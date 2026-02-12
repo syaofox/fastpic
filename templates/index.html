@@ -90,20 +90,20 @@
                         onclick="toggleSidebar()">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
                 </button>
-                <div class="flex-1 flex items-center gap-2 pl-3 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
-                    <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                    <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
-                    <input type="hidden" name="mode" id="mode-input" value="{{ request.query_params.get('mode', 'folder') }}">
-                    <input type="search"
-                           name="search"
-                           placeholder="输入一段描述搜索照片: 在公园散步"
-                           class="flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-0 text-slate-800 placeholder-slate-400"
-                           hx-get="/gallery"
-                           hx-trigger="keyup changed delay:300ms"
-                           hx-target="#gallery-container"
-                           hx-include="#path-input, #mode-input, #sort-by-input, #sort-order-input"
-                           hx-vals='{"page": 1}'
-                           hx-swap="innerHTML">
+                <div class="flex-1 relative" id="dir-search-wrapper">
+                    <div class="flex items-center gap-2 pl-3 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+                        <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
+                        <input type="hidden" name="mode" id="mode-input" value="{{ request.query_params.get('mode', 'folder') }}">
+                        <input type="search"
+                               id="dir-search-input"
+                               placeholder="搜索文件夹路径，如：2024、旅行、厦门..."
+                               autocomplete="off"
+                               class="flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-0 text-slate-800 placeholder-slate-400">
+                    </div>
+                    <!-- 目录搜索下拉结果 -->
+                    <div id="dir-search-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 z-50 bg-white rounded-lg shadow-lg border border-slate-200 max-h-80 overflow-y-auto">
+                    </div>
                 </div>
                 <button type="button" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors">AI 搜索</button>
                 <div class="flex items-center gap-1">
@@ -396,9 +396,13 @@ function refreshGalleryFromModal() {
     var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
     var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
     var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
-    var searchInput = document.querySelector('input[name="search"]');
-    var search = searchInput ? searchInput.value : '';
-    var url = '/gallery?path=' + encodeURIComponent(path) + '&search=' + encodeURIComponent(search) + '&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+    var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
+    var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1' +
+        '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
+        '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
+        '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
+        '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
+        '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
     htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
 }
 
@@ -976,16 +980,19 @@ document.addEventListener('keydown', function(e) {
         var marker = document.getElementById('current-path-marker');
         var path = marker ? (marker.getAttribute('data-path') || '') : '';
         var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
-        var searchInput = document.querySelector('input[name="search"]');
-        var search = searchInput ? searchInput.value : '';
         var sortByInput = document.getElementById('sort-by-input');
         var sortOrderInput = document.getElementById('sort-order-input');
         if (sortByInput) sortByInput.value = sortBy;
         if (sortOrderInput) sortOrderInput.value = sortOrder;
 
+        var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
         var encodedPath = encodeURIComponent(path);
-        var encodedSearch = encodeURIComponent(search);
-        var url = '/gallery?path=' + encodedPath + '&search=' + encodedSearch + '&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+        var url = '/gallery?path=' + encodedPath + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1' +
+            '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
+            '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
+            '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
+            '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
+            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
 
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
@@ -1241,9 +1248,13 @@ document.addEventListener('keydown', function(e) {
         var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
         var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
         var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
-        var searchInput = document.querySelector('input[name="search"]');
-        var search = searchInput ? searchInput.value : '';
-        var url = '/gallery?path=' + encodeURIComponent(path) + '&search=' + encodeURIComponent(search) + '&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+        var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
+        var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1' +
+            '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
+            '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
+            '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
+            '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
+            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
 
@@ -1253,6 +1264,260 @@ document.addEventListener('keydown', function(e) {
         if (ev.detail.target.id === 'gallery-container' || ev.detail.target.id === 'gallery-grid') {
             // 重新显示复选框
             document.querySelectorAll('.select-checkbox').forEach(function(cb) { cb.classList.remove('hidden'); });
+        }
+    });
+})();
+
+// ---------- 筛选面板 ----------
+(function() {
+    // 当前筛选状态（从 gallery 片段中读取）
+    var _filterState = {
+        filter_filename: '',
+        filter_size_min: '',
+        filter_size_max: '',
+        filter_date_from: '',
+        filter_date_to: ''
+    };
+
+    function readFilterState() {
+        var fn = document.getElementById('filter-filename-input');
+        var sMin = document.getElementById('filter-size-min-input');
+        var sMax = document.getElementById('filter-size-max-input');
+        var dFrom = document.getElementById('filter-date-from-input');
+        var dTo = document.getElementById('filter-date-to-input');
+        return {
+            filter_filename: fn ? fn.value.trim() : '',
+            filter_size_min: sMin ? sMin.value : '',
+            filter_size_max: sMax ? sMax.value : '',
+            filter_date_from: dFrom ? dFrom.value : '',
+            filter_date_to: dTo ? dTo.value : ''
+        };
+    }
+
+    function triggerFilteredGallery(filters) {
+        var marker = document.getElementById('current-path-marker');
+        var path = marker ? (marker.getAttribute('data-path') || '') : '';
+        var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
+        var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
+        var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+
+        var url = '/gallery?path=' + encodeURIComponent(path) +
+            '&search=&mode=' + mode +
+            '&sort_by=' + sortBy +
+            '&sort_order=' + sortOrder +
+            '&page=1' +
+            '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
+            '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
+            '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
+            '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
+            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
+
+        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+    }
+
+    // 事件委托：点击筛选按钮打开/关闭面板
+    document.body.addEventListener('click', function(e) {
+        var filterBtn = e.target.closest('#filter-btn');
+        var filterPopover = document.getElementById('filter-popover');
+        var insidePopover = filterPopover && filterPopover.contains(e.target);
+
+        if (filterBtn) {
+            if (filterPopover) filterPopover.classList.toggle('hidden');
+            return;
+        }
+
+        // 点击应用筛选
+        if (e.target.closest('#filter-apply-btn')) {
+            var filters = readFilterState();
+            _filterState = filters;
+            if (filterPopover) filterPopover.classList.add('hidden');
+            triggerFilteredGallery(filters);
+            return;
+        }
+
+        // 点击清除全部
+        if (e.target.closest('#filter-clear-btn')) {
+            // 重置所有输入
+            var fn = document.getElementById('filter-filename-input');
+            var sMin = document.getElementById('filter-size-min-input');
+            var sMax = document.getElementById('filter-size-max-input');
+            var dFrom = document.getElementById('filter-date-from-input');
+            var dTo = document.getElementById('filter-date-to-input');
+            if (fn) fn.value = '';
+            if (sMin) sMin.value = '';
+            if (sMax) sMax.value = '';
+            if (dFrom) dFrom.value = '';
+            if (dTo) dTo.value = '';
+            _filterState = {filter_filename: '', filter_size_min: '', filter_size_max: '', filter_date_from: '', filter_date_to: ''};
+            if (filterPopover) filterPopover.classList.add('hidden');
+            triggerFilteredGallery(_filterState);
+            return;
+        }
+
+        // 点击外部关闭面板
+        if (filterPopover && !filterPopover.classList.contains('hidden') && !insidePopover) {
+            filterPopover.classList.add('hidden');
+        }
+    });
+
+    // 回车键应用筛选
+    document.body.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            var filterPopover = document.getElementById('filter-popover');
+            if (filterPopover && !filterPopover.classList.contains('hidden')) {
+                var isInsideFilter = e.target.closest('#filter-popover');
+                if (isInsideFilter) {
+                    e.preventDefault();
+                    var filters = readFilterState();
+                    _filterState = filters;
+                    filterPopover.classList.add('hidden');
+                    triggerFilteredGallery(filters);
+                }
+            }
+        }
+    });
+
+    // 暴露过滤状态到全局（其他逻辑可能需要）
+    window.getFilterState = function() { return _filterState; };
+})();
+
+// ---------- 顶部目录搜索 ----------
+(function() {
+    var searchInput = document.getElementById('dir-search-input');
+    var dropdown = document.getElementById('dir-search-dropdown');
+    var timer = null;
+
+    function doSearch(query) {
+        if (!query.trim()) {
+            dropdown.classList.add('hidden');
+            dropdown.innerHTML = '';
+            return;
+        }
+        fetch('/api/search-dirs?q=' + encodeURIComponent(query) + '&limit=20')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.dirs || data.dirs.length === 0) {
+                    dropdown.innerHTML = '<div class="px-4 py-3 text-sm text-slate-400">未找到匹配的文件夹</div>';
+                    dropdown.classList.remove('hidden');
+                    return;
+                }
+                var html = '';
+                for (var i = 0; i < data.dirs.length; i++) {
+                    var d = data.dirs[i];
+                    // 高亮匹配部分
+                    var displayPath = highlightMatch(d.path, query);
+                    html += '<button type="button" class="dir-search-item w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors flex items-center gap-3 border-b border-slate-50 last:border-0" data-path="' + escapeAttr(d.path) + '">' +
+                        '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                        '<span class="text-sm text-slate-700 truncate flex-1">' + displayPath + '</span>' +
+                        '<span class="text-xs text-slate-400 flex-shrink-0">' + d.image_count + ' 张</span>' +
+                    '</button>';
+                }
+                dropdown.innerHTML = html;
+                dropdown.classList.remove('hidden');
+            })
+            .catch(function() {
+                dropdown.classList.add('hidden');
+            });
+    }
+
+    function highlightMatch(path, query) {
+        var ql = query.toLowerCase();
+        var pl = path.toLowerCase();
+        var idx = pl.indexOf(ql);
+        if (idx === -1) return escapeHtml(path);
+        return escapeHtml(path.substring(0, idx)) +
+            '<span class="text-blue-600 font-medium">' + escapeHtml(path.substring(idx, idx + query.length)) + '</span>' +
+            escapeHtml(path.substring(idx + query.length));
+    }
+
+    function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function escapeAttr(s) {
+        return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function navigateToDir(dirPath) {
+        dropdown.classList.add('hidden');
+        searchInput.value = '';
+        // 更新隐藏的 path input
+        document.querySelector('[name=path]').value = dirPath;
+        // 通过 HTMX 加载该目录的 gallery
+        var mode = document.getElementById('mode-input') ? document.getElementById('mode-input').value : 'folder';
+        var sortBy = document.getElementById('sort-by-input') ? document.getElementById('sort-by-input').value : 'modified_at';
+        var sortOrder = document.getElementById('sort-order-input') ? document.getElementById('sort-order-input').value : 'desc';
+        var url = '/gallery?path=' + encodeURIComponent(dirPath) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(timer);
+            var val = this.value;
+            timer = setTimeout(function() { doSearch(val); }, 250);
+        });
+
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                dropdown.classList.add('hidden');
+                this.blur();
+            }
+            if (e.key === 'Enter') {
+                // 选中第一个结果
+                var first = dropdown.querySelector('.dir-search-item');
+                if (first) {
+                    navigateToDir(first.getAttribute('data-path'));
+                }
+            }
+            // 上下键导航
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                var items = dropdown.querySelectorAll('.dir-search-item');
+                if (items.length === 0) return;
+                var active = dropdown.querySelector('.dir-search-item.bg-blue-50');
+                var idx = -1;
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i] === active) { idx = i; break; }
+                }
+                // 移除当前高亮
+                if (active) active.classList.remove('bg-blue-50');
+                if (e.key === 'ArrowDown') idx = (idx + 1) % items.length;
+                else idx = idx <= 0 ? items.length - 1 : idx - 1;
+                items[idx].classList.add('bg-blue-50');
+                items[idx].scrollIntoView({block: 'nearest'});
+            }
+        });
+
+        // 处理 Enter 键选中高亮项
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                var active = dropdown.querySelector('.dir-search-item.bg-blue-50');
+                if (active) {
+                    e.preventDefault();
+                    navigateToDir(active.getAttribute('data-path'));
+                }
+            }
+        });
+    }
+
+    // 点击下拉结果
+    if (dropdown) {
+        dropdown.addEventListener('click', function(e) {
+            var item = e.target.closest('.dir-search-item');
+            if (item) {
+                navigateToDir(item.getAttribute('data-path'));
+            }
+        });
+    }
+
+    // 点击外部关闭下拉
+    document.addEventListener('click', function(e) {
+        var wrapper = document.getElementById('dir-search-wrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
+            dropdown.classList.add('hidden');
         }
     });
 })();
@@ -1280,6 +1545,17 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
             link.classList.toggle('text-blue-600', isCurrent);
             link.classList.toggle('hover:bg-slate-100', !isCurrent);
         });
+
+        // 同步筛选状态到全局
+        if (marker && typeof window.getFilterState === 'function') {
+            var filterState = window.getFilterState();
+            // 从 marker 读取实际应用的筛选条件，更新全局状态
+            filterState.filter_filename = marker.getAttribute('data-filter-filename') || '';
+            filterState.filter_size_min = marker.getAttribute('data-filter-size-min') || '';
+            filterState.filter_size_max = marker.getAttribute('data-filter-size-max') || '';
+            filterState.filter_date_from = marker.getAttribute('data-filter-date-from') || '';
+            filterState.filter_date_to = marker.getAttribute('data-filter-date-to') || '';
+        }
     }
 });
 </script>

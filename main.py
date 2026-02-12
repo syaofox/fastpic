@@ -208,14 +208,24 @@ async def gallery(
     sort_order: str = "desc",
     page: int = 1,
     per_page: int = PER_PAGE,
+    filter_filename: str = "",
+    filter_size_min: str = "",
+    filter_size_max: str = "",
+    filter_date_from: str = "",
+    filter_date_to: str = "",
     session: AsyncSession = Depends(get_async_session),
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）
     mode: folder=仅当前层文件+子文件夹, waterfall=递归所有图片,无文件夹无文件名
     sort_by: filename / modified_at / file_size
     sort_order: asc / desc
+    filter_filename: 文件名包含指定字符串
+    filter_size_min/max: 文件大小范围（字节）
+    filter_date_from/to: 修改日期范围（ISO 格式日期字符串 YYYY-MM-DD）
     """
     from sqlalchemy import func
+    import time as _time
+    from datetime import datetime as _dt
 
     # 规范化路径：去除首尾空格和斜杠
     path = (path or "").strip().strip("/")
@@ -249,6 +259,45 @@ async def gallery(
     if search:
         stmt = stmt.where(Image.filename.ilike(f"%{search}%"))
 
+    # ── 过滤条件 ──
+    filter_filename = (filter_filename or "").strip()
+    has_filters = False
+    if filter_filename:
+        escaped_fn = _escape_like(filter_filename)
+        stmt = stmt.where(Image.filename.ilike(f"%{escaped_fn}%", escape="\\"))
+        has_filters = True
+
+    # 文件大小过滤（字节）
+    _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
+    _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
+    if _size_min is not None:
+        stmt = stmt.where(Image.file_size >= _size_min)
+        has_filters = True
+    if _size_max is not None:
+        stmt = stmt.where(Image.file_size <= _size_max)
+        has_filters = True
+
+    # 修改日期过滤（YYYY-MM-DD → timestamp）
+    _date_from_ts = None
+    _date_to_ts = None
+    if filter_date_from:
+        try:
+            _date_from_ts = _dt.strptime(filter_date_from, "%Y-%m-%d").timestamp()
+        except ValueError:
+            pass
+    if filter_date_to:
+        try:
+            # 日期结束为当天 23:59:59
+            _date_to_ts = _dt.strptime(filter_date_to, "%Y-%m-%d").timestamp() + 86399
+        except ValueError:
+            pass
+    if _date_from_ts is not None:
+        stmt = stmt.where(Image.modified_at >= _date_from_ts)
+        has_filters = True
+    if _date_to_ts is not None:
+        stmt = stmt.where(Image.modified_at <= _date_to_ts)
+        has_filters = True
+
     # 文件夹模式：仅当前层直接文件，不含子文件夹下的图片
     if mode == "folder":
         if path:
@@ -258,12 +307,22 @@ async def gallery(
         else:
             stmt = stmt.where(~Image.relative_path.like("%/%"))
 
-    # 总数
+    # 总数（需要复制相同的过滤条件）
     count_stmt = select(func.count(Image.id))
     if path:
         count_stmt = count_stmt.where(path_filter)
     if search:
         count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
+    if filter_filename:
+        count_stmt = count_stmt.where(Image.filename.ilike(f"%{_escape_like(filter_filename)}%", escape="\\"))
+    if _size_min is not None:
+        count_stmt = count_stmt.where(Image.file_size >= _size_min)
+    if _size_max is not None:
+        count_stmt = count_stmt.where(Image.file_size <= _size_max)
+    if _date_from_ts is not None:
+        count_stmt = count_stmt.where(Image.modified_at >= _date_from_ts)
+    if _date_to_ts is not None:
+        count_stmt = count_stmt.where(Image.modified_at <= _date_to_ts)
     if mode == "folder":
         if path:
             count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
@@ -271,9 +330,9 @@ async def gallery(
             count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
     total = (await session.execute(count_stmt)).scalar() or 0
 
-    # 子文件夹（仅文件夹模式、首页且无搜索时）
+    # 子文件夹（仅文件夹模式、首页且无搜索/过滤时）
     subfolders: list[dict] = []
-    if mode == "folder" and page == 1 and not search:
+    if mode == "folder" and page == 1 and not search and not has_filters:
         subfolders = await _get_subfolders(session, path, path_filter)
 
     # 分页
@@ -305,6 +364,12 @@ async def gallery(
             "append": page > 1,
             "subfolders": subfolders,
             "breadcrumb_parts": breadcrumb_parts,
+            "filter_filename": filter_filename,
+            "filter_size_min": filter_size_min,
+            "filter_size_max": filter_size_max,
+            "filter_date_from": filter_date_from,
+            "filter_date_to": filter_date_to,
+            "has_filters": has_filters,
         },
     )
 
@@ -390,6 +455,66 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
         "photos_dir": str(PHOTOS_DIR.resolve()),
         "cache_dir": str(CACHE_DIR.resolve()),
     }
+
+
+@app.get("/api/search-dirs")
+async def search_dirs(
+    q: str = "",
+    limit: int = 20,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """全局目录搜索：模糊匹配 relative_path 的目录部分（不含文件名）。
+    返回去重后的目录路径列表，每项含 path 和 image_count。"""
+    q = (q or "").strip()
+    if not q:
+        return {"dirs": []}
+
+    # 获取所有 relative_path
+    result = await session.execute(select(Image.relative_path))
+    all_paths = [r[0] for r in result.fetchall()]
+
+    # 提取每条路径的目录部分（去掉文件名），搜集去重目录及其图片计数
+    dir_counts: dict[str, int] = {}
+    for rp in all_paths:
+        parts = rp.rsplit("/", 1)
+        if len(parts) == 2:
+            dir_path = parts[0]
+        else:
+            dir_path = ""  # 根目录文件
+        dir_counts[dir_path] = dir_counts.get(dir_path, 0) + 1
+
+    # 同时包含所有中间路径（让父目录也可以搜到，计数为递归子图片数）
+    full_dir_counts: dict[str, int] = {}
+    for dir_path, count in dir_counts.items():
+        if not dir_path:
+            continue
+        parts = dir_path.split("/")
+        for i in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            full_dir_counts[prefix] = full_dir_counts.get(prefix, 0) + count
+
+    # 同时从文件系统扫描空文件夹
+    def _scan_all_dirs(base: Path, prefix: str = ""):
+        if not base.is_dir():
+            return
+        for child in sorted(base.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                child_path = f"{prefix}/{child.name}" if prefix else child.name
+                if child_path not in full_dir_counts:
+                    full_dir_counts[child_path] = 0
+                _scan_all_dirs(child, child_path)
+    _scan_all_dirs(PHOTOS_DIR)
+
+    # 模糊匹配：搜索词在目录路径中出现（不区分大小写）
+    q_lower = q.lower()
+    matched = []
+    for dir_path, count in sorted(full_dir_counts.items()):
+        if q_lower in dir_path.lower():
+            matched.append({"path": dir_path, "image_count": count})
+            if len(matched) >= limit:
+                break
+
+    return {"dirs": matched}
 
 
 @app.get("/settings")
