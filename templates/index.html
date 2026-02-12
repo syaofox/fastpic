@@ -16,7 +16,7 @@
                    hx-get="/gallery?path=&search=&page=1"
                    hx-target="#gallery-container"
                    hx-swap="innerHTML"
-                   hx-include="#mode-input"
+                   hx-include="#mode-input, #sort-by-input, #sort-order-input"
                    hx-on:click="document.querySelector('[name=path]').value = ''">/ 全部</a>
                 {% macro render_folder(prefix, children, depth) %}
                 {% for part, sub in children.items() %}
@@ -41,7 +41,7 @@
                            hx-get="/gallery?path={{ path_str|urlencode_path }}&search=&page=1"
                            hx-target="#gallery-container"
                            hx-swap="innerHTML"
-                           hx-include="#mode-input"
+                           hx-include="#mode-input, #sort-by-input, #sort-order-input"
                            hx-on:click="document.querySelector('[name=path]').value = '{{ path_str }}'">
                             {{ part }}
                         </a>
@@ -90,7 +90,7 @@
                            hx-get="/gallery"
                            hx-trigger="keyup changed delay:300ms"
                            hx-target="#gallery-container"
-                           hx-include="#path-input, #mode-input"
+                           hx-include="#path-input, #mode-input, #sort-by-input, #sort-order-input"
                            hx-vals='{"page": 1}'
                            hx-swap="innerHTML">
                 </div>
@@ -106,7 +106,7 @@
         <!-- 图片网格 -->
         <div class="flex-1 overflow-y-auto p-4" id="scroll-container">
             <div id="gallery-container"
-                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&page=1"
+                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1"
                  hx-trigger="load"
                  hx-swap="innerHTML">
                 <div class="flex justify-center items-center h-64 text-slate-500">
@@ -500,6 +500,67 @@ document.addEventListener('keydown', function(e) {
     });
 })();
 
+// 排序下拉菜单
+(function() {
+    function getCurrentSort() {
+        var sortByInput = document.getElementById('sort-by-input');
+        var sortOrderInput = document.getElementById('sort-order-input');
+        return {
+            sort_by: sortByInput ? sortByInput.value : 'modified_at',
+            sort_order: sortOrderInput ? sortOrderInput.value : 'desc'
+        };
+    }
+
+    function triggerSort(sortBy, sortOrder) {
+        var marker = document.getElementById('current-path-marker');
+        var path = marker ? (marker.getAttribute('data-path') || '') : '';
+        var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
+        var searchInput = document.querySelector('input[name="search"]');
+        var search = searchInput ? searchInput.value : '';
+        var sortByInput = document.getElementById('sort-by-input');
+        var sortOrderInput = document.getElementById('sort-order-input');
+        if (sortByInput) sortByInput.value = sortBy;
+        if (sortOrderInput) sortOrderInput.value = sortOrder;
+
+        var encodedPath = encodeURIComponent(path);
+        var encodedSearch = encodeURIComponent(search);
+        var url = '/gallery?path=' + encodedPath + '&search=' + encodedSearch + '&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+
+        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+    }
+
+    document.body.addEventListener('click', function(e) {
+        var btn = e.target.closest('#sort-btn');
+        var popover = document.getElementById('sort-popover');
+        var insidePopover = popover && popover.contains(e.target);
+
+        // 点击排序字段选项
+        var fieldOption = e.target.closest('.sort-field-option');
+        if (fieldOption && popover && popover.contains(fieldOption)) {
+            var current = getCurrentSort();
+            triggerSort(fieldOption.getAttribute('data-sort-field'), current.sort_order);
+            popover.classList.add('hidden');
+            return;
+        }
+
+        // 点击排序顺序选项
+        var orderOption = e.target.closest('.sort-order-option');
+        if (orderOption && popover && popover.contains(orderOption)) {
+            var current = getCurrentSort();
+            triggerSort(current.sort_by, orderOption.getAttribute('data-sort-order'));
+            popover.classList.add('hidden');
+            return;
+        }
+
+        // 切换排序弹出框
+        if (btn) {
+            if (popover) popover.classList.toggle('hidden');
+        } else if (popover && !popover.classList.contains('hidden') && !insidePopover) {
+            popover.classList.add('hidden');
+        }
+    });
+})();
+
 // HTMX 交换后更新侧栏选中状态、mode 输入、并确保缩略图大小应用
 document.body.addEventListener('htmx:afterSwap', function(ev) {
     if (ev.detail.target.id === 'gallery-container') {
@@ -509,8 +570,14 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
         const marker = document.getElementById('current-path-marker');
         const path = marker ? (marker.getAttribute('data-path') || '') : '';
         const mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
+        const sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
+        const sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
         const modeInput = document.getElementById('mode-input');
         if (modeInput) modeInput.value = mode;
+        const sortByInput = document.getElementById('sort-by-input');
+        if (sortByInput) sortByInput.value = sortBy;
+        const sortOrderInput = document.getElementById('sort-order-input');
+        if (sortOrderInput) sortOrderInput.value = sortOrder;
         document.querySelectorAll('#sidebar .folder-link').forEach(function(link) {
             const isCurrent = link.getAttribute('data-path') === path;
             link.classList.toggle('bg-blue-50', isCurrent);

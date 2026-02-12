@@ -32,18 +32,27 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
     cache_dir = cache_dir.resolve()
     count = 0
 
+    print(f"[scan] 开始扫描: {photos_dir}", flush=True)
+
+    BATCH_SIZE = 50  # 每 50 张提交一次，边扫边可见
+
     async with async_session_factory() as session:
         # 收集所有图片文件
         image_files: list[Path] = []
         for ext in IMAGE_EXTENSIONS:
             image_files.extend(photos_dir.rglob(f"*{ext}"))
 
+        total_files = len(image_files)
+        print(f"[scan] 发现 {total_files} 个图片文件", flush=True)
+
+        batch_count = 0
         for full_path in image_files:
             if not full_path.is_file():
                 continue
 
             rel_path = _relative_path(photos_dir, full_path)
             modified_at = os.path.getmtime(full_path)
+            file_size = os.path.getsize(full_path)
 
             # 检查是否已存在
             result = await session.execute(
@@ -77,15 +86,27 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                     filename=filename,
                     relative_path=rel_path,
                     modified_at=modified_at,
+                    file_size=file_size,
                     width=width,
                     height=height,
                 )
                 session.add(record)
                 count += 1
+                batch_count += 1
 
-            except Exception:
+                # 分批提交
+                if batch_count >= BATCH_SIZE:
+                    await session.commit()
+                    print(f"[scan] 进度: {count}/{total_files}", flush=True)
+                    batch_count = 0
+
+            except Exception as e:
+                print(f"[scan] 处理失败 {full_path}: {e}", flush=True)
                 continue
 
-        await session.commit()
+        # 提交剩余
+        if batch_count > 0:
+            await session.commit()
+        print(f"[scan] 扫描完成，新增 {count} 条记录", flush=True)
 
     return count

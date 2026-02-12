@@ -20,11 +20,22 @@ PHOTOS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
 
 
+async def _background_scan():
+    """后台扫描包装，捕获并打印异常"""
+    try:
+        n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
+        print(f"[scan] 扫描完成，新增 {n} 张图片")
+    except Exception as e:
+        import traceback
+        print(f"[scan] 扫描失败: {e}")
+        traceback.print_exc()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     # 后台异步扫描
-    asyncio.create_task(scan_photos(PHOTOS_DIR, CACHE_DIR))
+    asyncio.create_task(_background_scan())
     yield
 
 
@@ -118,12 +129,16 @@ async def gallery(
     path: str = "",
     search: str = "",
     mode: str = "folder",
+    sort_by: str = "modified_at",
+    sort_order: str = "desc",
     page: int = 1,
     per_page: int = PER_PAGE,
     session: AsyncSession = Depends(get_async_session),
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）
     mode: folder=仅当前层文件+子文件夹, waterfall=递归所有图片,无文件夹无文件名
+    sort_by: filename / modified_at / file_size
+    sort_order: asc / desc
     """
     from sqlalchemy import func
 
@@ -131,7 +146,17 @@ async def gallery(
     path = (path or "").strip().strip("/")
     mode = "waterfall" if mode == "waterfall" else "folder"
 
-    stmt = select(Image).order_by(Image.modified_at.desc())
+    # 排序字段映射
+    sort_columns = {
+        "filename": Image.filename,
+        "modified_at": Image.modified_at,
+        "file_size": Image.file_size,
+    }
+    sort_col = sort_columns.get(sort_by, Image.modified_at)
+    sort_order = "asc" if sort_order == "asc" else "desc"
+    order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
+
+    stmt = select(Image).order_by(order_clause)
     if path:
         escaped = _escape_like(path)
         path_filter = (
@@ -191,6 +216,8 @@ async def gallery(
             "path": path,
             "search": search,
             "mode": mode,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
             "page": page,
             "per_page": per_page,
             "has_next": has_next,

@@ -12,6 +12,7 @@ class Image(SQLModel, table=True):
     filename: str = Field(index=True)
     relative_path: str = Field(unique=True, index=True)
     modified_at: float = Field(index=True)
+    file_size: int = Field(default=0, index=True)
     width: int = 0
     height: int = 0
 
