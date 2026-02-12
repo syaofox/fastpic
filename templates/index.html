@@ -120,6 +120,19 @@
 <!-- 大图预览模态框 -->
 <div id="modal" class="fixed inset-0 z-50 hidden" onclick="closeModal(event)">
     <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex items-center justify-center">
+        <!-- 顶部工具栏 -->
+        <div class="absolute top-0 left-0 right-0 flex items-center justify-end gap-2 p-4 z-10" onclick="event.stopPropagation()">
+            <button type="button" id="modal-delete-btn" onclick="deleteCurrentImage(); event.stopPropagation();"
+                    class="p-2.5 rounded-full bg-white/15 hover:bg-red-500/80 text-white/80 hover:text-white transition-all"
+                    title="删除当前图片">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+            <button type="button" onclick="document.getElementById('modal').classList.add('hidden'); event.stopPropagation();"
+                    class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
+                    title="关闭">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
         <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">‹</button>
         <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
         <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">›</button>
@@ -182,10 +195,12 @@ function toggleFolder(btn) {
 }
 
 let modalImages = [];
+let modalImageIds = [];
 let modalIndex = 0;
 
-function openModal(photoUrl, index, allUrls) {
+function openModal(photoUrl, index, allUrls, allIds) {
     modalImages = allUrls;
+    modalImageIds = allIds || [];
     modalIndex = index;
     document.getElementById('modal-img').src = photoUrl;
     document.getElementById('modal').classList.remove('hidden');
@@ -209,12 +224,66 @@ function nextImage() {
     document.getElementById('modal-img').src = modalImages[modalIndex];
 }
 
+function deleteCurrentImage() {
+    if (modalImages.length === 0 || modalImageIds.length === 0) return;
+    var imageId = modalImageIds[modalIndex];
+    if (!imageId) return;
+
+    // 简单确认
+    if (!confirm('确定要删除这张图片吗？此操作不可恢复。')) return;
+
+    var btn = document.getElementById('modal-delete-btn');
+    if (btn) btn.disabled = true;
+
+    fetch('/api/delete-images', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids: [imageId]})
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        // 从列表中移除当前图片
+        modalImages.splice(modalIndex, 1);
+        modalImageIds.splice(modalIndex, 1);
+
+        if (modalImages.length === 0) {
+            // 没有图片了，关闭模态框并刷新画廊
+            document.getElementById('modal').classList.add('hidden');
+            refreshGalleryFromModal();
+        } else {
+            // 调整索引，显示下一张（或最后一张）
+            if (modalIndex >= modalImages.length) {
+                modalIndex = modalImages.length - 1;
+            }
+            document.getElementById('modal-img').src = modalImages[modalIndex];
+            // 刷新画廊（后台更新网格）
+            refreshGalleryFromModal();
+        }
+        if (btn) btn.disabled = false;
+    }).catch(function(err) {
+        console.error('删除失败:', err);
+        alert('删除失败');
+        if (btn) btn.disabled = false;
+    });
+}
+
+function refreshGalleryFromModal() {
+    var marker = document.getElementById('current-path-marker');
+    var path = marker ? (marker.getAttribute('data-path') || '') : '';
+    var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
+    var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
+    var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+    var searchInput = document.querySelector('input[name="search"]');
+    var search = searchInput ? searchInput.value : '';
+    var url = '/gallery?path=' + encodeURIComponent(path) + '&search=' + encodeURIComponent(search) + '&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+    htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+}
+
 document.addEventListener('keydown', function(e) {
     const modal = document.getElementById('modal');
     if (modal.classList.contains('hidden')) return;
     if (e.key === 'Escape') { modal.classList.add('hidden'); }
     if (e.key === 'ArrowLeft') { prevImage(); }
     if (e.key === 'ArrowRight') { nextImage(); }
+    if (e.key === 'Delete' || e.key === 'Backspace') { deleteCurrentImage(); }
 });
 
 // 缩略图大小调节
