@@ -121,17 +121,50 @@
 <div id="modal" class="fixed inset-0 z-50 hidden" onclick="closeModal(event)">
     <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex items-center justify-center">
         <!-- 顶部工具栏 -->
-        <div class="absolute top-0 left-0 right-0 flex items-center justify-end gap-2 p-4 z-10" onclick="event.stopPropagation()">
-            <button type="button" id="modal-delete-btn" onclick="deleteCurrentImage(); event.stopPropagation();"
-                    class="p-2.5 rounded-full bg-white/15 hover:bg-red-500/80 text-white/80 hover:text-white transition-all"
-                    title="删除当前图片">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-            </button>
-            <button type="button" onclick="document.getElementById('modal').classList.add('hidden'); event.stopPropagation();"
-                    class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
-                    title="关闭">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
+        <div class="absolute top-0 left-0 right-0 flex items-center justify-between p-4 z-10" onclick="event.stopPropagation()">
+            <!-- 左侧：幻灯片控件 -->
+            <div class="flex items-center gap-2">
+                <button type="button" id="slideshow-btn" onclick="toggleSlideshow(); event.stopPropagation();"
+                        class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
+                        title="幻灯片播放">
+                    <!-- 播放图标 -->
+                    <svg id="slideshow-play-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <!-- 暂停图标 -->
+                    <svg id="slideshow-pause-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </button>
+                <!-- 间隔设置 -->
+                <div class="relative" id="slideshow-interval-wrapper">
+                    <button type="button" id="slideshow-interval-btn" onclick="toggleSlideshowInterval(); event.stopPropagation();"
+                            class="px-2.5 py-1.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white text-xs font-medium transition-all"
+                            title="播放间隔">
+                        <span id="slideshow-interval-label">2s</span>
+                    </button>
+                    <div id="slideshow-interval-popover" class="hidden absolute left-0 top-full mt-2 p-3 bg-slate-800/95 backdrop-blur rounded-lg shadow-xl border border-white/10 min-w-[180px]">
+                        <div class="text-xs text-white/60 mb-2">播放间隔</div>
+                        <input type="range" id="slideshow-interval-slider" min="1" max="10" step="0.5" value="2"
+                               class="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-400"
+                               oninput="updateSlideshowInterval(this.value)">
+                        <div class="flex justify-between text-xs text-white/50 mt-1">
+                            <span>1s</span>
+                            <span id="slideshow-interval-value">2 秒</span>
+                            <span>10s</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 右侧：删除 + 关闭 -->
+            <div class="flex items-center gap-2">
+                <button type="button" id="modal-delete-btn" onclick="deleteCurrentImage(); event.stopPropagation();"
+                        class="p-2.5 rounded-full bg-white/15 hover:bg-red-500/80 text-white/80 hover:text-white transition-all"
+                        title="删除当前图片">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+                <button type="button" onclick="closeModalAndStopSlideshow(); event.stopPropagation();"
+                        class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
+                        title="关闭">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
         </div>
         <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">‹</button>
         <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
@@ -197,6 +230,8 @@ function toggleFolder(btn) {
 let modalImages = [];
 let modalImageIds = [];
 let modalIndex = 0;
+let slideshowTimer = null;
+let slideshowInterval = parseFloat(localStorage.getItem('fastpic_slideshow_interval') || '2');
 
 function openModal(photoUrl, index, allUrls, allIds) {
     modalImages = allUrls;
@@ -204,12 +239,20 @@ function openModal(photoUrl, index, allUrls, allIds) {
     modalIndex = index;
     document.getElementById('modal-img').src = photoUrl;
     document.getElementById('modal').classList.remove('hidden');
+    // 同步间隔显示
+    _updateIntervalUI(slideshowInterval);
 }
 
 function closeModal(e) {
     if (e.target.id === 'modal' || e.target.id === 'modal-overlay') {
+        stopSlideshow();
         document.getElementById('modal').classList.add('hidden');
     }
+}
+
+function closeModalAndStopSlideshow() {
+    stopSlideshow();
+    document.getElementById('modal').classList.add('hidden');
 }
 
 function prevImage() {
@@ -223,6 +266,79 @@ function nextImage() {
     modalIndex = (modalIndex + 1) % modalImages.length;
     document.getElementById('modal-img').src = modalImages[modalIndex];
 }
+
+// ── 幻灯片播放 ──
+
+function toggleSlideshow() {
+    if (slideshowTimer) {
+        stopSlideshow();
+    } else {
+        startSlideshow();
+    }
+}
+
+function startSlideshow() {
+    if (modalImages.length <= 1) return;
+    if (slideshowTimer) return;
+    slideshowTimer = setInterval(function() {
+        nextImage();
+    }, slideshowInterval * 1000);
+    // 更新按钮外观
+    var playIcon = document.getElementById('slideshow-play-icon');
+    var pauseIcon = document.getElementById('slideshow-pause-icon');
+    var btn = document.getElementById('slideshow-btn');
+    if (playIcon) playIcon.classList.add('hidden');
+    if (pauseIcon) pauseIcon.classList.remove('hidden');
+    if (btn) { btn.classList.add('bg-blue-500/60'); btn.classList.remove('bg-white/15'); }
+}
+
+function stopSlideshow() {
+    if (slideshowTimer) {
+        clearInterval(slideshowTimer);
+        slideshowTimer = null;
+    }
+    var playIcon = document.getElementById('slideshow-play-icon');
+    var pauseIcon = document.getElementById('slideshow-pause-icon');
+    var btn = document.getElementById('slideshow-btn');
+    if (playIcon) playIcon.classList.remove('hidden');
+    if (pauseIcon) pauseIcon.classList.add('hidden');
+    if (btn) { btn.classList.remove('bg-blue-500/60'); btn.classList.add('bg-white/15'); }
+}
+
+function toggleSlideshowInterval() {
+    var popover = document.getElementById('slideshow-interval-popover');
+    if (popover) popover.classList.toggle('hidden');
+}
+
+function updateSlideshowInterval(val) {
+    slideshowInterval = parseFloat(val);
+    localStorage.setItem('fastpic_slideshow_interval', String(slideshowInterval));
+    _updateIntervalUI(slideshowInterval);
+    // 如果正在播放，重启计时器以使用新间隔
+    if (slideshowTimer) {
+        stopSlideshow();
+        startSlideshow();
+    }
+}
+
+function _updateIntervalUI(val) {
+    var label = document.getElementById('slideshow-interval-label');
+    var valueText = document.getElementById('slideshow-interval-value');
+    var slider = document.getElementById('slideshow-interval-slider');
+    var display = val % 1 === 0 ? val + ' 秒' : val.toFixed(1) + ' 秒';
+    if (label) label.textContent = val % 1 === 0 ? val + 's' : val.toFixed(1) + 's';
+    if (valueText) valueText.textContent = display;
+    if (slider) slider.value = val;
+}
+
+// 点击模态框外部区域关闭间隔弹窗
+document.addEventListener('click', function(e) {
+    var popover = document.getElementById('slideshow-interval-popover');
+    var wrapper = document.getElementById('slideshow-interval-wrapper');
+    if (popover && !popover.classList.contains('hidden') && wrapper && !wrapper.contains(e.target)) {
+        popover.classList.add('hidden');
+    }
+});
 
 function deleteCurrentImage() {
     if (modalImages.length === 0 || modalImageIds.length === 0) return;
@@ -280,10 +396,11 @@ function refreshGalleryFromModal() {
 document.addEventListener('keydown', function(e) {
     const modal = document.getElementById('modal');
     if (modal.classList.contains('hidden')) return;
-    if (e.key === 'Escape') { modal.classList.add('hidden'); }
-    if (e.key === 'ArrowLeft') { prevImage(); }
-    if (e.key === 'ArrowRight') { nextImage(); }
+    if (e.key === 'Escape') { stopSlideshow(); modal.classList.add('hidden'); }
+    if (e.key === 'ArrowLeft') { stopSlideshow(); prevImage(); }
+    if (e.key === 'ArrowRight') { stopSlideshow(); nextImage(); }
     if (e.key === 'Delete' || e.key === 'Backspace') { deleteCurrentImage(); }
+    if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
 });
 
 // 缩略图大小调节
