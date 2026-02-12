@@ -370,11 +370,13 @@ document.addEventListener('keydown', function(e) {
 
         var colCount = getColCount();
 
-        // 收集所有直接子元素（图片链接 + 滚动哨兵）
+        // 收集所有直接子元素（图片卡片 + 滚动哨兵）
         var items = [];
         var sentinel = null;
         Array.from(grid.children).forEach(function(child) {
-            if (child.tagName === 'A') {
+            if (child.classList && child.classList.contains('selectable-item')) {
+                items.push(child);
+            } else if (child.tagName === 'A') {
                 items.push(child);
             } else if (child.hasAttribute('hx-get') && child.hasAttribute('hx-trigger')) {
                 sentinel = child;
@@ -424,7 +426,9 @@ document.addEventListener('keydown', function(e) {
         var sentinels = [];
         Array.from(grid.children).forEach(function(child) {
             if (child === wfRow) return;
-            if (child.tagName === 'A') {
+            if (child.classList && child.classList.contains('selectable-item')) {
+                newImages.push(child);
+            } else if (child.tagName === 'A') {
                 newImages.push(child);
             } else if (child.hasAttribute('hx-get') && child.hasAttribute('hx-trigger')) {
                 sentinels.push(child);
@@ -557,6 +561,241 @@ document.addEventListener('keydown', function(e) {
             if (popover) popover.classList.toggle('hidden');
         } else if (popover && !popover.classList.contains('hidden') && !insidePopover) {
             popover.classList.add('hidden');
+        }
+    });
+})();
+
+// ---------- 批量选择 & 删除 ----------
+(function() {
+    window._selectMode = false;
+    var _selectedImages = new Set();  // image ids
+    var _selectedFolders = new Set(); // folder paths
+
+    function isSelectMode() { return window._selectMode; }
+
+    function enterSelectMode() {
+        window._selectMode = true;
+        var btn = document.getElementById('select-mode-btn');
+        if (btn) { btn.classList.add('bg-blue-100', 'text-blue-600'); btn.classList.remove('hover:bg-slate-100', 'hover:text-slate-700'); }
+        var selAllBtn = document.getElementById('select-all-btn');
+        if (selAllBtn) selAllBtn.classList.remove('hidden');
+        // 显示所有复选框
+        document.querySelectorAll('.select-checkbox').forEach(function(cb) { cb.classList.remove('hidden'); });
+    }
+
+    function exitSelectMode() {
+        window._selectMode = false;
+        _selectedImages.clear();
+        _selectedFolders.clear();
+        var btn = document.getElementById('select-mode-btn');
+        if (btn) { btn.classList.remove('bg-blue-100', 'text-blue-600'); btn.classList.add('hover:bg-slate-100', 'hover:text-slate-700'); }
+        var selAllBtn = document.getElementById('select-all-btn');
+        if (selAllBtn) selAllBtn.classList.add('hidden');
+        var delBtn = document.getElementById('delete-selected-btn');
+        if (delBtn) delBtn.classList.add('hidden');
+        // 隐藏复选框，取消选中效果
+        document.querySelectorAll('.select-checkbox').forEach(function(cb) { cb.classList.add('hidden'); });
+        document.querySelectorAll('.selectable-item').forEach(function(item) { uncheckItem(item); });
+    }
+
+    window.toggleSelectMode = function() {
+        if (isSelectMode()) { exitSelectMode(); } else { enterSelectMode(); }
+    };
+
+    function checkItem(item) {
+        item.setAttribute('data-selected', 'true');
+        var overlay = item.querySelector('.select-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+        var cbDiv = item.querySelector('.select-checkbox > div');
+        if (cbDiv) { cbDiv.classList.add('bg-blue-500', 'border-blue-500'); cbDiv.classList.remove('bg-white/80'); }
+        var icon = item.querySelector('.check-icon');
+        if (icon) icon.classList.remove('hidden');
+    }
+
+    function uncheckItem(item) {
+        item.removeAttribute('data-selected');
+        var overlay = item.querySelector('.select-overlay');
+        if (overlay) overlay.classList.add('hidden');
+        var cbDiv = item.querySelector('.select-checkbox > div');
+        if (cbDiv) { cbDiv.classList.remove('bg-blue-500', 'border-blue-500'); cbDiv.classList.add('bg-white/80'); }
+        var icon = item.querySelector('.check-icon');
+        if (icon) icon.classList.add('hidden');
+    }
+
+    function updateDeleteButton() {
+        var total = _selectedImages.size + _selectedFolders.size;
+        var delBtn = document.getElementById('delete-selected-btn');
+        var countText = document.getElementById('delete-count-text');
+        if (total > 0) {
+            if (delBtn) delBtn.classList.remove('hidden');
+            if (countText) countText.textContent = '删除 (' + total + ')';
+        } else {
+            if (delBtn) delBtn.classList.add('hidden');
+        }
+    }
+
+    window.handleItemClick = function(event, item) {
+        if (!isSelectMode()) {
+            // 非选择模式：文件夹正常导航，图片正常预览
+            return;
+        }
+        // 选择模式下阻止所有导航/链接
+        event.preventDefault();
+        event.stopPropagation();
+
+        var type = item.getAttribute('data-type');
+        var isSelected = item.getAttribute('data-selected') === 'true';
+
+        if (isSelected) {
+            uncheckItem(item);
+            if (type === 'image') _selectedImages.delete(parseInt(item.getAttribute('data-image-id')));
+            if (type === 'folder') _selectedFolders.delete(item.getAttribute('data-folder-path'));
+        } else {
+            checkItem(item);
+            if (type === 'image') _selectedImages.add(parseInt(item.getAttribute('data-image-id')));
+            if (type === 'folder') _selectedFolders.add(item.getAttribute('data-folder-path'));
+        }
+        updateDeleteButton();
+    };
+
+    window.toggleSelectAll = function() {
+        var items = document.querySelectorAll('.selectable-item');
+        // 判断是全选还是取消全选
+        var allSelected = true;
+        items.forEach(function(item) {
+            if (item.getAttribute('data-selected') !== 'true') allSelected = false;
+        });
+        items.forEach(function(item) {
+            var type = item.getAttribute('data-type');
+            if (allSelected) {
+                uncheckItem(item);
+                if (type === 'image') _selectedImages.delete(parseInt(item.getAttribute('data-image-id')));
+                if (type === 'folder') _selectedFolders.delete(item.getAttribute('data-folder-path'));
+            } else {
+                checkItem(item);
+                if (type === 'image') _selectedImages.add(parseInt(item.getAttribute('data-image-id')));
+                if (type === 'folder') _selectedFolders.add(item.getAttribute('data-folder-path'));
+            }
+        });
+        updateDeleteButton();
+    };
+
+    window.confirmDeleteSelected = function() {
+        var imgCount = _selectedImages.size;
+        var folderCount = _selectedFolders.size;
+        if (imgCount === 0 && folderCount === 0) return;
+
+        var msg = '确定要删除以下内容吗？\n\n';
+        if (folderCount > 0) msg += '• ' + folderCount + ' 个文件夹（包含其中所有图片）\n';
+        if (imgCount > 0) msg += '• ' + imgCount + ' 张图片\n';
+        msg += '\n此操作不可恢复！';
+
+        // 显示自定义确认对话框
+        showDeleteConfirmDialog(msg, function() {
+            executeDelete(Array.from(_selectedImages), Array.from(_selectedFolders));
+        });
+    };
+
+    function showDeleteConfirmDialog(message, onConfirm) {
+        // 移除之前的对话框（如果有）
+        var old = document.getElementById('delete-confirm-dialog');
+        if (old) old.remove();
+
+        var overlay = document.createElement('div');
+        overlay.id = 'delete-confirm-dialog';
+        overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40';
+        overlay.innerHTML =
+            '<div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6">' +
+                '<div class="flex items-center gap-3 mb-4">' +
+                    '<div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">' +
+                        '<svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>' +
+                    '</div>' +
+                    '<h3 class="text-lg font-semibold text-slate-800">确认删除</h3>' +
+                '</div>' +
+                '<pre class="text-sm text-slate-600 mb-6 whitespace-pre-wrap font-sans">' + message.replace(/</g, '&lt;') + '</pre>' +
+                '<div class="flex justify-end gap-3">' +
+                    '<button type="button" class="cancel-btn px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                    '<button type="button" class="confirm-btn px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors">确认删除</button>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.cancel-btn').addEventListener('click', function() { overlay.remove(); });
+        overlay.querySelector('.confirm-btn').addEventListener('click', function() {
+            overlay.remove();
+            onConfirm();
+        });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    }
+
+    function executeDelete(imageIds, folderPaths) {
+        var delBtn = document.getElementById('delete-selected-btn');
+        if (delBtn) {
+            delBtn.disabled = true;
+            delBtn.querySelector('#delete-count-text').textContent = '删除中...';
+        }
+
+        var promises = [];
+
+        if (imageIds.length > 0) {
+            promises.push(
+                fetch('/api/delete-images', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ids: imageIds})
+                }).then(function(r) { return r.json(); })
+            );
+        }
+
+        if (folderPaths.length > 0) {
+            promises.push(
+                fetch('/api/delete-folders', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({paths: folderPaths})
+                }).then(function(r) { return r.json(); })
+            );
+        }
+
+        Promise.all(promises).then(function(results) {
+            // 退出选择模式
+            exitSelectMode();
+            // 如果删除了文件夹，需要重新加载整个页面以更新侧栏文件夹树
+            if (folderPaths.length > 0) {
+                window.location.reload();
+                return;
+            }
+            // 仅删除了图片，刷新画廊即可
+            refreshGallery();
+        }).catch(function(err) {
+            console.error('删除失败:', err);
+            alert('删除失败，请查看控制台日志');
+            if (delBtn) {
+                delBtn.disabled = false;
+                updateDeleteButton();
+            }
+        });
+    }
+
+    function refreshGallery() {
+        var marker = document.getElementById('current-path-marker');
+        var path = marker ? (marker.getAttribute('data-path') || '') : '';
+        var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
+        var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
+        var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+        var searchInput = document.querySelector('input[name="search"]');
+        var search = searchInput ? searchInput.value : '';
+        var url = '/gallery?path=' + encodeURIComponent(path) + '&search=' + encodeURIComponent(search) + '&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+    }
+
+    // HTMX 加载新内容后，如果处于选择模式，需要更新新内容的复选框状态
+    document.body.addEventListener('htmx:afterSettle', function(ev) {
+        if (!isSelectMode()) return;
+        if (ev.detail.target.id === 'gallery-container' || ev.detail.target.id === 'gallery-grid') {
+            // 重新显示复选框
+            document.querySelectorAll('.select-checkbox').forEach(function(cb) { cb.classList.remove('hidden'); });
         }
     });
 })();

@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import quote
@@ -6,6 +7,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -146,6 +148,11 @@ async def gallery(
     path = (path or "").strip().strip("/")
     mode = "waterfall" if mode == "waterfall" else "folder"
 
+    # 瀑布流模式强制使用默认排序
+    if mode == "waterfall":
+        sort_by = "modified_at"
+        sort_order = "desc"
+
     # 排序字段映射
     sort_columns = {
         "filename": Image.filename,
@@ -266,6 +273,95 @@ async def trigger_scan():
     """手动触发扫描"""
     n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
     return {"scanned": n}
+
+
+# ---------- 删除 API ----------
+
+class DeleteImagesRequest(BaseModel):
+    ids: list[int]
+
+
+class DeleteFoldersRequest(BaseModel):
+    paths: list[str]
+
+
+def _delete_image_files(relative_path: str) -> None:
+    """删除图片的原始文件和缓存文件"""
+    # 删除原图
+    photo_path = PHOTOS_DIR / relative_path
+    if photo_path.exists():
+        photo_path.unlink(missing_ok=True)
+    # 删除缓存缩略图
+    cache_name = _cache_filename(relative_path)
+    cache_path = CACHE_DIR / cache_name
+    if cache_path.exists():
+        cache_path.unlink(missing_ok=True)
+
+
+@app.post("/api/delete-images")
+async def delete_images(
+    body: DeleteImagesRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """删除指定 ID 的图片（数据库记录 + 原图 + 缓存）"""
+    if not body.ids:
+        return {"deleted": 0}
+
+    # 查出所有要删除的图片
+    stmt = select(Image).where(Image.id.in_(body.ids))
+    result = await session.execute(stmt)
+    images = list(result.scalars().all())
+
+    deleted = 0
+    for img in images:
+        _delete_image_files(img.relative_path)
+        await session.delete(img)
+        deleted += 1
+
+    await session.commit()
+    return {"deleted": deleted}
+
+
+@app.post("/api/delete-folders")
+async def delete_folders(
+    body: DeleteFoldersRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """删除指定文件夹路径下所有图片（数据库 + 文件系统），并删除文件夹目录"""
+    if not body.paths:
+        return {"deleted_images": 0, "deleted_folders": 0}
+
+    total_images = 0
+    total_folders = 0
+
+    for folder_path in body.paths:
+        folder_path = folder_path.strip().strip("/")
+        if not folder_path:
+            continue
+
+        # 查询该路径下的所有图片（递归）
+        escaped = _escape_like(folder_path)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == folder_path)
+        )
+        stmt = select(Image).where(path_filter)
+        result = await session.execute(stmt)
+        images = list(result.scalars().all())
+
+        for img in images:
+            _delete_image_files(img.relative_path)
+            await session.delete(img)
+            total_images += 1
+
+        # 删除文件夹目录本身
+        folder_fs_path = PHOTOS_DIR / folder_path
+        if folder_fs_path.exists() and folder_fs_path.is_dir():
+            shutil.rmtree(folder_fs_path, ignore_errors=True)
+            total_folders += 1
+
+    await session.commit()
+    return {"deleted_images": total_images, "deleted_folders": total_folders}
 
 
 # 静态目录挂载（放在路由之后，mount 会匹配前缀路径）
