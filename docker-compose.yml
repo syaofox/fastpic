@@ -1,0 +1,26 @@
+services:
+  fastpic:
+    build:
+      context: .
+      args:
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+    container_name: fastpic
+    restart: unless-stopped
+    # 以宿主用户身份运行，确保对挂载卷有读写权限
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "8000:8000"
+    environment:
+      # 时区（环境变量兜底，优先使用挂载的宿主时区文件）
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      # 宿主时区同步（只读挂载）
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # 数据库（含 SQLite WAL/journal 文件）
+      - ./data:/app/data
+      # 缩略图缓存
+      - ./cache:/app/cache
+      # 图片文件夹
+      - ./photos:/app/photos

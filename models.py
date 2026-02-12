@@ -1,8 +1,13 @@
+import os
+
 from sqlmodel import Field, SQLModel, create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-DATABASE_URL = "sqlite:///./fastpic.db"
-ASYNC_DATABASE_URL = "sqlite+aiosqlite:///./fastpic.db"
+# 数据库存放在 data/ 目录下，支持通过环境变量覆盖
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.environ.get("DATA_DIR", "data"))
+os.makedirs(_DATA_DIR, exist_ok=True)
+DATABASE_URL = f"sqlite:///{_DATA_DIR}/fastpic.db"
+ASYNC_DATABASE_URL = f"sqlite+aiosqlite:///{_DATA_DIR}/fastpic.db"
 
 
 class Image(SQLModel, table=True):

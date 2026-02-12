@@ -1,0 +1,42 @@
+# 数据目录（运行时挂载，不打包进镜像）
+photos/
+cache/
+data/
+*.db
+*.db-journal
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 文档
+README.md
+*.md
+LICENSE
+
+# uv 锁文件不排除（构建时需要）
+# uv.lock
