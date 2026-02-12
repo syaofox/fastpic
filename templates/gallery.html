@@ -166,6 +166,11 @@
     <button type="button" id="select-all-btn" class="hidden p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors text-sm" title="全选/取消全选" onclick="window.toggleSelectAll()">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 5h16M4 12h16M4 19h16"/><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 5l-2 2m0 0L5 5m2 2V3M9 12l-2 2m0 0l-2-2m2 2V8M9 19l-2 2m0 0l-2-2m2 2v-4"/></svg>
     </button>
+    <!-- 移动按钮（选择模式下，仅有图片选中时显示） -->
+    <button type="button" id="move-selected-btn" class="hidden px-3 py-1.5 rounded bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" title="移动选中图片" onclick="window.showMoveDialog && window.showMoveDialog()">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+        <span>移动</span>
+    </button>
     <!-- 删除按钮（选择模式下显示） -->
     <button type="button" id="delete-selected-btn" class="hidden px-3 py-1.5 rounded bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" title="删除选中项" onclick="window.confirmDeleteSelected()">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>

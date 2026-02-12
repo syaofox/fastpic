@@ -625,6 +625,112 @@ async def delete_images(
     return {"deleted": deleted}
 
 
+@app.get("/api/subfolders")
+async def get_subfolders(
+    path: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """获取指定路径下的直接子文件夹，用于移动目标选择"""
+    path = (path or "").strip().strip("/")
+    # 安全检查
+    if ".." in path or path.startswith("/"):
+        return {"subfolders": []}
+
+    if path:
+        escaped = _escape_like(path)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == path)
+        )
+    else:
+        path_filter = None
+    subfolders = await _get_subfolders(session, path, path_filter)
+    return {
+        "subfolders": [
+            {"name": s["name"], "full_path": s["full_path"], "image_count": s["image_count"]}
+            for s in subfolders
+        ]
+    }
+
+
+class MoveImagesRequest(BaseModel):
+    ids: list[int]
+    target_path: str
+
+
+@app.post("/api/move-images")
+async def move_images(
+    body: MoveImagesRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """将指定图片移动到目标文件夹"""
+    from scanner import IMAGE_EXTENSIONS, _generate_thumbnail
+
+    if not body.ids:
+        return {"moved": 0, "errors": []}
+
+    target_path = (body.target_path or "").strip().strip("/")
+    if ".." in target_path or target_path.startswith("/"):
+        return {"moved": 0, "errors": ["目标路径不合法"]}
+
+    target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    stmt = select(Image).where(Image.id.in_(body.ids))
+    result = await session.execute(stmt)
+    images = list(result.scalars().all())
+
+    moved = 0
+    errors = []
+    for img in images:
+        src_path = PHOTOS_DIR / img.relative_path
+        if not src_path.exists():
+            errors.append(f"{img.filename}: 文件不存在")
+            continue
+
+        ext = Path(img.filename).suffix.lower()
+        if ext not in IMAGE_EXTENSIONS:
+            errors.append(f"{img.filename}: 不支持的格式")
+            continue
+
+        # 目标路径：若已在目标目录则跳过
+        new_rel = f"{target_path}/{img.filename}" if target_path else img.filename
+        if new_rel == img.relative_path:
+            continue  # 已在目标位置
+
+        dest_path = target_dir / img.filename
+        if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+            dest_path = _unique_dest(target_dir, img.filename, ext)
+            new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
+
+        try:
+            shutil.move(str(src_path), str(dest_path))
+        except OSError as e:
+            errors.append(f"{img.filename}: {e}")
+            continue
+
+        # 删除旧缓存
+        old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+        if old_cache.exists():
+            old_cache.unlink(missing_ok=True)
+
+        # 更新数据库
+        img.relative_path = new_rel
+        img.filename = dest_path.name
+        img.modified_at = os.path.getmtime(dest_path)
+        img.file_size = dest_path.stat().st_size
+
+        # 生成新缓存
+        new_cache = CACHE_DIR / _cache_filename(new_rel)
+        _generate_thumbnail(dest_path, new_cache)
+
+        session.add(img)
+        moved += 1
+
+    await session.commit()
+    return {"moved": moved, "errors": errors}
+
+
 @app.post("/api/delete-folders")
 async def delete_folders(
     body: DeleteFoldersRequest,

@@ -130,6 +130,10 @@
 <div id="select-mode-fab" class="hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-4 py-3 flex items-center justify-between gap-4">
     <span id="select-mode-fab-count" class="text-sm font-medium text-slate-700">已选 0 项</span>
     <div class="flex items-center gap-2">
+        <button type="button" id="select-mode-fab-move" class="hidden px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.showMoveDialog && window.showMoveDialog()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+            移动
+        </button>
         <button type="button" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onclick="window.toggleSelectMode && window.toggleSelectMode()">取消选择</button>
         <button type="button" id="select-mode-fab-delete" class="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.confirmDeleteSelected && window.confirmDeleteSelected()">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -1127,6 +1131,8 @@ document.addEventListener('keydown', function(e) {
         if (selAllBtn) selAllBtn.classList.add('hidden');
         var delBtn = document.getElementById('delete-selected-btn');
         if (delBtn) delBtn.classList.add('hidden');
+        var moveBtn = document.getElementById('move-selected-btn');
+        if (moveBtn) moveBtn.classList.add('hidden');
         // 隐藏底部固定操作栏
         var fab = document.getElementById('select-mode-fab');
         if (fab) fab.classList.add('hidden');
@@ -1163,7 +1169,10 @@ document.addEventListener('keydown', function(e) {
 
     function updateDeleteButton() {
         var total = _selectedImages.size + _selectedFolders.size;
+        var imgCount = _selectedImages.size;
         var delBtn = document.getElementById('delete-selected-btn');
+        var moveBtn = document.getElementById('move-selected-btn');
+        var fabMoveBtn = document.getElementById('select-mode-fab-move');
         var countText = document.getElementById('delete-count-text');
         var fab = document.getElementById('select-mode-fab');
         var fabCount = document.getElementById('select-mode-fab-count');
@@ -1171,12 +1180,15 @@ document.addEventListener('keydown', function(e) {
         if (total > 0) {
             if (delBtn) delBtn.classList.remove('hidden');
             if (countText) countText.textContent = '删除 (' + total + ')';
-            // 显示底部固定操作栏，滚动后删除按钮始终可见
+            if (moveBtn) (imgCount > 0 ? moveBtn.classList.remove('hidden') : moveBtn.classList.add('hidden'));
+            if (fabMoveBtn) (imgCount > 0 ? fabMoveBtn.classList.remove('hidden') : fabMoveBtn.classList.add('hidden'));
             if (fab) fab.classList.remove('hidden');
             if (fabCount) fabCount.textContent = '已选 ' + total + ' 项';
             if (scrollEl) scrollEl.classList.add('pb-24');
         } else {
             if (delBtn) delBtn.classList.add('hidden');
+            if (moveBtn) moveBtn.classList.add('hidden');
+            if (fabMoveBtn) fabMoveBtn.classList.add('hidden');
             if (fab) fab.classList.add('hidden');
             if (scrollEl) scrollEl.classList.remove('pb-24');
         }
@@ -1333,6 +1345,145 @@ document.addEventListener('keydown', function(e) {
             updateDeleteButton();
         });
     }
+
+    window.showMoveDialog = function() {
+        var imgIds = Array.from(_selectedImages);
+        if (imgIds.length === 0) return;
+
+        var old = document.getElementById('move-dialog');
+        if (old) old.remove();
+
+        var overlay = document.createElement('div');
+        overlay.id = 'move-dialog';
+        overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40';
+        overlay.innerHTML =
+            '<div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 max-h-[85vh] flex flex-col">' +
+                '<div class="p-4 border-b border-slate-200 flex-shrink-0">' +
+                    '<div class="flex items-center gap-3 mb-2">' +
+                        '<div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">' +
+                            '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>' +
+                        '</div>' +
+                        '<h3 class="text-lg font-semibold text-slate-800">移动图片</h3>' +
+                    '</div>' +
+                    '<div class="text-sm text-slate-500">将 ' + imgIds.length + ' 张图片移动到：</div>' +
+                    '<nav id="move-breadcrumb" class="mt-2 flex items-center gap-1 text-sm text-slate-600 flex-wrap"></nav>' +
+                '</div>' +
+                '<div id="move-folder-list" class="flex-1 overflow-y-auto p-4 min-h-0"></div>' +
+                '<div class="p-4 border-t border-slate-200 flex-shrink-0 flex justify-end gap-2">' +
+                    '<button type="button" class="move-cancel-btn px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                    '<button type="button" class="move-confirm-btn px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">移动到这里</button>' +
+                '</div>' +
+                '<div id="move-error" class="hidden px-4 pb-4 text-sm text-red-500"></div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+
+        var currentPath = '';
+        var breadcrumbEl = overlay.querySelector('#move-breadcrumb');
+        var listEl = overlay.querySelector('#move-folder-list');
+        var confirmBtn = overlay.querySelector('.move-confirm-btn');
+        var errorEl = overlay.querySelector('#move-error');
+
+        function renderBreadcrumb() {
+            var parts = currentPath ? currentPath.split('/') : [];
+            var html = '<a href="#" class="move-nav-link" data-path="">全部文件夹</a>';
+            for (var i = 0; i < parts.length; i++) {
+                var path = parts.slice(0, i + 1).join('/');
+                html += '<span class="text-slate-400"> › </span>';
+                html += '<a href="#" class="move-nav-link" data-path="' + path.replace(/"/g, '&quot;') + '">' + parts[i] + '</a>';
+            }
+            breadcrumbEl.innerHTML = html;
+            breadcrumbEl.querySelectorAll('.move-nav-link').forEach(function(a) {
+                a.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    currentPath = a.getAttribute('data-path') || '';
+                    renderBreadcrumb();
+                    loadSubfolders();
+                });
+            });
+        }
+
+        function loadSubfolders() {
+            listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">加载中...</div>';
+            fetch('/api/subfolders?path=' + encodeURIComponent(currentPath))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var subs = data.subfolders || [];
+                    if (subs.length === 0) {
+                        listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
+                    } else {
+                        listEl.innerHTML = subs.map(function(s) {
+                            return '<div class="move-folder-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
+                                '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                                '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
+                                (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
+                                '</div>';
+                        }).join('');
+                        listEl.querySelectorAll('.move-folder-item').forEach(function(el) {
+                            el.addEventListener('click', function() {
+                                currentPath = el.getAttribute('data-path') || '';
+                                renderBreadcrumb();
+                                loadSubfolders();
+                            });
+                        });
+                    }
+                })
+                .catch(function(err) {
+                    listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
+                });
+        }
+
+        function doMove() {
+            errorEl.classList.add('hidden');
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = '移动中...';
+
+            fetch('/api/move-images', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ids: imgIds, target_path: currentPath})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                overlay.remove();
+                if (data.moved > 0) {
+                    var moved = data.moved;
+                    var errs = data.errors || [];
+                    imgIds.forEach(function(id) { _selectedImages.delete(id); });
+                    if (errs.length > 0) {
+                        alert('已移动 ' + moved + ' 张，失败 ' + errs.length + ' 张：' + errs.join('；'));
+                    }
+                    updateDeleteButton();
+                    if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
+                    refreshGallery();
+                } else {
+                    if (data.errors && data.errors.length > 0) {
+                        errorEl.textContent = data.errors.join('；');
+                        errorEl.classList.remove('hidden');
+                    } else {
+                        errorEl.textContent = '所选图片已在目标位置';
+                        errorEl.classList.remove('hidden');
+                    }
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = '移动到这里';
+                }
+            })
+            .catch(function(err) {
+                console.error('移动失败:', err);
+                errorEl.textContent = '请求失败: ' + err;
+                errorEl.classList.remove('hidden');
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = '移动到这里';
+            });
+        }
+
+        overlay.querySelector('.move-cancel-btn').addEventListener('click', function() { overlay.remove(); });
+        confirmBtn.addEventListener('click', doMove);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+        renderBreadcrumb();
+        loadSubfolders();
+    };
 
     function refreshGallery() {
         var marker = document.getElementById('current-path-marker');
