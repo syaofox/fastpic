@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex h-screen">
+    <!-- 左侧文件夹树 -->
+    <aside class="w-[220px] bg-slate-800 text-slate-200 flex-shrink-0 overflow-y-auto">
+        <div class="p-4">
+            <h2 class="font-semibold text-slate-100 mb-3">文件夹</h2>
+            <div class="space-y-1" id="folder-tree">
+                <a href="/" class="block px-3 py-2 rounded hover:bg-slate-700 transition-colors"
+                   hx-get="/gallery?path=&search=&page=1"
+                   hx-target="#gallery-container"
+                   hx-swap="innerHTML"
+                   hx-on:click="document.querySelector('[name=path]').value = ''">/ 全部</a>
+                {% for folder in folder_tree %}
+                <a href="?path={{ folder|join('/') }}"
+                   class="block px-3 py-2 rounded hover:bg-slate-700 transition-colors"
+                   style="padding-left: {{ 12 + folder|length * 12 }}px;"
+                   hx-get="/gallery?path={{ folder|join('/') }}&search=&page=1"
+                   hx-target="#gallery-container"
+                   hx-swap="innerHTML"
+                   hx-on:click="document.querySelector('[name=path]').value = '{{ folder|join('/') }}'">
+                    {{ folder|join('/') }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </aside>
+
+    <!-- 右侧主区 -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+        <!-- 搜索框 -->
+        <header class="p-4 bg-white border-b border-slate-200 flex-shrink-0">
+            <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') }}">
+            <input type="search"
+                   name="search"
+                   placeholder="搜索文件名..."
+                   class="w-full max-w-md px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                   hx-get="/gallery"
+                   hx-trigger="keyup changed delay:300ms"
+                   hx-target="#gallery-container"
+                   hx-include="#path-input"
+                   hx-vals='{"page": 1}'
+                   hx-swap="innerHTML">
+        </header>
+
+        <!-- 图片网格 -->
+        <div class="flex-1 overflow-y-auto p-4" id="scroll-container">
+            <div id="gallery-container"
+                 hx-get="/gallery?path={{ request.query_params.get('path', '') }}&search=&page=1"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="flex justify-center items-center h-64 text-slate-500">
+                    <span class="htmx-indicator">加载中...</span>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 大图预览模态框 -->
+<div id="modal" class="fixed inset-0 z-50 hidden" onclick="closeModal(event)">
+    <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex items-center justify-center">
+        <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">‹</button>
+        <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
+        <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">›</button>
+    </div>
+</div>
+
+<script>
+let modalImages = [];
+let modalIndex = 0;
+
+function openModal(photoUrl, index, allUrls) {
+    modalImages = allUrls;
+    modalIndex = index;
+    document.getElementById('modal-img').src = photoUrl;
+    document.getElementById('modal').classList.remove('hidden');
+}
+
+function closeModal(e) {
+    if (e.target.id === 'modal' || e.target.id === 'modal-overlay') {
+        document.getElementById('modal').classList.add('hidden');
+    }
+}
+
+function prevImage() {
+    if (modalImages.length === 0) return;
+    modalIndex = (modalIndex - 1 + modalImages.length) % modalImages.length;
+    document.getElementById('modal-img').src = modalImages[modalIndex];
+}
+
+function nextImage() {
+    if (modalImages.length === 0) return;
+    modalIndex = (modalIndex + 1) % modalImages.length;
+    document.getElementById('modal-img').src = modalImages[modalIndex];
+}
+
+document.addEventListener('keydown', function(e) {
+    const modal = document.getElementById('modal');
+    if (modal.classList.contains('hidden')) return;
+    if (e.key === 'Escape') { modal.classList.add('hidden'); }
+    if (e.key === 'ArrowLeft') { prevImage(); }
+    if (e.key === 'ArrowRight') { nextImage(); }
+});
+</script>
+{% endblock %}

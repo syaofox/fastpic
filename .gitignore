@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.Python
+
+# 缓存与数据库
+photos/
+cache/
+*.db
+
+# 图片目录（可选，若 photos 含用户数据可不提交）
+# photos/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db

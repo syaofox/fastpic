@@ -1,0 +1,14 @@
+[project]
+name = "fastpic"
+version = "0.1.0"
+description = "局域网图片查看器 - FastAPI + HTMX + SQLModel"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "jinja2>=3.1.0",
+    "sqlmodel>=0.0.14",
+    "aiosqlite>=0.19.0",
+    "pillow>=10.0.0",
+    "python-multipart>=0.0.6",
+]
