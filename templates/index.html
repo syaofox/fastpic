@@ -746,6 +746,17 @@ document.addEventListener('keydown', function(e) {
         } else if (ev.detail.target.id === 'gallery-grid' && wfInitialized && isWaterfallMode()) {
             // 追加加载（无限滚动）
             distributeNew();
+        } else if (ev.detail.target.id === 'gallery-grid' && !isWaterfallMode()) {
+            // 文件夹模式追加加载：清理旧的滚动哨兵，只保留最新的
+            var grid = document.getElementById('gallery-grid');
+            if (grid) {
+                var sentinels = grid.querySelectorAll(':scope > .scroll-sentinel');
+                if (sentinels.length > 1) {
+                    for (var i = 0; i < sentinels.length - 1; i++) {
+                        sentinels[i].remove();
+                    }
+                }
+            }
         }
     });
 })();
