@@ -7,10 +7,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
-        /* 侧边栏：细窄滚动条，深色主题 */
+        /* 侧边栏：细窄滚动条，浅色主题 */
         #sidebar {
             scrollbar-width: thin;
-            scrollbar-color: rgb(100 116 139) transparent;
+            scrollbar-color: rgb(203 213 225) transparent;
         }
         #sidebar::-webkit-scrollbar {
             width: 6px;
@@ -19,7 +19,7 @@
             background: transparent;
         }
         #sidebar::-webkit-scrollbar-thumb {
-            background: rgb(100 116 139);
+            background: rgb(203 213 225);
             border-radius: 3px;
         }
         #sidebar::-webkit-scrollbar-thumb:hover {
@@ -46,7 +46,7 @@
         }
     </style>
 </head>
-<body class="bg-slate-100 min-h-screen">
+<body class="bg-slate-50 min-h-screen">
     {% block content %}{% endblock %}
 </body>
 </html>

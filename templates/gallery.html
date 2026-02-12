@@ -1,14 +1,82 @@
 {% if not append %}
+<div id="current-path-marker" data-path="{{ path }}" class="hidden"></div>
+<!-- 面包屑 -->
+<nav class="text-sm text-slate-600 mb-3">
+    <a href="/"
+       class="hover:text-blue-600 transition-colors"
+       hx-get="/gallery?path=&search={{ search|urlencode_path }}&page=1"
+       hx-target="#gallery-container"
+       hx-swap="innerHTML"
+       hx-on:click="document.querySelector('[name=path]').value = ''">全部文件夹</a>
+    {% for i in range(breadcrumb_parts|length) %}
+    <span class="mx-1">›</span>
+    {% set seg_path = breadcrumb_parts[:i+1]|join('/') %}
+    {% if loop.last %}
+    <span class="text-slate-800 font-medium">{{ breadcrumb_parts[i] }}</span>
+    {% else %}
+    <a href="?path={{ seg_path|urlencode_path }}"
+       class="hover:text-blue-600 transition-colors"
+       hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&page=1"
+       hx-target="#gallery-container"
+       hx-swap="innerHTML"
+       hx-on:click="document.querySelector('[name=path]').value = '{{ seg_path }}'">{{ breadcrumb_parts[i] }}</a>
+    {% endif %}
+    {% endfor %}
+</nav>
+
+<!-- 工具栏 -->
+<div class="flex items-center gap-2 mb-4 text-slate-500">
+    <button type="button" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="网格视图">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1" stroke-width="2"/></svg>
+    </button>
+    <button type="button" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="列表视图">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <button type="button" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="筛选">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+    </button>
+    <button type="button" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="排序">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/></svg>
+    </button>
+</div>
+
 <div id="gallery-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
 {% endif %}
+    {% if not append %}
+    {% for sub in subfolders %}
+    <a href="?path={{ sub.full_path|urlencode_path }}"
+       class="block group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white"
+       hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&page=1"
+       hx-target="#gallery-container"
+       hx-swap="innerHTML"
+       hx-on:click="document.querySelector('[name=path]').value = '{{ sub.full_path }}'">
+        <div class="aspect-square grid grid-cols-2 grid-rows-2 gap-0.5 p-0.5 bg-slate-100">
+            {% for i in range(4) %}
+            <div class="bg-slate-200 overflow-hidden">
+                {% if i < (sub.thumbnails|length) %}
+                <img src="/cache/{{ sub.thumbnails[i]|cache_key }}"
+                     alt=""
+                     class="w-full h-full object-cover"
+                     loading="lazy">
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="px-2 py-1.5 text-sm text-slate-700 truncate group-hover:text-blue-600 transition-colors">{{ sub.name }}</div>
+    </a>
+    {% endfor %}
+    {% endif %}
     {% for img in images %}
     <a href="/photos/{{ img.relative_path }}"
-       class="block aspect-square overflow-hidden rounded-lg bg-slate-200 hover:ring-2 hover:ring-blue-500 transition-all"
+       class="block rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white"
        onclick="event.preventDefault(); openModal('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}]);">
-        <img src="/cache/{{ img.relative_path|cache_key }}"
-             alt="{{ img.filename }}"
-             class="w-full h-full object-cover"
-             loading="lazy">
+        <div class="aspect-square overflow-hidden bg-slate-100">
+            <img src="/cache/{{ img.relative_path|cache_key }}"
+                 alt="{{ img.filename }}"
+                 class="w-full h-full object-cover"
+                 loading="lazy">
+        </div>
+        <div class="px-2 py-1 text-xs text-slate-600 truncate">{{ img.filename }}</div>
     </a>
     {% endfor %}
 {% if has_next %}

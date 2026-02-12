@@ -77,6 +77,41 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
     )
 
 
+async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list[dict]:
+    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图"""
+    # 查询该路径下所有 relative_path（用于提取子文件夹名）
+    subfolder_stmt = select(Image.relative_path)
+    if path:
+        subfolder_stmt = subfolder_stmt.where(path_filter)
+    subfolder_stmt = subfolder_stmt.distinct()
+    result = await session.execute(subfolder_stmt)
+    all_paths = [r[0] for r in result.fetchall()]
+
+    path_depth = len(path.split("/")) if path else 0
+    subfolder_names: set[str] = set()
+    for rel in all_paths:
+        parts = rel.split("/")
+        if len(parts) > path_depth + 1:
+            subfolder_names.add(parts[path_depth])
+
+    subfolders: list[dict] = []
+    for name in sorted(subfolder_names):
+        full_path = f"{path}/{name}" if path else name
+        escaped_sub = _escape_like(full_path)
+        sub_path_filter = Image.relative_path.like(f"{escaped_sub}/%", escape="\\")
+        thumb_stmt = (
+            select(Image.relative_path)
+            .where(sub_path_filter)
+            .order_by(Image.modified_at.desc())
+            .limit(4)
+        )
+        thumb_result = await session.execute(thumb_stmt)
+        thumbnails = [r[0] for r in thumb_result.fetchall()]
+        subfolders.append({"name": name, "full_path": full_path, "thumbnails": thumbnails})
+
+    return subfolders
+
+
 @app.get("/gallery")
 async def gallery(
     request: Request,
@@ -94,13 +129,14 @@ async def gallery(
 
     stmt = select(Image).order_by(Image.modified_at.desc())
     if path:
-        # 转义 LIKE 通配符 % 和 _，避免错误匹配
         escaped = _escape_like(path)
         path_filter = (
             Image.relative_path.like(f"{escaped}/%", escape="\\")
             | (Image.relative_path == path)
         )
         stmt = stmt.where(path_filter)
+    else:
+        path_filter = None
     if search:
         stmt = stmt.where(Image.filename.ilike(f"%{search}%"))
 
@@ -112,6 +148,11 @@ async def gallery(
         count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
     total = (await session.execute(count_stmt)).scalar() or 0
 
+    # 子文件夹（仅首页且无搜索时）
+    subfolders: list[dict] = []
+    if page == 1 and not search:
+        subfolders = await _get_subfolders(session, path, path_filter)
+
     # 分页
     offset = (page - 1) * per_page
     stmt = stmt.offset(offset).limit(per_page + 1)
@@ -120,6 +161,9 @@ async def gallery(
     has_next = len(images) > per_page
     if has_next:
         images = images[:per_page]
+
+    # 面包屑
+    breadcrumb_parts = path.split("/") if path else []
 
     return templates.TemplateResponse(
         "gallery.html",
@@ -133,6 +177,8 @@ async def gallery(
             "has_next": has_next,
             "total": total,
             "append": page > 1,
+            "subfolders": subfolders,
+            "breadcrumb_parts": breadcrumb_parts,
         },
     )
 

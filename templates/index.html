@@ -2,11 +2,17 @@
 {% block content %}
 <div class="flex h-screen" id="layout">
     <!-- 左侧文件夹树（可调节宽度） -->
-    <aside id="sidebar" class="bg-slate-800 text-slate-200 flex-shrink-0 overflow-y-auto" style="width: var(--sidebar-width, 160px); min-width: 160px; max-width: 800px;">
+    <aside id="sidebar" class="bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 800px;">
         <div class="p-4">
-            <h2 class="font-semibold text-slate-100 mb-3">文件夹</h2>
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="font-semibold text-slate-800">全部文件夹</h2>
+                <button type="button" class="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="折叠">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+            </div>
             <div class="space-y-0" id="folder-tree">
-                <a href="/" class="block px-3 py-2 rounded hover:bg-slate-700 transition-colors"
+                {% set is_root = (request.query_params.get('path') or '') == '' %}
+                <a href="/" data-path="" class="folder-link block px-3 py-2 rounded transition-colors {{ 'bg-blue-50 text-blue-600' if is_root else 'hover:bg-slate-100 text-slate-700' }}"
                    hx-get="/gallery?path=&search=&page=1"
                    hx-target="#gallery-container"
                    hx-swap="innerHTML"
@@ -15,10 +21,11 @@
                 {% for part, sub in children.items() %}
                 {% set path_parts = prefix + [part] %}
                 {% set path_str = path_parts|join('/') %}
+                {% set is_current = path_str == (request.query_params.get('path') or '') %}
                 <div class="folder-node" data-path="{{ path_str }}">
                     <div class="flex items-center group" style="padding-left: {{ 12 + depth * 16 }}px;">
                         {% if sub %}
-                        <button type="button" class="folder-toggle w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-slate-600 text-slate-400 group-hover:text-slate-200 transition-colors"
+                        <button type="button" class="folder-toggle w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 group-hover:text-slate-700 transition-colors"
                                 data-expanded="false"
                                 onclick="toggleFolder(this); event.stopPropagation();"
                                 aria-label="展开">
@@ -28,7 +35,8 @@
                         <span class="w-5 flex-shrink-0"></span>
                         {% endif %}
                         <a href="?path={{ path_str|urlencode_path }}"
-                           class="flex-1 min-w-0 px-2 py-1.5 rounded hover:bg-slate-700 transition-colors truncate"
+                           data-path="{{ path_str }}"
+                           class="folder-link flex-1 min-w-0 px-2 py-1.5 rounded truncate transition-colors {{ 'bg-blue-50 text-blue-600' if is_current else 'hover:bg-slate-100 text-slate-700' }}"
                            hx-get="/gallery?path={{ path_str|urlencode_path }}&search=&page=1"
                            hx-target="#gallery-container"
                            hx-swap="innerHTML"
@@ -51,27 +59,38 @@
 
     <!-- 拖拽调节手柄 -->
     <div id="resize-handle"
-         class="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-blue-400/50 active:bg-blue-400/70 transition-colors flex items-center justify-center group"
+         class="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-blue-100 transition-colors flex items-center justify-center group bg-slate-100"
          role="separator"
          aria-label="调节侧边栏宽度">
-        <div class="w-0.5 h-8 bg-slate-500 group-hover:bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        <div class="w-0.5 h-8 bg-slate-400 group-hover:bg-blue-500 rounded-full opacity-60 group-hover:opacity-100 transition-opacity"></div>
     </div>
 
     <!-- 右侧主区 -->
-    <main class="flex-1 flex flex-col overflow-hidden">
-        <!-- 搜索框 -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-slate-50">
+        <!-- 顶部栏：搜索 + AI 搜索 + 图标 -->
         <header class="p-4 bg-white border-b border-slate-200 flex-shrink-0">
-            <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
-            <input type="search"
-                   name="search"
-                   placeholder="搜索文件名..."
-                   class="w-full max-w-md px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                   hx-get="/gallery"
-                   hx-trigger="keyup changed delay:300ms"
-                   hx-target="#gallery-container"
-                   hx-include="#path-input"
-                   hx-vals='{"page": 1}'
-                   hx-swap="innerHTML">
+            <div class="flex items-center gap-3">
+                <div class="flex-1 flex items-center gap-2 pl-3 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+                    <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
+                    <input type="search"
+                           name="search"
+                           placeholder="输入一段描述搜索照片: 在公园散步"
+                           class="flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-0 text-slate-800 placeholder-slate-400"
+                           hx-get="/gallery"
+                           hx-trigger="keyup changed delay:300ms"
+                           hx-target="#gallery-container"
+                           hx-include="#path-input"
+                           hx-vals='{"page": 1}'
+                           hx-swap="innerHTML">
+                </div>
+                <button type="button" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors">AI 搜索</button>
+                <div class="flex items-center gap-1">
+                    <button type="button" class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="添加"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg></button>
+                    <button type="button" class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="上传"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg></button>
+                    <button type="button" class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="设置"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
+                </div>
+            </div>
         </header>
 
         <!-- 图片网格 -->
@@ -203,5 +222,19 @@ document.addEventListener('keydown', function(e) {
         document.addEventListener('mouseup', onMouseUp);
     });
 })();
+
+// HTMX 交换后更新侧栏选中状态
+document.body.addEventListener('htmx:afterSwap', function(ev) {
+    if (ev.detail.target.id === 'gallery-container') {
+        const marker = document.getElementById('current-path-marker');
+        const path = marker ? (marker.getAttribute('data-path') || '') : '';
+        document.querySelectorAll('#sidebar .folder-link').forEach(function(link) {
+            const isCurrent = link.getAttribute('data-path') === path;
+            link.classList.toggle('bg-blue-50', isCurrent);
+            link.classList.toggle('text-blue-600', isCurrent);
+            link.classList.toggle('hover:bg-slate-100', !isCurrent);
+        });
+    }
+});
 </script>
 {% endblock %}
