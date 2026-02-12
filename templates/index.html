@@ -171,6 +171,62 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'ArrowRight') { nextImage(); }
 });
 
+// 缩略图大小调节
+(function() {
+    const STORAGE_KEY = 'fastpic_gallery_cols';
+    const DEFAULT_COLS = 4;
+    const MIN_COLS = 2;
+    const MAX_COLS = 8;
+
+    function getScrollContainer() {
+        return document.getElementById('scroll-container');
+    }
+
+    function initThumbnailSize() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        const cols = saved ? Math.max(MIN_COLS, Math.min(MAX_COLS, parseInt(saved, 10))) : DEFAULT_COLS;
+        const sc = getScrollContainer();
+        if (sc) sc.style.setProperty('--gallery-cols', String(cols));
+    }
+
+    function setThumbnailCols(cols) {
+        const c = Math.max(MIN_COLS, Math.min(MAX_COLS, cols));
+        const sc = getScrollContainer();
+        if (sc) sc.style.setProperty('--gallery-cols', String(c));
+        localStorage.setItem(STORAGE_KEY, String(c));
+        const valEl = document.getElementById('thumbnail-size-value');
+        if (valEl) valEl.textContent = c + ' 列';
+        const slider = document.getElementById('thumbnail-size-slider');
+        if (slider) slider.value = c;
+    }
+
+    initThumbnailSize();
+
+    document.body.addEventListener('click', function(e) {
+        const btn = e.target.closest('#thumbnail-size-btn');
+        const popover = document.getElementById('thumbnail-size-popover');
+        const insidePopover = popover && popover.contains(e.target);
+        if (btn) {
+            popover.classList.toggle('hidden');
+            if (!popover.classList.contains('hidden')) {
+                const slider = document.getElementById('thumbnail-size-slider');
+                const saved = localStorage.getItem(STORAGE_KEY);
+                const cols = saved ? parseInt(saved, 10) : DEFAULT_COLS;
+                if (slider) slider.value = Math.max(MIN_COLS, Math.min(MAX_COLS, cols));
+                setThumbnailCols(cols);
+            }
+        } else if (popover && !popover.classList.contains('hidden') && !insidePopover) {
+            popover.classList.add('hidden');
+        }
+    });
+
+    document.body.addEventListener('input', function(e) {
+        if (e.target.id === 'thumbnail-size-slider') {
+            setThumbnailCols(parseInt(e.target.value, 10));
+        }
+    });
+})();
+
 // 侧边栏宽度调节
 (function() {
     const SIDEBAR_MIN = 160;
@@ -223,9 +279,12 @@ document.addEventListener('keydown', function(e) {
     });
 })();
 
-// HTMX 交换后更新侧栏选中状态
+// HTMX 交换后更新侧栏选中状态，并确保缩略图大小应用
 document.body.addEventListener('htmx:afterSwap', function(ev) {
     if (ev.detail.target.id === 'gallery-container') {
+        const saved = localStorage.getItem('fastpic_gallery_cols');
+        const sc = document.getElementById('scroll-container');
+        if (sc && saved) sc.style.setProperty('--gallery-cols', saved);
         const marker = document.getElementById('current-path-marker');
         const path = marker ? (marker.getAttribute('data-path') || '') : '';
         document.querySelectorAll('#sidebar .folder-link').forEach(function(link) {
