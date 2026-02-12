@@ -44,6 +44,15 @@
         #scroll-container::-webkit-scrollbar-thumb:hover {
             background: rgb(148 163 184);
         }
+
+        /* 瀑布流：多列布局 */
+        .waterfall-grid {
+            column-fill: balance;
+        }
+        .waterfall-grid > a {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
