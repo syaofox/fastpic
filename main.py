@@ -436,13 +436,16 @@ async def upload_images(
     path: str = Form(""),
     on_duplicate: str = Form("skip"),
     files: list[UploadFile] = File(...),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """上传图片到指定路径
     on_duplicate: skip=跳过重复, rename=重命名, overwrite=覆盖
     重复判断：同目录下文件内容 MD5 相同即视为重复
+    写入文件后立即生成缩略图并入库，无需等待 watchdog。
     """
     import hashlib
-    from scanner import IMAGE_EXTENSIONS
+    from PIL import Image as PILImage
+    from scanner import IMAGE_EXTENSIONS, _generate_thumbnail
 
     target_path = (path or "").strip().strip("/")
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
@@ -478,6 +481,7 @@ async def upload_images(
 
         # 内容哈希
         content_hash = hashlib.md5(content).hexdigest()
+        is_overwrite = False
 
         # 检查内容是否已存在
         if content_hash in existing_hashes:
@@ -485,13 +489,11 @@ async def upload_images(
                 skipped += 1
                 continue
             elif on_duplicate == "overwrite":
-                # 覆盖同内容的已有文件
                 dest = target_dir / existing_hashes[content_hash]
+                is_overwrite = True
             else:
-                # rename: 内容相同但仍保存为新文件
                 dest = _unique_dest(target_dir, f.filename, ext)
         else:
-            # 内容不重复，但文件名可能冲突
             safe_name = Path(f.filename).name
             dest = target_dir / safe_name
             if dest.exists():
@@ -499,19 +501,61 @@ async def upload_images(
                     skipped += 1
                     continue
                 elif on_duplicate == "overwrite":
-                    pass  # 直接覆盖
+                    is_overwrite = True
                 else:
                     dest = _unique_dest(target_dir, f.filename, ext)
 
         try:
             dest.write_bytes(content)
-            # 更新哈希表
             existing_hashes[content_hash] = dest.name
+
+            # ── 立即入库：生成缩略图 + 写数据库 ──
+            rel_path = str(dest.relative_to(PHOTOS_DIR)).replace("\\", "/")
+
+            # 检查是否已有记录（覆盖场景）
+            existing_record = (await session.execute(
+                select(Image).where(Image.relative_path == rel_path)
+            )).scalar_one_or_none()
+
+            try:
+                with PILImage.open(dest) as img:
+                    width, height = img.size
+            except Exception:
+                width, height = 0, 0
+
+            modified_at = os.path.getmtime(dest)
+            file_size = os.path.getsize(dest)
+
+            # 生成缩略图
+            cache_name = _cache_filename(rel_path)
+            cache_path = CACHE_DIR / cache_name
+            _generate_thumbnail(dest, cache_path)
+
+            if existing_record:
+                # 更新已有记录
+                existing_record.filename = dest.name
+                existing_record.modified_at = modified_at
+                existing_record.file_size = file_size
+                existing_record.width = width
+                existing_record.height = height
+                session.add(existing_record)
+            else:
+                # 新增记录
+                record = Image(
+                    filename=dest.name,
+                    relative_path=rel_path,
+                    modified_at=modified_at,
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                )
+                session.add(record)
+
             uploaded += 1
         except Exception as e:
             errors.append(f"{f.filename}: {str(e)}")
 
-    # watchdog 会自动检测新文件并入库，无需手动 scan
+    await session.commit()
     return {"uploaded": uploaded, "skipped": skipped, "errors": errors}
 
 
