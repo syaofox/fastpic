@@ -12,7 +12,7 @@ from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, init_db, get_async_session
-from scanner import scan_photos, _cache_filename
+from scanner import scan_photos, cleanup_database, _cache_filename
 
 PHOTOS_DIR = Path(__file__).parent / "photos"
 CACHE_DIR = Path(__file__).parent / "cache"
@@ -23,8 +23,11 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 
 async def _background_scan():
-    """后台扫描包装，捕获并打印异常"""
+    """后台扫描包装：先清理再扫描，捕获并打印异常"""
     try:
+        # 先清理不一致数据
+        await cleanup_database(PHOTOS_DIR, CACHE_DIR)
+        # 再扫描新增图片
         n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
         print(f"[scan] 扫描完成，新增 {n} 张图片")
     except Exception as e:
@@ -273,6 +276,13 @@ async def trigger_scan():
     """手动触发扫描"""
     n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
     return {"scanned": n}
+
+
+@app.post("/api/cleanup")
+async def trigger_cleanup():
+    """手动触发数据库清理同步"""
+    result = await cleanup_database(PHOTOS_DIR, CACHE_DIR)
+    return result
 
 
 # ---------- 删除 API ----------
