@@ -6,6 +6,45 @@
     <title>{% block title %}FastPic 图片查看器{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        /* 侧边栏：细窄滚动条，深色主题 */
+        #sidebar {
+            scrollbar-width: thin;
+            scrollbar-color: rgb(100 116 139) transparent;
+        }
+        #sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+        #sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #sidebar::-webkit-scrollbar-thumb {
+            background: rgb(100 116 139);
+            border-radius: 3px;
+        }
+        #sidebar::-webkit-scrollbar-thumb:hover {
+            background: rgb(148 163 184);
+        }
+
+        /* 主区：细窄滚动条，浅色主题 */
+        #scroll-container {
+            scrollbar-width: thin;
+            scrollbar-color: rgb(203 213 225) transparent;
+        }
+        #scroll-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        #scroll-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #scroll-container::-webkit-scrollbar-thumb {
+            background: rgb(203 213 225);
+            border-radius: 3px;
+        }
+        #scroll-container::-webkit-scrollbar-thumb:hover {
+            background: rgb(148 163 184);
+        }
+    </style>
 </head>
 <body class="bg-slate-100 min-h-screen">
     {% block content %}{% endblock %}
