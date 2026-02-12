@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, init_db, get_async_session
 from scanner import scan_photos, cleanup_database, _cache_filename
+from watcher import start_watcher
 
 PHOTOS_DIR = Path(__file__).parent / "photos"
 CACHE_DIR = Path(__file__).parent / "cache"
@@ -41,7 +42,13 @@ async def lifespan(app: FastAPI):
     init_db()
     # 后台异步扫描
     asyncio.create_task(_background_scan())
+    # 启动文件系统监听（实时感知 photos 目录变化）
+    loop = asyncio.get_running_loop()
+    observer = start_watcher(PHOTOS_DIR, CACHE_DIR, loop)
     yield
+    # 关闭时停止监听
+    observer.stop()
+    observer.join(timeout=5)
 
 
 app = FastAPI(lifespan=lifespan)
