@@ -14,6 +14,8 @@ services:
     environment:
       # 时区（环境变量兜底，优先使用挂载的宿主时区文件）
       - TZ=${TZ:-Asia/Shanghai}
+      # 访问密码（留空或不设置则不启用密码保护）
+      - ACCESS_PASSWORD=${ACCESS_PASSWORD:-}
     volumes:
       # 宿主时区同步（只读挂载）
       - /etc/localtime:/etc/localtime:ro

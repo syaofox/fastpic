@@ -1,12 +1,15 @@
 import asyncio
+import hmac
 import os
 import re
+import secrets
 import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -20,6 +23,10 @@ from watcher import start_watcher
 PHOTOS_DIR = Path(__file__).parent / "photos"
 CACHE_DIR = Path(__file__).parent / "cache"
 PER_PAGE = 24
+
+# ── 访问密码保护 ──
+ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "").strip()
+_SESSION_TOKEN = secrets.token_hex(32) if ACCESS_PASSWORD else ""
 
 
 def _get_version() -> str:
@@ -71,6 +78,54 @@ app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 templates.env.filters["cache_key"] = _cache_filename
 templates.env.filters["urlencode_path"] = lambda s: quote(s or "", safe="")
+
+
+# ── 密码保护中间件 ──
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """如果设置了 ACCESS_PASSWORD，则拦截未认证请求并重定向到登录页"""
+    if not ACCESS_PASSWORD:
+        return await call_next(request)
+    path = request.url.path
+    # 白名单：登录页和 favicon 不需要验证
+    if path == "/login" or path == "/favicon.ico":
+        return await call_next(request)
+    token = request.cookies.get("fp_session")
+    if not token or not hmac.compare_digest(token, _SESSION_TOKEN):
+        return RedirectResponse(url="/login", status_code=302)
+    return await call_next(request)
+
+
+@app.get("/login")
+async def login_page(request: Request):
+    """显示登录页面"""
+    # 如果未启用密码保护，直接跳转首页
+    if not ACCESS_PASSWORD:
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse("login.html", {"request": request, "error": ""})
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    """验证密码并设置 session cookie"""
+    form = await request.form()
+    password = (form.get("password") or "").strip()
+    if hmac.compare_digest(password, ACCESS_PASSWORD):
+        response = RedirectResponse(url="/", status_code=302)
+        # session cookie：不设置 max_age，浏览器关闭即失效
+        response.set_cookie(key="fp_session", value=_SESSION_TOKEN, httponly=True, samesite="lax")
+        return response
+    # 密码错误
+    return templates.TemplateResponse("login.html", {"request": request, "error": "密码错误，请重试"})
+
+
+@app.get("/logout")
+async def logout():
+    """登出：清除 session cookie"""
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(key="fp_session")
+    return response
 
 
 def _escape_like(value: str) -> str:
