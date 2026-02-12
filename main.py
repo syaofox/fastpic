@@ -314,6 +314,49 @@ async def trigger_cleanup():
     return result
 
 
+@app.get("/api/stats")
+async def get_stats(session: AsyncSession = Depends(get_async_session)):
+    """获取数据库和文件系统统计信息"""
+    from sqlalchemy import func
+
+    # 数据库图片总数
+    total_images = (await session.execute(select(func.count(Image.id)))).scalar() or 0
+    # 数据库总文件大小
+    total_size = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
+
+    # 文件夹数量（从文件系统统计）
+    folder_count = 0
+    for dirpath, dirnames, _ in os.walk(PHOTOS_DIR):
+        # 排除隐藏文件夹
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        folder_count += len(dirnames)
+
+    # 缓存文件数量和大小
+    cache_count = 0
+    cache_size = 0
+    if CACHE_DIR.exists():
+        for f in CACHE_DIR.iterdir():
+            if f.suffix == ".webp":
+                cache_count += 1
+                cache_size += f.stat().st_size
+
+    return {
+        "total_images": total_images,
+        "total_size": total_size,
+        "folder_count": folder_count,
+        "cache_count": cache_count,
+        "cache_size": cache_size,
+        "photos_dir": str(PHOTOS_DIR.resolve()),
+        "cache_dir": str(CACHE_DIR.resolve()),
+    }
+
+
+@app.get("/settings")
+async def settings_page(request: Request):
+    """设置页面"""
+    return templates.TemplateResponse("settings.html", {"request": request})
+
+
 # ---------- 删除 API ----------
 
 class DeleteImagesRequest(BaseModel):

@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+{% block title %}设置 - FastPic{% endblock %}
+{% block content %}
+<div class="min-h-screen bg-slate-50">
+    <!-- 顶部栏 -->
+    <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4">
+        <a href="/" class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="返回首页">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        </a>
+        <h1 class="text-lg font-semibold text-slate-800">设置</h1>
+    </header>
+
+    <div class="max-w-4xl mx-auto px-6 py-6">
+        <!-- 标签页导航 -->
+        <div class="flex border-b border-slate-200 mb-6" id="settings-tabs">
+            <button type="button" data-tab="maintenance"
+                    class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-blue-500 text-blue-600"
+                    onclick="switchTab('maintenance')">
+                <span class="flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    数据维护
+                </span>
+            </button>
+            <button type="button" data-tab="about"
+                    class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
+                    onclick="switchTab('about')">
+                <span class="flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    关于
+                </span>
+            </button>
+        </div>
+
+        <!-- 标签页内容 -->
+        <!-- ======== 数据维护 ======== -->
+        <div id="tab-maintenance" class="tab-content">
+            <!-- 统计概览 -->
+            <div class="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-base font-semibold text-slate-800">数据概览</h2>
+                    <button type="button" onclick="loadStats()" class="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors">刷新</button>
+                </div>
+                <div id="stats-container" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div class="text-center p-3 bg-slate-50 rounded-lg">
+                        <div class="text-2xl font-bold text-slate-800" id="stat-images">-</div>
+                        <div class="text-xs text-slate-500 mt-1">图片总数</div>
+                    </div>
+                    <div class="text-center p-3 bg-slate-50 rounded-lg">
+                        <div class="text-2xl font-bold text-slate-800" id="stat-folders">-</div>
+                        <div class="text-xs text-slate-500 mt-1">文件夹数</div>
+                    </div>
+                    <div class="text-center p-3 bg-slate-50 rounded-lg">
+                        <div class="text-2xl font-bold text-slate-800" id="stat-size">-</div>
+                        <div class="text-xs text-slate-500 mt-1">图片总大小</div>
+                    </div>
+                    <div class="text-center p-3 bg-slate-50 rounded-lg">
+                        <div class="text-2xl font-bold text-slate-800" id="stat-cache">-</div>
+                        <div class="text-xs text-slate-500 mt-1">缓存大小</div>
+                    </div>
+                </div>
+                <div class="mt-4 text-xs text-slate-400 space-y-1" id="stats-paths"></div>
+            </div>
+
+            <!-- 操作区 -->
+            <div class="space-y-4">
+                <!-- 扫描新图片 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-6">
+                    <div class="flex items-start gap-4">
+                        <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-semibold text-slate-800 mb-1">扫描新图片</h3>
+                            <p class="text-sm text-slate-500 mb-3">扫描 photos 目录中尚未入库的图片，自动生成缩略图并写入数据库。适用于手动拷贝图片到目录后的场景。</p>
+                            <div class="flex items-center gap-3">
+                                <button type="button" id="scan-btn" onclick="triggerScan()"
+                                        class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    开始扫描
+                                </button>
+                                <span id="scan-status" class="text-sm text-slate-500"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 清理同步 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-6">
+                    <div class="flex items-start gap-4">
+                        <div class="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-semibold text-slate-800 mb-1">清理同步</h3>
+                            <p class="text-sm text-slate-500 mb-3">将数据库与文件系统同步，处理以下不一致问题：</p>
+                            <ul class="text-sm text-slate-500 mb-3 ml-4 list-disc space-y-1">
+                                <li><span class="text-slate-700 font-medium">幽灵记录</span>：原图已被外部删除，清理数据库记录和对应缓存</li>
+                                <li><span class="text-slate-700 font-medium">孤儿缓存</span>：缓存目录中无对应数据库记录的多余文件</li>
+                                <li><span class="text-slate-700 font-medium">缺失缓存</span>：数据库有记录但缩略图丢失，重新生成</li>
+                            </ul>
+                            <div class="flex items-center gap-3">
+                                <button type="button" id="cleanup-btn" onclick="triggerCleanup()"
+                                        class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    开始清理
+                                </button>
+                                <span id="cleanup-status" class="text-sm text-slate-500"></span>
+                            </div>
+                            <div id="cleanup-result" class="hidden mt-3 p-3 bg-slate-50 rounded-lg text-sm text-slate-600 space-y-1"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 完整重建 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-6">
+                    <div class="flex items-start gap-4">
+                        <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-semibold text-slate-800 mb-1">完整重建</h3>
+                            <p class="text-sm text-slate-500 mb-3">先执行清理同步，再执行全量扫描。适用于数据严重不一致、首次部署或迁移后的场景。耗时较长。</p>
+                            <div class="flex items-center gap-3">
+                                <button type="button" id="rebuild-btn" onclick="triggerRebuild()"
+                                        class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    完整重建
+                                </button>
+                                <span id="rebuild-status" class="text-sm text-slate-500"></span>
+                            </div>
+                            <div id="rebuild-result" class="hidden mt-3 p-3 bg-slate-50 rounded-lg text-sm text-slate-600 space-y-1"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======== 关于 ======== -->
+        <div id="tab-about" class="tab-content hidden">
+            <div class="bg-white rounded-xl border border-slate-200 p-6">
+                <div class="flex items-center gap-4 mb-6">
+                    <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a2.25 2.25 0 002.25-2.25V5.25a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v13.5a2.25 2.25 0 002.25 2.25z"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-800">FastPic</h2>
+                        <p class="text-sm text-slate-500">轻量级本地图片查看器</p>
+                    </div>
+                </div>
+                <div class="space-y-3 text-sm text-slate-600">
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-400 w-20 flex-shrink-0">技术栈</span>
+                        <span>FastAPI + Jinja2 + HTMX + Tailwind CSS</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-400 w-20 flex-shrink-0">数据库</span>
+                        <span>SQLite (SQLModel / SQLAlchemy)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-400 w-20 flex-shrink-0">缩略图</span>
+                        <span>Pillow (WebP, 300px)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 标签页切换
+function switchTab(tabName) {
+    // 更新按钮样式
+    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+        if (btn.getAttribute('data-tab') === tabName) {
+            btn.classList.add('border-blue-500', 'text-blue-600');
+            btn.classList.remove('border-transparent', 'text-slate-500', 'hover:text-slate-700');
+        } else {
+            btn.classList.remove('border-blue-500', 'text-blue-600');
+            btn.classList.add('border-transparent', 'text-slate-500', 'hover:text-slate-700');
+        }
+    });
+    // 切换内容区
+    document.querySelectorAll('.tab-content').forEach(function(content) {
+        content.classList.add('hidden');
+    });
+    var target = document.getElementById('tab-' + tabName);
+    if (target) target.classList.remove('hidden');
+}
+
+// 格式化文件大小
+function formatSize(bytes) {
+    if (bytes === 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+}
+
+// 加载统计信息
+function loadStats() {
+    fetch('/api/stats').then(function(r) { return r.json(); }).then(function(data) {
+        document.getElementById('stat-images').textContent = data.total_images.toLocaleString();
+        document.getElementById('stat-folders').textContent = data.folder_count.toLocaleString();
+        document.getElementById('stat-size').textContent = formatSize(data.total_size);
+        document.getElementById('stat-cache').textContent = formatSize(data.cache_size) + ' (' + data.cache_count + ')';
+        document.getElementById('stats-paths').innerHTML =
+            '<div>图片目录：<span class="text-slate-600 font-mono">' + data.photos_dir + '</span></div>' +
+            '<div>缓存目录：<span class="text-slate-600 font-mono">' + data.cache_dir + '</span></div>';
+    }).catch(function(err) {
+        console.error('加载统计失败:', err);
+    });
+}
+
+// 扫描
+function triggerScan() {
+    var btn = document.getElementById('scan-btn');
+    var status = document.getElementById('scan-status');
+    btn.disabled = true;
+    btn.textContent = '扫描中...';
+    status.textContent = '';
+    status.className = 'text-sm text-slate-500';
+
+    fetch('/scan', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            btn.textContent = '开始扫描';
+            status.textContent = '扫描完成，新增 ' + data.scanned + ' 张图片';
+            status.className = 'text-sm text-green-600';
+            loadStats();
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = '开始扫描';
+            status.textContent = '扫描失败: ' + err;
+            status.className = 'text-sm text-red-500';
+        });
+}
+
+// 清理
+function triggerCleanup() {
+    var btn = document.getElementById('cleanup-btn');
+    var status = document.getElementById('cleanup-status');
+    var resultEl = document.getElementById('cleanup-result');
+    btn.disabled = true;
+    btn.textContent = '清理中...';
+    status.textContent = '';
+    status.className = 'text-sm text-slate-500';
+    resultEl.classList.add('hidden');
+
+    fetch('/api/cleanup', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            btn.textContent = '开始清理';
+            var total = data.stale_removed + data.orphan_cache_removed + data.cache_regenerated;
+            if (total === 0) {
+                status.textContent = '清理完成，数据已一致，无需处理';
+                status.className = 'text-sm text-green-600';
+            } else {
+                status.textContent = '清理完成';
+                status.className = 'text-sm text-green-600';
+                resultEl.classList.remove('hidden');
+                resultEl.innerHTML =
+                    '<div>清除幽灵记录：<span class="font-medium text-slate-800">' + data.stale_removed + '</span> 条</div>' +
+                    '<div>清除孤儿缓存：<span class="font-medium text-slate-800">' + data.orphan_cache_removed + '</span> 个</div>' +
+                    '<div>重新生成缓存：<span class="font-medium text-slate-800">' + data.cache_regenerated + '</span> 个</div>';
+            }
+            loadStats();
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = '开始清理';
+            status.textContent = '清理失败: ' + err;
+            status.className = 'text-sm text-red-500';
+        });
+}
+
+// 完整重建
+function triggerRebuild() {
+    var btn = document.getElementById('rebuild-btn');
+    var status = document.getElementById('rebuild-status');
+    var resultEl = document.getElementById('rebuild-result');
+    btn.disabled = true;
+    btn.textContent = '重建中...';
+    status.textContent = '正在执行清理同步...';
+    status.className = 'text-sm text-slate-500';
+    resultEl.classList.add('hidden');
+
+    // 先清理
+    fetch('/api/cleanup', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(cleanupData) {
+            status.textContent = '清理完成，正在扫描新图片...';
+            // 再扫描
+            return fetch('/scan', { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function(scanData) {
+                    return { cleanup: cleanupData, scan: scanData };
+                });
+        })
+        .then(function(result) {
+            btn.disabled = false;
+            btn.textContent = '完整重建';
+            status.textContent = '重建完成';
+            status.className = 'text-sm text-green-600';
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML =
+                '<div class="font-medium text-slate-700 mb-1">清理结果：</div>' +
+                '<div class="ml-3">清除幽灵记录：' + result.cleanup.stale_removed + ' 条</div>' +
+                '<div class="ml-3">清除孤儿缓存：' + result.cleanup.orphan_cache_removed + ' 个</div>' +
+                '<div class="ml-3">重新生成缓存：' + result.cleanup.cache_regenerated + ' 个</div>' +
+                '<div class="font-medium text-slate-700 mt-2 mb-1">扫描结果：</div>' +
+                '<div class="ml-3">新增图片：' + result.scan.scanned + ' 张</div>';
+            loadStats();
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = '完整重建';
+            status.textContent = '重建失败: ' + err;
+            status.className = 'text-sm text-red-500';
+        });
+}
+
+// 页面加载时获取统计
+loadStats();
+</script>
+{% endblock %}
