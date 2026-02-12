@@ -1315,6 +1315,24 @@ document.addEventListener('keydown', function(e) {
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
 
+    function positionFilterPopover(btn, popover) {
+        var rect = btn.getBoundingClientRect();
+        var popW = 320; // w-80 = 20rem = 320px
+        // 优先放在按钮下方、右对齐
+        var top = rect.bottom + 8;
+        var left = rect.right - popW;
+        // 防止左侧溢出
+        if (left < 8) left = 8;
+        // 防止底部溢出：如果放不下就放到按钮上方
+        var popH = popover.scrollHeight || 340;
+        if (top + popH > window.innerHeight - 8) {
+            top = rect.top - popH - 8;
+            if (top < 8) top = 8;
+        }
+        popover.style.top = top + 'px';
+        popover.style.left = left + 'px';
+    }
+
     // 事件委托：点击筛选按钮打开/关闭面板
     document.body.addEventListener('click', function(e) {
         var filterBtn = e.target.closest('#filter-btn');
@@ -1322,7 +1340,12 @@ document.addEventListener('keydown', function(e) {
         var insidePopover = filterPopover && filterPopover.contains(e.target);
 
         if (filterBtn) {
-            if (filterPopover) filterPopover.classList.toggle('hidden');
+            if (filterPopover) {
+                filterPopover.classList.toggle('hidden');
+                if (!filterPopover.classList.contains('hidden')) {
+                    positionFilterPopover(filterBtn, filterPopover);
+                }
+            }
             return;
         }
 
