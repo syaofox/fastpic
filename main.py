@@ -434,16 +434,33 @@ async def create_folder(body: CreateFolderRequest):
 @app.post("/api/upload")
 async def upload_images(
     path: str = Form(""),
+    on_duplicate: str = Form("skip"),
     files: list[UploadFile] = File(...),
 ):
-    """上传图片到指定路径"""
+    """上传图片到指定路径
+    on_duplicate: skip=跳过重复, rename=重命名, overwrite=覆盖
+    重复判断：同目录下文件内容 MD5 相同即视为重复
+    """
+    import hashlib
     from scanner import IMAGE_EXTENSIONS
 
     target_path = (path or "").strip().strip("/")
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # 预计算目标目录中已有文件的哈希（用于内容去重）
+    existing_hashes: dict[str, str] = {}  # md5 -> filename
+    if target_dir.is_dir():
+        for existing in target_dir.iterdir():
+            if existing.is_file() and existing.suffix.lower() in IMAGE_EXTENSIONS:
+                try:
+                    h = hashlib.md5(existing.read_bytes()).hexdigest()
+                    existing_hashes[h] = existing.name
+                except OSError:
+                    pass
+
     uploaded = 0
+    skipped = 0
     errors = []
     for f in files:
         if not f.filename:
@@ -453,25 +470,63 @@ async def upload_images(
             errors.append(f"{f.filename}: 不支持的格式 {ext}")
             continue
 
-        # 安全文件名
-        safe_name = Path(f.filename).name
-        dest = target_dir / safe_name
-        # 若同名则添加序号
-        counter = 1
-        while dest.exists():
-            stem = Path(f.filename).stem
-            dest = target_dir / f"{stem}_{counter}{ext}"
-            counter += 1
-
         try:
             content = await f.read()
+        except Exception as e:
+            errors.append(f"{f.filename}: 读取失败 {e}")
+            continue
+
+        # 内容哈希
+        content_hash = hashlib.md5(content).hexdigest()
+
+        # 检查内容是否已存在
+        if content_hash in existing_hashes:
+            if on_duplicate == "skip":
+                skipped += 1
+                continue
+            elif on_duplicate == "overwrite":
+                # 覆盖同内容的已有文件
+                dest = target_dir / existing_hashes[content_hash]
+            else:
+                # rename: 内容相同但仍保存为新文件
+                dest = _unique_dest(target_dir, f.filename, ext)
+        else:
+            # 内容不重复，但文件名可能冲突
+            safe_name = Path(f.filename).name
+            dest = target_dir / safe_name
+            if dest.exists():
+                if on_duplicate == "skip":
+                    skipped += 1
+                    continue
+                elif on_duplicate == "overwrite":
+                    pass  # 直接覆盖
+                else:
+                    dest = _unique_dest(target_dir, f.filename, ext)
+
+        try:
             dest.write_bytes(content)
+            # 更新哈希表
+            existing_hashes[content_hash] = dest.name
             uploaded += 1
         except Exception as e:
             errors.append(f"{f.filename}: {str(e)}")
 
     # watchdog 会自动检测新文件并入库，无需手动 scan
-    return {"uploaded": uploaded, "errors": errors}
+    return {"uploaded": uploaded, "skipped": skipped, "errors": errors}
+
+
+def _unique_dest(target_dir: Path, filename: str, ext: str) -> Path:
+    """生成不冲突的文件路径"""
+    safe_name = Path(filename).name
+    dest = target_dir / safe_name
+    if not dest.exists():
+        return dest
+    stem = Path(filename).stem
+    counter = 1
+    while dest.exists():
+        dest = target_dir / f"{stem}_{counter}{ext}"
+        counter += 1
+    return dest
 
 
 # 静态目录挂载（放在路由之后，mount 会匹配前缀路径）

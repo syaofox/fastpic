@@ -795,6 +795,12 @@ document.addEventListener('keydown', function(e) {
                     '<input type="file" id="upload-file-input" multiple accept="image/*" class="hidden">' +
                     '<p class="text-xs text-slate-400 mt-2">支持 JPG、PNG、GIF、WebP、BMP</p>' +
                 '</div>' +
+                '<div class="mt-3 flex items-center gap-3 text-sm text-slate-600">' +
+                    '<span class="flex-shrink-0">重复文件：</span>' +
+                    '<label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="on_duplicate" value="skip" checked class="accent-blue-500"> 跳过</label>' +
+                    '<label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="on_duplicate" value="rename" class="accent-blue-500"> 重命名</label>' +
+                    '<label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="on_duplicate" value="overwrite" class="accent-blue-500"> 覆盖</label>' +
+                '</div>' +
                 '<div id="upload-file-list" class="mt-3 max-h-40 overflow-y-auto hidden"></div>' +
                 '<div id="upload-progress-wrapper" class="mt-3 hidden">' +
                     '<div class="flex items-center justify-between text-sm text-slate-600 mb-1">' +
@@ -887,6 +893,8 @@ document.addEventListener('keydown', function(e) {
 
             var formData = new FormData();
             formData.append('path', getCurrentPath());
+            var dupRadio = overlay.querySelector('input[name="on_duplicate"]:checked');
+            formData.append('on_duplicate', dupRadio ? dupRadio.value : 'skip');
             for (var i = 0; i < selectedFiles.length; i++) {
                 formData.append('files', selectedFiles[i]);
             }
@@ -907,15 +915,18 @@ document.addEventListener('keydown', function(e) {
                     var data = JSON.parse(xhr.responseText);
                     progressText.textContent = '上传完成';
                     progressBar.style.width = '100%';
-                    progressCount.textContent = data.uploaded + ' 张';
+                    var summary = data.uploaded + ' 张成功';
+                    if (data.skipped > 0) summary += '，' + data.skipped + ' 张跳过（重复）';
+                    progressCount.textContent = summary;
                     if (data.errors && data.errors.length > 0) {
                         errorEl.textContent = '部分失败: ' + data.errors.join('; ');
                         errorEl.classList.remove('hidden');
                     }
+                    var delay = (data.errors && data.errors.length > 0) ? 3000 : 1200;
                     setTimeout(function() {
                         overlay.remove();
                         refreshGalleryFromModal();
-                    }, 800);
+                    }, delay);
                 } else {
                     progressText.textContent = '上传失败';
                     errorEl.textContent = '服务器返回 ' + xhr.status;
