@@ -2,7 +2,7 @@
 {% block content %}
 <div class="flex h-screen" id="layout">
     <!-- 左侧文件夹树（可调节宽度） -->
-    <aside id="sidebar" class="bg-slate-800 text-slate-200 flex-shrink-0 overflow-y-auto" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 400px;">
+    <aside id="sidebar" class="bg-slate-800 text-slate-200 flex-shrink-0 overflow-y-auto" style="width: var(--sidebar-width, 160px); min-width: 160px; max-width: 800px;">
         <div class="p-4">
             <h2 class="font-semibold text-slate-100 mb-3">文件夹</h2>
             <div class="space-y-0" id="folder-tree">
@@ -155,7 +155,7 @@ document.addEventListener('keydown', function(e) {
 // 侧边栏宽度调节
 (function() {
     const SIDEBAR_MIN = 160;
-    const SIDEBAR_MAX = 400;
+    const SIDEBAR_MAX = 800;
     const STORAGE_KEY = 'fastpic_sidebar_width';
 
     function initSidebarWidth() {
