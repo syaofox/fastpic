@@ -113,7 +113,7 @@
         </header>
 
         <!-- 图片网格 -->
-        <div class="flex-1 overflow-y-auto p-4" id="scroll-container">
+        <div class="flex-1 overflow-y-auto p-4 transition-[padding] duration-200" id="scroll-container">
             <div id="gallery-container"
                  hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1"
                  hx-trigger="load"
@@ -124,6 +124,18 @@
             </div>
         </div>
     </main>
+</div>
+
+<!-- 批量选择时底部固定操作栏（滚动后删除按钮始终可见） -->
+<div id="select-mode-fab" class="hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-4 py-3 flex items-center justify-between gap-4">
+    <span id="select-mode-fab-count" class="text-sm font-medium text-slate-700">已选 0 项</span>
+    <div class="flex items-center gap-2">
+        <button type="button" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onclick="window.toggleSelectMode && window.toggleSelectMode()">取消选择</button>
+        <button type="button" id="select-mode-fab-delete" class="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.confirmDeleteSelected && window.confirmDeleteSelected()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            删除
+        </button>
+    </div>
 </div>
 
 <!-- 大图预览模态框 -->
@@ -1115,6 +1127,11 @@ document.addEventListener('keydown', function(e) {
         if (selAllBtn) selAllBtn.classList.add('hidden');
         var delBtn = document.getElementById('delete-selected-btn');
         if (delBtn) delBtn.classList.add('hidden');
+        // 隐藏底部固定操作栏
+        var fab = document.getElementById('select-mode-fab');
+        if (fab) fab.classList.add('hidden');
+        var scrollEl = document.getElementById('scroll-container');
+        if (scrollEl) scrollEl.classList.remove('pb-24');
         // 隐藏复选框，取消选中效果
         document.querySelectorAll('.select-checkbox').forEach(function(cb) { cb.classList.add('hidden'); });
         document.querySelectorAll('.selectable-item').forEach(function(item) { uncheckItem(item); });
@@ -1148,11 +1165,20 @@ document.addEventListener('keydown', function(e) {
         var total = _selectedImages.size + _selectedFolders.size;
         var delBtn = document.getElementById('delete-selected-btn');
         var countText = document.getElementById('delete-count-text');
+        var fab = document.getElementById('select-mode-fab');
+        var fabCount = document.getElementById('select-mode-fab-count');
+        var scrollEl = document.getElementById('scroll-container');
         if (total > 0) {
             if (delBtn) delBtn.classList.remove('hidden');
             if (countText) countText.textContent = '删除 (' + total + ')';
+            // 显示底部固定操作栏，滚动后删除按钮始终可见
+            if (fab) fab.classList.remove('hidden');
+            if (fabCount) fabCount.textContent = '已选 ' + total + ' 项';
+            if (scrollEl) scrollEl.classList.add('pb-24');
         } else {
             if (delBtn) delBtn.classList.add('hidden');
+            if (fab) fab.classList.add('hidden');
+            if (scrollEl) scrollEl.classList.remove('pb-24');
         }
     }
 
@@ -1253,9 +1279,15 @@ document.addEventListener('keydown', function(e) {
 
     function executeDelete(imageIds, folderPaths) {
         var delBtn = document.getElementById('delete-selected-btn');
+        var fabDelBtn = document.getElementById('select-mode-fab-delete');
         if (delBtn) {
             delBtn.disabled = true;
-            delBtn.querySelector('#delete-count-text').textContent = '删除中...';
+            var countText = delBtn.querySelector('#delete-count-text');
+            if (countText) countText.textContent = '删除中...';
+        }
+        if (fabDelBtn) {
+            fabDelBtn.disabled = true;
+            fabDelBtn.innerHTML = '<span>删除中...</span>';
         }
 
         var promises = [];
@@ -1293,10 +1325,12 @@ document.addEventListener('keydown', function(e) {
         }).catch(function(err) {
             console.error('删除失败:', err);
             alert('删除失败，请查看控制台日志');
-            if (delBtn) {
-                delBtn.disabled = false;
-                updateDeleteButton();
+            if (delBtn) delBtn.disabled = false;
+            if (fabDelBtn) {
+                fabDelBtn.disabled = false;
+                fabDelBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>\n            删除';
             }
+            updateDeleteButton();
         });
     }
 
