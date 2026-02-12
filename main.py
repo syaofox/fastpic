@@ -117,15 +117,19 @@ async def gallery(
     request: Request,
     path: str = "",
     search: str = "",
+    mode: str = "folder",
     page: int = 1,
     per_page: int = PER_PAGE,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """返回图片网格 HTML 片段（供 HTMX 调用）"""
+    """返回图片网格 HTML 片段（供 HTMX 调用）
+    mode: folder=仅当前层文件+子文件夹, waterfall=递归所有图片,无文件夹无文件名
+    """
     from sqlalchemy import func
 
     # 规范化路径：去除首尾空格和斜杠
     path = (path or "").strip().strip("/")
+    mode = "waterfall" if mode == "waterfall" else "folder"
 
     stmt = select(Image).order_by(Image.modified_at.desc())
     if path:
@@ -140,17 +144,31 @@ async def gallery(
     if search:
         stmt = stmt.where(Image.filename.ilike(f"%{search}%"))
 
+    # 文件夹模式：仅当前层直接文件，不含子文件夹下的图片
+    if mode == "folder":
+        if path:
+            escaped = _escape_like(path)
+            direct_filter = ~Image.relative_path.like(f"{escaped}/%/%", escape="\\")
+            stmt = stmt.where(direct_filter)
+        else:
+            stmt = stmt.where(~Image.relative_path.like("%/%"))
+
     # 总数
     count_stmt = select(func.count(Image.id))
     if path:
         count_stmt = count_stmt.where(path_filter)
     if search:
         count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
+    if mode == "folder":
+        if path:
+            count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
+        else:
+            count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
     total = (await session.execute(count_stmt)).scalar() or 0
 
-    # 子文件夹（仅首页且无搜索时）
+    # 子文件夹（仅文件夹模式、首页且无搜索时）
     subfolders: list[dict] = []
-    if page == 1 and not search:
+    if mode == "folder" and page == 1 and not search:
         subfolders = await _get_subfolders(session, path, path_filter)
 
     # 分页
@@ -172,6 +190,7 @@ async def gallery(
             "images": images,
             "path": path,
             "search": search,
+            "mode": mode,
             "page": page,
             "per_page": per_page,
             "has_next": has_next,

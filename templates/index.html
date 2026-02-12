@@ -16,6 +16,7 @@
                    hx-get="/gallery?path=&search=&page=1"
                    hx-target="#gallery-container"
                    hx-swap="innerHTML"
+                   hx-include="#mode-input"
                    hx-on:click="document.querySelector('[name=path]').value = ''">/ 全部</a>
                 {% macro render_folder(prefix, children, depth) %}
                 {% for part, sub in children.items() %}
@@ -40,6 +41,7 @@
                            hx-get="/gallery?path={{ path_str|urlencode_path }}&search=&page=1"
                            hx-target="#gallery-container"
                            hx-swap="innerHTML"
+                           hx-include="#mode-input"
                            hx-on:click="document.querySelector('[name=path]').value = '{{ path_str }}'">
                             {{ part }}
                         </a>
@@ -73,6 +75,7 @@
                 <div class="flex-1 flex items-center gap-2 pl-3 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
                     <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                     <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
+                    <input type="hidden" name="mode" id="mode-input" value="{{ request.query_params.get('mode', 'folder') }}">
                     <input type="search"
                            name="search"
                            placeholder="输入一段描述搜索照片: 在公园散步"
@@ -80,7 +83,7 @@
                            hx-get="/gallery"
                            hx-trigger="keyup changed delay:300ms"
                            hx-target="#gallery-container"
-                           hx-include="#path-input"
+                           hx-include="#path-input, #mode-input"
                            hx-vals='{"page": 1}'
                            hx-swap="innerHTML">
                 </div>
@@ -96,7 +99,7 @@
         <!-- 图片网格 -->
         <div class="flex-1 overflow-y-auto p-4" id="scroll-container">
             <div id="gallery-container"
-                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&page=1"
+                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&page=1"
                  hx-trigger="load"
                  hx-swap="innerHTML">
                 <div class="flex justify-center items-center h-64 text-slate-500">
@@ -279,7 +282,7 @@ document.addEventListener('keydown', function(e) {
     });
 })();
 
-// HTMX 交换后更新侧栏选中状态，并确保缩略图大小应用
+// HTMX 交换后更新侧栏选中状态、mode 输入、并确保缩略图大小应用
 document.body.addEventListener('htmx:afterSwap', function(ev) {
     if (ev.detail.target.id === 'gallery-container') {
         const saved = localStorage.getItem('fastpic_gallery_cols');
@@ -287,6 +290,9 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
         if (sc && saved) sc.style.setProperty('--gallery-cols', saved);
         const marker = document.getElementById('current-path-marker');
         const path = marker ? (marker.getAttribute('data-path') || '') : '';
+        const mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
+        const modeInput = document.getElementById('mode-input');
+        if (modeInput) modeInput.value = mode;
         document.querySelectorAll('#sidebar .folder-link').forEach(function(link) {
             const isCurrent = link.getAttribute('data-path') === path;
             link.classList.toggle('bg-blue-50', isCurrent);

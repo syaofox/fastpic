@@ -1,10 +1,10 @@
 {% if not append %}
-<div id="current-path-marker" data-path="{{ path }}" class="hidden"></div>
+<div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" class="hidden"></div>
 <!-- 面包屑 -->
 <nav class="text-sm text-slate-600 mb-3">
     <a href="/"
        class="hover:text-blue-600 transition-colors"
-       hx-get="/gallery?path=&search={{ search|urlencode_path }}&page=1"
+       hx-get="/gallery?path=&search={{ search|urlencode_path }}&mode={{ mode }}&page=1"
        hx-target="#gallery-container"
        hx-swap="innerHTML"
        hx-on:click="document.querySelector('[name=path]').value = ''">全部文件夹</a>
@@ -16,7 +16,7 @@
     {% else %}
     <a href="?path={{ seg_path|urlencode_path }}"
        class="hover:text-blue-600 transition-colors"
-       hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&page=1"
+       hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&page=1"
        hx-target="#gallery-container"
        hx-swap="innerHTML"
        hx-on:click="document.querySelector('[name=path]').value = '{{ seg_path }}'">{{ breadcrumb_parts[i] }}</a>
@@ -40,8 +40,16 @@
             </div>
         </div>
     </div>
-    <button type="button" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="列表视图">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    <button type="button" id="view-mode-btn" class="p-2 rounded transition-colors {{ 'bg-blue-100 text-blue-600' if mode == 'folder' else 'bg-slate-100 text-slate-700 hover:bg-slate-100' }}" title="{{ '切换到瀑布流' if mode == 'folder' else '切换到文件夹' }}"
+            hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ 'waterfall' if mode == 'folder' else 'folder' }}&page=1"
+            hx-target="#gallery-container"
+            hx-swap="innerHTML"
+            hx-on:click="document.querySelector('[name=mode]').value = '{{ 'waterfall' if mode == 'folder' else 'folder' }}'">
+        {% if mode == 'folder' %}
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        {% else %}
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z"/></svg>
+        {% endif %}
     </button>
     <button type="button" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="筛选">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
@@ -51,13 +59,13 @@
     </button>
 </div>
 
-<div id="gallery-grid" class="grid gap-4" style="grid-template-columns: repeat(var(--gallery-cols, 4), minmax(0, 1fr))">
+<div id="gallery-grid" class="gap-4 {{ 'grid' if mode == 'folder' else 'waterfall-grid' }}" style="{% if mode == 'folder' %}grid-template-columns: repeat(var(--gallery-cols, 4), minmax(0, 1fr));{% else %}columns: var(--gallery-cols, 4); column-gap: 1rem;{% endif %}">
 {% endif %}
     {% if not append %}
     {% for sub in subfolders %}
     <a href="?path={{ sub.full_path|urlencode_path }}"
        class="block group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white"
-       hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&page=1"
+       hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&mode={{ mode }}&page=1"
        hx-target="#gallery-container"
        hx-swap="innerHTML"
        hx-on:click="document.querySelector('[name=path]').value = '{{ sub.full_path }}'">
@@ -79,19 +87,21 @@
     {% endif %}
     {% for img in images %}
     <a href="/photos/{{ img.relative_path }}"
-       class="block rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white"
+       class="block rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white {{ 'break-inside-avoid mb-4' if mode == 'waterfall' else '' }}"
        onclick="event.preventDefault(); openModal('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}]);">
-        <div class="aspect-square overflow-hidden bg-slate-100">
+        <div class="overflow-hidden bg-slate-100 {{ 'aspect-square' if mode == 'folder' else '' }}">
             <img src="/cache/{{ img.relative_path|cache_key }}"
                  alt="{{ img.filename }}"
-                 class="w-full h-full object-cover"
+                 class="w-full {{ 'h-full object-cover' if mode == 'folder' else 'h-auto' }}"
                  loading="lazy">
         </div>
+        {% if mode == 'folder' %}
         <div class="px-2 py-1 text-xs text-slate-600 truncate">{{ img.filename }}</div>
+        {% endif %}
     </a>
     {% endfor %}
 {% if has_next %}
-<div hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&page={{ page + 1 }}"
+<div hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&page={{ page + 1 }}"
      hx-trigger="intersect once root:#scroll-container threshold:0"
      hx-swap="beforeend"
      hx-target="#gallery-grid">
