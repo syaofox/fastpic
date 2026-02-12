@@ -45,13 +45,14 @@
             background: rgb(148 163 184);
         }
 
-        /* 瀑布流：多列布局 */
-        .waterfall-grid {
-            column-fill: balance;
+        /* 瀑布流：JS 列布局 */
+        #wf-row {
+            display: flex;
+            align-items: flex-start;
         }
-        .waterfall-grid > a {
-            break-inside: avoid;
-            page-break-inside: avoid;
+        #wf-row > .wf-col {
+            flex: 1;
+            min-width: 0;
         }
     </style>
 </head>

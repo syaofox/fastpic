@@ -201,6 +201,8 @@ document.addEventListener('keydown', function(e) {
         if (valEl) valEl.textContent = c + ' 列';
         const slider = document.getElementById('thumbnail-size-slider');
         if (slider) slider.value = c;
+        // 瀑布流模式下重建列布局
+        if (typeof window.rebuildWaterfall === 'function') window.rebuildWaterfall();
     }
 
     initThumbnailSize();
@@ -279,6 +281,179 @@ document.addEventListener('keydown', function(e) {
         document.body.style.userSelect = 'none';
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
+    });
+})();
+
+// 瀑布流布局管理器（JS 多列，避免 CSS columns 重排）
+(function() {
+    var wfColumns = [];
+    var wfHeights = [];
+    var wfInitialized = false;
+
+    function getColCount() {
+        var saved = localStorage.getItem('fastpic_gallery_cols');
+        return saved ? Math.max(2, Math.min(8, parseInt(saved, 10))) : 4;
+    }
+
+    function isWaterfallMode() {
+        var marker = document.getElementById('current-path-marker');
+        return marker && marker.getAttribute('data-mode') === 'waterfall';
+    }
+
+    function getShortestCol() {
+        var minIdx = 0;
+        for (var i = 1; i < wfHeights.length; i++) {
+            if (wfHeights[i] < wfHeights[minIdx]) minIdx = i;
+        }
+        return minIdx;
+    }
+
+    function getItemHeight(item) {
+        var w = parseInt(item.getAttribute('data-w')) || 0;
+        var h = parseInt(item.getAttribute('data-h')) || 0;
+        if (w > 0 && h > 0) return (h / w) * 1000;
+        return 1000;
+    }
+
+    function placeItem(item) {
+        var idx = getShortestCol();
+        wfColumns[idx].appendChild(item);
+        wfHeights[idx] += getItemHeight(item);
+    }
+
+    function initWaterfall() {
+        var grid = document.getElementById('gallery-grid');
+        if (!grid) return;
+
+        var colCount = getColCount();
+
+        // 收集所有直接子元素（图片链接 + 滚动哨兵）
+        var items = [];
+        var sentinel = null;
+        Array.from(grid.children).forEach(function(child) {
+            if (child.tagName === 'A') {
+                items.push(child);
+            } else if (child.hasAttribute('hx-get') && child.hasAttribute('hx-trigger')) {
+                sentinel = child;
+            }
+        });
+
+        // 移除旧元素
+        items.forEach(function(item) { item.remove(); });
+        if (sentinel) sentinel.remove();
+
+        // 移除可能存在的旧 wf-row
+        var oldRow = document.getElementById('wf-row');
+        if (oldRow) oldRow.remove();
+
+        // 创建列容器
+        var row = document.createElement('div');
+        row.id = 'wf-row';
+        grid.appendChild(row);
+
+        wfColumns = [];
+        wfHeights = new Array(colCount).fill(0);
+        for (var i = 0; i < colCount; i++) {
+            var col = document.createElement('div');
+            col.className = 'wf-col';
+            row.appendChild(col);
+            wfColumns.push(col);
+        }
+
+        // 按最短列分配图片
+        items.forEach(function(item) { placeItem(item); });
+
+        // 哨兵放在 grid 最后（在列容器下方，确保滚动到底部才触发）
+        if (sentinel) grid.appendChild(sentinel);
+
+        wfInitialized = true;
+    }
+
+    function distributeNew() {
+        var grid = document.getElementById('gallery-grid');
+        if (!grid) return;
+
+        var wfRow = document.getElementById('wf-row');
+        if (!wfRow) return;
+
+        // 找到所有不在 wf-row 中的直接子元素（HTMX 追加的新内容）
+        var newImages = [];
+        var sentinels = [];
+        Array.from(grid.children).forEach(function(child) {
+            if (child === wfRow) return;
+            if (child.tagName === 'A') {
+                newImages.push(child);
+            } else if (child.hasAttribute('hx-get') && child.hasAttribute('hx-trigger')) {
+                sentinels.push(child);
+            }
+        });
+
+        // 将新图片分配到最短列
+        newImages.forEach(function(item) {
+            item.remove();
+            placeItem(item);
+        });
+
+        // 只保留最新的哨兵，移除旧的
+        if (sentinels.length > 1) {
+            sentinels.slice(0, -1).forEach(function(s) { s.remove(); });
+        }
+    }
+
+    function rebuildWaterfall() {
+        if (!isWaterfallMode() || !wfInitialized) return;
+
+        var grid = document.getElementById('gallery-grid');
+        if (!grid) return;
+
+        var wfRow = document.getElementById('wf-row');
+        if (!wfRow) return;
+
+        // 从各列中收集所有图片
+        var items = [];
+        wfColumns.forEach(function(col) {
+            Array.from(col.children).forEach(function(child) {
+                items.push(child);
+            });
+        });
+
+        // 收集哨兵
+        var sentinel = null;
+        Array.from(grid.children).forEach(function(child) {
+            if (child !== wfRow && child.hasAttribute('hx-get') && child.hasAttribute('hx-trigger')) {
+                sentinel = child;
+            }
+        });
+
+        // 清空
+        wfRow.remove();
+        if (sentinel) sentinel.remove();
+
+        // 重新放回 grid
+        items.forEach(function(item) { grid.appendChild(item); });
+        if (sentinel) grid.appendChild(sentinel);
+
+        // 重新初始化
+        initWaterfall();
+    }
+
+    // 暴露给外部（缩略图大小改变时调用）
+    window.rebuildWaterfall = rebuildWaterfall;
+
+    // 监听 HTMX 交换事件
+    document.body.addEventListener('htmx:afterSettle', function(ev) {
+        if (ev.detail.target.id === 'gallery-container') {
+            // 全量加载（首页 / 切换模式 / 切换文件夹）
+            wfInitialized = false;
+            wfColumns = [];
+            wfHeights = [];
+            if (isWaterfallMode()) {
+                initWaterfall();
+            }
+        } else if (ev.detail.target.id === 'gallery-grid' && wfInitialized && isWaterfallMode()) {
+            // 追加加载（无限滚动）
+            distributeNew();
+        }
     });
 })();
 

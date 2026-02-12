@@ -59,7 +59,7 @@
     </button>
 </div>
 
-<div id="gallery-grid" class="{{ 'gap-4 grid' if mode == 'folder' else 'waterfall-grid' }}" style="{% if mode == 'folder' %}grid-template-columns: repeat(var(--gallery-cols, 4), minmax(0, 1fr));{% else %}columns: var(--gallery-cols, 4); column-gap: 0;{% endif %}">
+<div id="gallery-grid" class="{{ 'gap-4 grid' if mode == 'folder' else '' }}" style="{% if mode == 'folder' %}grid-template-columns: repeat(var(--gallery-cols, 4), minmax(0, 1fr));{% endif %}">
 {% endif %}
     {% if not append %}
     {% for sub in subfolders %}
@@ -87,7 +87,8 @@
     {% endif %}
     {% for img in images %}
     <a href="/photos/{{ img.relative_path }}"
-       class="block rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white {{ 'break-inside-avoid mb-0' if mode == 'waterfall' else '' }}"
+       class="block rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white"
+       {% if mode == 'waterfall' %}data-w="{{ img.width }}" data-h="{{ img.height }}"{% endif %}
        onclick="event.preventDefault(); openModal('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}]);">
         <div class="overflow-hidden bg-slate-100 {{ 'aspect-square' if mode == 'folder' else '' }}">
             <img src="/cache/{{ img.relative_path|cache_key }}"
