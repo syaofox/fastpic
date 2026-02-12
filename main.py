@@ -1,10 +1,11 @@
 import asyncio
+import os
 import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -63,14 +64,26 @@ def _escape_like(value: str) -> str:
 
 
 def _get_folder_tree(rel_paths: list[str]) -> list[list[str]]:
-    """从 relative_path 列表提取文件夹树，返回 [['2024'], ['2024','01'], ...]"""
+    """从 relative_path 列表 + 文件系统提取文件夹树，返回 [['2024'], ['2024','01'], ...]
+    同时扫描文件系统，确保空文件夹也出现在树中。"""
     folders: set[tuple[str, ...]] = set()
     folders.add(())  # 根
+    # 从数据库路径提取
     for rp in rel_paths:
         parts = rp.split("/")
         if len(parts) > 1:
             for i in range(1, len(parts)):
                 folders.add(tuple(parts[:i]))
+    # 从文件系统扫描所有子目录
+    def _scan_dirs(base: Path, prefix: tuple[str, ...] = ()):
+        if not base.is_dir():
+            return
+        for child in sorted(base.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                path_tuple = prefix + (child.name,)
+                folders.add(path_tuple)
+                _scan_dirs(child, path_tuple)
+    _scan_dirs(PHOTOS_DIR)
     return [list(f) for f in sorted(folders) if f]
 
 
@@ -101,8 +114,9 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
 
 
 async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list[dict]:
-    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图"""
-    # 查询该路径下所有 relative_path（用于提取子文件夹名）
+    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。
+    同时扫描文件系统，确保空文件夹也能显示。"""
+    # 1) 从数据库中提取子文件夹名
     subfolder_stmt = select(Image.relative_path)
     if path:
         subfolder_stmt = subfolder_stmt.where(path_filter)
@@ -117,6 +131,14 @@ async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list
         if len(parts) > path_depth + 1:
             subfolder_names.add(parts[path_depth])
 
+    # 2) 从文件系统中扫描实际子目录（捕获空文件夹）
+    fs_dir = PHOTOS_DIR / path if path else PHOTOS_DIR
+    if fs_dir.is_dir():
+        for child in fs_dir.iterdir():
+            if child.is_dir() and not child.name.startswith("."):
+                subfolder_names.add(child.name)
+
+    # 3) 为每个子文件夹取缩略图
     subfolders: list[dict] = []
     for name in sorted(subfolder_names):
         full_path = f"{path}/{name}" if path else name
@@ -379,6 +401,77 @@ async def delete_folders(
 
     await session.commit()
     return {"deleted_images": total_images, "deleted_folders": total_folders}
+
+
+# ---------- 创建文件夹 & 上传 API ----------
+
+class CreateFolderRequest(BaseModel):
+    path: str  # 当前所在路径
+    name: str  # 新文件夹名
+
+
+@app.post("/api/create-folder")
+async def create_folder(body: CreateFolderRequest):
+    """在指定路径下创建子文件夹"""
+    parent = (body.path or "").strip().strip("/")
+    name = body.name.strip().strip("/")
+    if not name:
+        return {"error": "文件夹名不能为空", "ok": False}
+    # 安全检查：不允许 .. 和绝对路径
+    if ".." in name or "/" in name or "\\" in name:
+        return {"error": "文件夹名不合法", "ok": False}
+
+    folder_path = PHOTOS_DIR / parent / name if parent else PHOTOS_DIR / name
+    if folder_path.exists():
+        return {"error": "文件夹已存在", "ok": False}
+
+    folder_path.mkdir(parents=True, exist_ok=True)
+    rel = f"{parent}/{name}" if parent else name
+    print(f"[api] 创建文件夹: {rel}", flush=True)
+    return {"ok": True, "path": rel}
+
+
+@app.post("/api/upload")
+async def upload_images(
+    path: str = Form(""),
+    files: list[UploadFile] = File(...),
+):
+    """上传图片到指定路径"""
+    from scanner import IMAGE_EXTENSIONS
+
+    target_path = (path or "").strip().strip("/")
+    target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    uploaded = 0
+    errors = []
+    for f in files:
+        if not f.filename:
+            continue
+        ext = Path(f.filename).suffix.lower()
+        if ext not in IMAGE_EXTENSIONS:
+            errors.append(f"{f.filename}: 不支持的格式 {ext}")
+            continue
+
+        # 安全文件名
+        safe_name = Path(f.filename).name
+        dest = target_dir / safe_name
+        # 若同名则添加序号
+        counter = 1
+        while dest.exists():
+            stem = Path(f.filename).stem
+            dest = target_dir / f"{stem}_{counter}{ext}"
+            counter += 1
+
+        try:
+            content = await f.read()
+            dest.write_bytes(content)
+            uploaded += 1
+        except Exception as e:
+            errors.append(f"{f.filename}: {str(e)}")
+
+    # watchdog 会自动检测新文件并入库，无需手动 scan
+    return {"uploaded": uploaded, "errors": errors}
 
 
 # 静态目录挂载（放在路由之后，mount 会匹配前缀路径）
