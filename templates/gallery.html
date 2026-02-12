@@ -12,8 +12,8 @@
     </a>
     {% endfor %}
 {% if has_next %}
-<div hx-get="/gallery?path={{ path }}&search={{ search }}&page={{ page + 1 }}"
-     hx-trigger="revealed"
+<div hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&page={{ page + 1 }}"
+     hx-trigger="intersect once root:#scroll-container threshold:0"
      hx-swap="beforeend"
      hx-target="#gallery-grid">
 </div>

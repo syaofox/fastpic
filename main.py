@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +31,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 templates.env.filters["cache_key"] = _cache_filename
+templates.env.filters["urlencode_path"] = lambda s: quote(s or "", safe="")
+
+
+def _escape_like(value: str) -> str:
+    """转义 SQL LIKE 中的 % 和 _，避免被当作通配符"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _get_folder_tree(rel_paths: list[str]) -> list[list[str]]:
@@ -82,20 +89,25 @@ async def gallery(
     """返回图片网格 HTML 片段（供 HTMX 调用）"""
     from sqlalchemy import func
 
+    # 规范化路径：去除首尾空格和斜杠
+    path = (path or "").strip().strip("/")
+
     stmt = select(Image).order_by(Image.modified_at.desc())
     if path:
-        stmt = stmt.where(
-            (Image.relative_path.like(f"{path}/%")) | (Image.relative_path == path)
+        # 转义 LIKE 通配符 % 和 _，避免错误匹配
+        escaped = _escape_like(path)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == path)
         )
+        stmt = stmt.where(path_filter)
     if search:
         stmt = stmt.where(Image.filename.ilike(f"%{search}%"))
 
     # 总数
     count_stmt = select(func.count(Image.id))
     if path:
-        count_stmt = count_stmt.where(
-            (Image.relative_path.like(f"{path}/%")) | (Image.relative_path == path)
-        )
+        count_stmt = count_stmt.where(path_filter)
     if search:
         count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
     total = (await session.execute(count_stmt)).scalar() or 0
@@ -123,6 +135,38 @@ async def gallery(
             "append": page > 1,
         },
     )
+
+
+@app.get("/debug/path-count")
+async def debug_path_count(
+    path: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """调试：查看指定路径下的图片数量（用于排查路径过滤问题）"""
+    from sqlalchemy import func
+
+    path = (path or "").strip().strip("/")
+    if not path:
+        total = (await session.execute(select(func.count(Image.id)))).scalar() or 0
+        return {"path": "", "total": total, "note": "path 为空时返回全部"}
+
+    escaped = _escape_like(path)
+    path_filter = (
+        Image.relative_path.like(f"{escaped}/%", escape="\\")
+        | (Image.relative_path == path)
+    )
+    total = (
+        await session.execute(
+            select(func.count(Image.id)).where(path_filter)
+        )
+    ).scalar() or 0
+
+    # 取前 5 条示例路径
+    result = await session.execute(
+        select(Image.relative_path).where(path_filter).limit(5)
+    )
+    sample_paths = [r[0] for r in result.fetchall()]
+    return {"path": path, "total": total, "sample_paths": sample_paths}
 
 
 @app.post("/scan")
