@@ -44,15 +44,29 @@ def _get_folder_tree(rel_paths: list[str]) -> list[list[str]]:
     return [list(f) for f in sorted(folders) if f]
 
 
+def _build_nested_tree(flat_folders: list[list[str]]) -> dict:
+    """将扁平文件夹列表转为嵌套树结构，用于可折叠渲染。
+    返回格式: {'2024': {'01': {'Jan': {}}, '02': {}}, '2025': {}}"""
+    root: dict = {}
+    for parts in flat_folders:
+        d = root
+        for part in parts:
+            if part not in d:
+                d[part] = {}
+            d = d[part]
+    return root
+
+
 @app.get("/")
 async def index(request: Request, session: AsyncSession = Depends(get_async_session)):
     """返回主页框架"""
     result = await session.execute(select(Image.relative_path))
     rel_paths = [r[0] for r in result.fetchall()]
     folder_tree = _get_folder_tree(rel_paths)
+    nested_tree = _build_nested_tree(folder_tree)
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "folder_tree": folder_tree},
+        {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree},
     )
 
 

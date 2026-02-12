@@ -1,30 +1,61 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex h-screen">
-    <!-- 左侧文件夹树 -->
-    <aside class="w-[220px] bg-slate-800 text-slate-200 flex-shrink-0 overflow-y-auto">
+<div class="flex h-screen" id="layout">
+    <!-- 左侧文件夹树（可调节宽度） -->
+    <aside id="sidebar" class="bg-slate-800 text-slate-200 flex-shrink-0 overflow-y-auto" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 400px;">
         <div class="p-4">
             <h2 class="font-semibold text-slate-100 mb-3">文件夹</h2>
-            <div class="space-y-1" id="folder-tree">
+            <div class="space-y-0" id="folder-tree">
                 <a href="/" class="block px-3 py-2 rounded hover:bg-slate-700 transition-colors"
                    hx-get="/gallery?path=&search=&page=1"
                    hx-target="#gallery-container"
                    hx-swap="innerHTML"
                    hx-on:click="document.querySelector('[name=path]').value = ''">/ 全部</a>
-                {% for folder in folder_tree %}
-                <a href="?path={{ folder|join('/') }}"
-                   class="block px-3 py-2 rounded hover:bg-slate-700 transition-colors"
-                   style="padding-left: {{ 12 + folder|length * 12 }}px;"
-                   hx-get="/gallery?path={{ folder|join('/') }}&search=&page=1"
-                   hx-target="#gallery-container"
-                   hx-swap="innerHTML"
-                   hx-on:click="document.querySelector('[name=path]').value = '{{ folder|join('/') }}'">
-                    {{ folder|join('/') }}
-                </a>
+                {% macro render_folder(prefix, children, depth) %}
+                {% for part, sub in children.items() %}
+                {% set path_parts = prefix + [part] %}
+                {% set path_str = path_parts|join('/') %}
+                <div class="folder-node" data-path="{{ path_str }}">
+                    <div class="flex items-center group" style="padding-left: {{ 12 + depth * 16 }}px;">
+                        {% if sub %}
+                        <button type="button" class="folder-toggle w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-slate-600 text-slate-400 group-hover:text-slate-200 transition-colors"
+                                data-expanded="false"
+                                onclick="toggleFolder(this); event.stopPropagation();"
+                                aria-label="展开">
+                            <svg class="chevron w-3 h-3 transition-transform" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2L8 6 4 10"/></svg>
+                        </button>
+                        {% else %}
+                        <span class="w-5 flex-shrink-0"></span>
+                        {% endif %}
+                        <a href="?path={{ path_str }}"
+                           class="flex-1 min-w-0 px-2 py-1.5 rounded hover:bg-slate-700 transition-colors truncate"
+                           hx-get="/gallery?path={{ path_str }}&search=&page=1"
+                           hx-target="#gallery-container"
+                           hx-swap="innerHTML"
+                           hx-on:click="document.querySelector('[name=path]').value = '{{ path_str }}'">
+                            {{ part }}
+                        </a>
+                    </div>
+                    {% if sub %}
+                    <div class="folder-children hidden">
+                        {{ render_folder(path_parts, sub, depth + 1) }}
+                    </div>
+                    {% endif %}
+                </div>
                 {% endfor %}
+                {% endmacro %}
+                {{ render_folder([], nested_tree, 0) }}
             </div>
         </div>
     </aside>
+
+    <!-- 拖拽调节手柄 -->
+    <div id="resize-handle"
+         class="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-blue-400/50 active:bg-blue-400/70 transition-colors flex items-center justify-center group"
+         role="separator"
+         aria-label="调节侧边栏宽度">
+        <div class="w-0.5 h-8 bg-slate-500 group-hover:bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
+    </div>
 
     <!-- 右侧主区 -->
     <main class="flex-1 flex flex-col overflow-hidden">
@@ -67,6 +98,24 @@
 </div>
 
 <script>
+function toggleFolder(btn) {
+    const node = btn.closest('.folder-node');
+    const children = node.querySelector(':scope > .folder-children');
+    if (!children) return;
+    const expanded = btn.getAttribute('data-expanded') === 'true';
+        if (expanded) {
+            children.classList.add('hidden');
+            btn.querySelector('.chevron').classList.remove('-rotate-90');
+            btn.setAttribute('data-expanded', 'false');
+            btn.setAttribute('aria-label', '展开');
+        } else {
+            children.classList.remove('hidden');
+            btn.querySelector('.chevron').classList.add('-rotate-90');
+            btn.setAttribute('data-expanded', 'true');
+            btn.setAttribute('aria-label', '折叠');
+        }
+}
+
 let modalImages = [];
 let modalIndex = 0;
 
@@ -102,5 +151,57 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'ArrowLeft') { prevImage(); }
     if (e.key === 'ArrowRight') { nextImage(); }
 });
+
+// 侧边栏宽度调节
+(function() {
+    const SIDEBAR_MIN = 160;
+    const SIDEBAR_MAX = 400;
+    const STORAGE_KEY = 'fastpic_sidebar_width';
+
+    function initSidebarWidth() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            const w = parseInt(saved, 10);
+            if (w >= SIDEBAR_MIN && w <= SIDEBAR_MAX) {
+                document.documentElement.style.setProperty('--sidebar-width', w + 'px');
+            }
+        }
+    }
+
+    function setSidebarWidth(px) {
+        const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, px));
+        document.documentElement.style.setProperty('--sidebar-width', w + 'px');
+        localStorage.setItem(STORAGE_KEY, String(w));
+    }
+
+    initSidebarWidth();
+
+    const handle = document.getElementById('resize-handle');
+    const sidebar = document.getElementById('sidebar');
+
+    handle.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const startX = e.clientX;
+        const startWidth = sidebar.getBoundingClientRect().width;
+
+        function onMouseMove(e) {
+            const dx = e.clientX - startX;
+            setSidebarWidth(startWidth + dx);
+        }
+
+        function onMouseUp() {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+})();
 </script>
 {% endblock %}
