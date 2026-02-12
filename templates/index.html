@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex h-screen" id="layout">
-    <!-- 左侧文件夹树（可调节宽度） -->
-    <aside id="sidebar" class="bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 800px;">
+    <!-- 左侧文件夹树（可调节宽度，默认隐藏） -->
+    <aside id="sidebar" class="bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto hidden" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 800px;">
         <div class="p-4">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="font-semibold text-slate-800">全部文件夹</h2>
-                <button type="button" class="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="折叠">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                <button type="button" class="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="隐藏文件夹树" title="隐藏文件夹树" onclick="toggleSidebar()">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
                 </button>
             </div>
             <div class="space-y-0" id="folder-tree">
@@ -59,9 +59,9 @@
         </div>
     </aside>
 
-    <!-- 拖拽调节手柄 -->
+    <!-- 拖拽调节手柄（默认隐藏，跟随侧栏） -->
     <div id="resize-handle"
-         class="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-blue-100 transition-colors flex items-center justify-center group bg-slate-100"
+         class="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-blue-100 transition-colors flex items-center justify-center group bg-slate-100 hidden"
          role="separator"
          aria-label="调节侧边栏宽度">
         <div class="w-0.5 h-8 bg-slate-400 group-hover:bg-blue-500 rounded-full opacity-60 group-hover:opacity-100 transition-opacity"></div>
@@ -72,6 +72,13 @@
         <!-- 顶部栏：搜索 + AI 搜索 + 图标 -->
         <header class="p-4 bg-white border-b border-slate-200 flex-shrink-0">
             <div class="flex items-center gap-3">
+                <!-- 侧边栏切换按钮 -->
+                <button type="button" id="sidebar-toggle-btn"
+                        class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors flex-shrink-0"
+                        title="显示/隐藏文件夹树"
+                        onclick="toggleSidebar()">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                </button>
                 <div class="flex-1 flex items-center gap-2 pl-3 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
                     <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                     <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
@@ -120,6 +127,42 @@
 </div>
 
 <script>
+// 侧边栏开关（默认隐藏，localStorage 持久化）
+(function() {
+    const SIDEBAR_VISIBLE_KEY = 'fastpic_sidebar_visible';
+
+    function isSidebarVisible() {
+        return localStorage.getItem(SIDEBAR_VISIBLE_KEY) === 'true';
+    }
+
+    function applySidebarState(visible) {
+        const sidebar = document.getElementById('sidebar');
+        const handle = document.getElementById('resize-handle');
+        const btn = document.getElementById('sidebar-toggle-btn');
+        if (visible) {
+            sidebar.classList.remove('hidden');
+            handle.classList.remove('hidden');
+            btn.classList.add('bg-blue-50', 'text-blue-600');
+            btn.classList.remove('text-slate-500');
+        } else {
+            sidebar.classList.add('hidden');
+            handle.classList.add('hidden');
+            btn.classList.remove('bg-blue-50', 'text-blue-600');
+            btn.classList.add('text-slate-500');
+        }
+    }
+
+    // 页面加载时恢复状态
+    applySidebarState(isSidebarVisible());
+
+    // 全局切换函数
+    window.toggleSidebar = function() {
+        const visible = !isSidebarVisible();
+        localStorage.setItem(SIDEBAR_VISIBLE_KEY, String(visible));
+        applySidebarState(visible);
+    };
+})();
+
 function toggleFolder(btn) {
     const node = btn.closest('.folder-node');
     const children = node.querySelector(':scope > .folder-children');
