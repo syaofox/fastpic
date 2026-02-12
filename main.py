@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -19,6 +20,20 @@ from watcher import start_watcher
 PHOTOS_DIR = Path(__file__).parent / "photos"
 CACHE_DIR = Path(__file__).parent / "cache"
 PER_PAGE = 24
+
+
+def _get_version() -> str:
+    """从 pyproject.toml 读取版本号"""
+    pyproject_path = Path(__file__).parent / "pyproject.toml"
+    if pyproject_path.exists():
+        text = pyproject_path.read_text(encoding="utf-8")
+        m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        if m:
+            return m.group(1)
+    return "unknown"
+
+
+APP_VERSION = _get_version()
 
 PHOTOS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
@@ -109,7 +124,7 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
     nested_tree = _build_nested_tree(folder_tree)
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree},
+        {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree, "version": APP_VERSION},
     )
 
 
