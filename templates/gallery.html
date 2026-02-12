@@ -149,7 +149,12 @@
                 </div>
                 {% endfor %}
             </div>
-            <div class="px-2 py-1.5 text-sm text-slate-700 truncate group-hover:text-blue-600 transition-colors">{{ sub.name }}</div>
+            <div class="px-2 py-1.5 flex items-center gap-1 min-w-0">
+                <span class="text-sm text-slate-700 truncate group-hover:text-blue-600 transition-colors">{{ sub.name }}</span>
+                {% if sub.image_count > 0 %}
+                <span class="text-xs text-slate-400 flex-shrink-0">{{ sub.image_count }}</span>
+                {% endif %}
+            </div>
         </a>
     </div>
     {% endfor %}

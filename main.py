@@ -102,6 +102,18 @@ def _get_folder_tree(rel_paths: list[str]) -> list[list[str]]:
     return [list(f) for f in sorted(folders) if f]
 
 
+def _compute_folder_counts(rel_paths: list[str]) -> dict[str, int]:
+    """从 relative_path 列表计算每个文件夹下的图片总数（含子目录）。
+    O(N * D)，N=图片数，D=平均路径深度，无需额外数据库查询。"""
+    counts: dict[str, int] = {"": len(rel_paths)}  # 根目录 = 全部图片
+    for rp in rel_paths:
+        parts = rp.split("/")
+        for i in range(1, len(parts)):  # 不含文件名本身
+            prefix = "/".join(parts[:i])
+            counts[prefix] = counts.get(prefix, 0) + 1
+    return counts
+
+
 def _build_nested_tree(flat_folders: list[list[str]]) -> dict:
     """将扁平文件夹列表转为嵌套树结构，用于可折叠渲染。
     返回格式: {'2024': {'01': {'Jan': {}}, '02': {}}, '2025': {}}"""
@@ -122,9 +134,10 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
     rel_paths = [r[0] for r in result.fetchall()]
     folder_tree = _get_folder_tree(rel_paths)
     nested_tree = _build_nested_tree(folder_tree)
+    folder_counts = _compute_folder_counts(rel_paths)
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree, "version": APP_VERSION},
+        {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree, "folder_counts": folder_counts, "version": APP_VERSION},
     )
 
 
@@ -153,7 +166,15 @@ async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list
             if child.is_dir() and not child.name.startswith("."):
                 subfolder_names.add(child.name)
 
-    # 3) 为每个子文件夹取缩略图
+    # 3) 预计算每个子文件夹的图片数（含递归子目录），O(N)
+    subfolder_img_counts: dict[str, int] = {}
+    for rel in all_paths:
+        parts = rel.split("/")
+        if len(parts) > path_depth + 1:
+            sub_name = parts[path_depth]
+            subfolder_img_counts[sub_name] = subfolder_img_counts.get(sub_name, 0) + 1
+
+    # 4) 为每个子文件夹取缩略图
     subfolders: list[dict] = []
     for name in sorted(subfolder_names):
         full_path = f"{path}/{name}" if path else name
@@ -167,7 +188,12 @@ async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list
         )
         thumb_result = await session.execute(thumb_stmt)
         thumbnails = [r[0] for r in thumb_result.fetchall()]
-        subfolders.append({"name": name, "full_path": full_path, "thumbnails": thumbnails})
+        subfolders.append({
+            "name": name,
+            "full_path": full_path,
+            "thumbnails": thumbnails,
+            "image_count": subfolder_img_counts.get(name, 0),
+        })
 
     return subfolders
 
