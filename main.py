@@ -268,6 +268,12 @@ async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list
     return subfolders
 
 
+def _per_page_for_cols(cols: int) -> int:
+    """根据列数计算每页数量，确保能被列数整除，避免最后一行出现空位"""
+    cols = max(2, min(8, cols))
+    return cols * ((PER_PAGE + cols - 1) // cols)
+
+
 @app.get("/gallery")
 async def gallery(
     request: Request,
@@ -277,7 +283,7 @@ async def gallery(
     sort_by: str = "modified_at",
     sort_order: str = "desc",
     page: int = 1,
-    per_page: int = PER_PAGE,
+    cols: int = 4,
     filter_filename: str = "",
     filter_size_min: str = "",
     filter_size_max: str = "",
@@ -300,6 +306,9 @@ async def gallery(
     # 规范化路径：去除首尾空格和斜杠
     path = (path or "").strip().strip("/")
     mode = "waterfall" if mode == "waterfall" else "folder"
+
+    # 根据列数计算每页数量，确保能被整除
+    per_page = _per_page_for_cols(cols)
 
     # 瀑布流模式强制使用默认排序
     if mode == "waterfall":
@@ -440,6 +449,7 @@ async def gallery(
             "filter_date_from": filter_date_from,
             "filter_date_to": filter_date_to,
             "has_filters": has_filters,
+            "cols": cols,
         },
     )
 

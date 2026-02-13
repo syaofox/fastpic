@@ -4,7 +4,7 @@
    hx-get="/gallery?path=&search=&page=1"
    hx-target="#gallery-container"
    hx-swap="innerHTML"
-   hx-include="#mode-input, #sort-by-input, #sort-order-input"
+   hx-include="#mode-input, #sort-by-input, #sort-order-input, #cols-input"
    hx-on:click="document.querySelector('[name=path]').value = ''">
     <span class="truncate">/ 全部</span>
     {% if folder_counts.get('', 0) > 0 %}
@@ -34,7 +34,7 @@
            hx-get="/gallery?path={{ path_str|urlencode_path }}&search=&page=1"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
-           hx-include="#mode-input, #sort-by-input, #sort-order-input"
+           hx-include="#mode-input, #sort-by-input, #sort-order-input, #cols-input"
            hx-on:click="document.querySelector('[name=path]').value = '{{ path_str }}'">
             <span class="truncate">{{ part }}</span>
             {% if folder_counts.get(path_str, 0) > 0 %}

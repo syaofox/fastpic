@@ -54,6 +54,35 @@
             flex: 1;
             min-width: 0;
         }
+
+        /* 文件夹模式：Flexbox 布局，避免 Grid 空单元格产生大面积空白 */
+        #gallery-grid.gallery-flex {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        /* 使用 data-cols 避免 calc+var 在部分浏览器失效，JS 会在加载后同步 */
+        #gallery-grid.gallery-flex > .selectable-item {
+            flex: 0 0 auto;
+            min-width: 0;
+            width: calc(25% - 0.75rem); /* 默认 4 列 */
+        }
+        #gallery-grid.gallery-flex[data-cols="2"] > .selectable-item { width: calc(50% - 0.5rem); }
+        #gallery-grid.gallery-flex[data-cols="3"] > .selectable-item { width: calc(33.333% - 0.667rem); }
+        #gallery-grid.gallery-flex[data-cols="4"] > .selectable-item { width: calc(25% - 0.75rem); }
+        #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item { width: calc(20% - 0.8rem); }
+        #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item { width: calc(16.666% - 0.833rem); }
+        #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item { width: calc(14.285% - 0.857rem); }
+        #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item { width: calc(12.5% - 0.875rem); }
+        #gallery-grid.gallery-flex > .folder-image-separator,
+        #gallery-grid.gallery-flex > .scroll-sentinel {
+            flex: 0 0 100%;
+            width: 100%;
+        }
+        /* 滚动哨兵负边距消除与上一行之间的可见间隙 */
+        #gallery-grid.gallery-flex > .scroll-sentinel {
+            margin-top: -0.25rem;
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">

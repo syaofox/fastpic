@@ -39,6 +39,7 @@
                         <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                         <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
                         <input type="hidden" name="mode" id="mode-input" value="{{ request.query_params.get('mode', 'folder') }}">
+                        <input type="hidden" name="cols" id="cols-input" value="4">
                         <input type="search"
                                id="dir-search-input"
                                placeholder="搜索文件夹路径，如：2024、旅行、厦门..."
@@ -66,9 +67,10 @@
         <!-- 图片网格 -->
         <div class="flex-1 overflow-y-auto p-4 transition-[padding] duration-200" id="scroll-container">
             <div id="gallery-container"
-                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1"
+                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1&cols=4"
                  hx-trigger="load"
-                 hx-swap="innerHTML">
+                 hx-swap="innerHTML"
+                 hx-include="#cols-input">
                 <div class="flex justify-center items-center h-64 text-slate-500">
                     <span class="htmx-indicator">加载中...</span>
                 </div>
@@ -578,8 +580,9 @@ function refreshGalleryFromModal() {
     var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
     var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
     var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+    var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
     var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
-    var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1' +
+    var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
         '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
         '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
         '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
@@ -646,20 +649,39 @@ document.addEventListener('keydown', function(e) {
         const cols = saved ? Math.max(MIN_COLS, Math.min(MAX_COLS, parseInt(saved, 10))) : DEFAULT_COLS;
         const sc = getScrollContainer();
         if (sc) sc.style.setProperty('--gallery-cols', String(cols));
+        var colsInput = document.getElementById('cols-input');
+        if (colsInput) colsInput.value = String(cols);
     }
 
-    function setThumbnailCols(cols) {
+    function setThumbnailCols(cols, skipRefresh) {
         const c = Math.max(MIN_COLS, Math.min(MAX_COLS, cols));
         const sc = getScrollContainer();
         if (sc) sc.style.setProperty('--gallery-cols', String(c));
         localStorage.setItem(STORAGE_KEY, String(c));
+        var colsInput = document.getElementById('cols-input');
+        if (colsInput) colsInput.value = String(c);
         const valEl = document.getElementById('thumbnail-size-value');
         if (valEl) valEl.textContent = c + ' 列';
         const slider = document.getElementById('thumbnail-size-slider');
         if (slider) slider.value = c;
-        // 瀑布流模式下重建列布局
-        if (typeof window.rebuildWaterfall === 'function') window.rebuildWaterfall();
+        syncGalleryGridCols();
+        if (!skipRefresh) {
+            // 列数变化时重新加载画廊，使每页数量能被列数整除
+            if (typeof window.refreshGallery === 'function') window.refreshGallery();
+            // 瀑布流模式下重建列布局
+            if (typeof window.rebuildWaterfall === 'function') window.rebuildWaterfall();
+        }
     }
+
+    function syncGalleryGridCols() {
+        var grid = document.getElementById('gallery-grid');
+        var sc = getScrollContainer();
+        if (grid && sc) {
+            var cols = getComputedStyle(sc).getPropertyValue('--gallery-cols').trim() || '4';
+            grid.setAttribute('data-cols', cols);
+        }
+    }
+    window.syncGalleryGridCols = syncGalleryGridCols;
 
     initThumbnailSize();
 
@@ -691,7 +713,7 @@ document.addEventListener('keydown', function(e) {
                 const saved = localStorage.getItem(STORAGE_KEY);
                 const cols = saved ? parseInt(saved, 10) : DEFAULT_COLS;
                 if (slider) slider.value = Math.max(MIN_COLS, Math.min(MAX_COLS, cols));
-                setThumbnailCols(cols);
+                setThumbnailCols(cols, true);  // 仅同步显示，不刷新画廊（避免弹窗被替换）
             }
         } else if (popover && !popover.classList.contains('hidden') && !insidePopover) {
             popover.classList.add('hidden');
@@ -941,6 +963,9 @@ document.addEventListener('keydown', function(e) {
                     }
                 }
             }
+        }
+        if (ev.detail.target.id === 'gallery-container' || ev.detail.target.id === 'gallery-grid') {
+            if (typeof window.syncGalleryGridCols === 'function') window.syncGalleryGridCols();
         }
     });
 })();
@@ -1227,9 +1252,10 @@ document.addEventListener('keydown', function(e) {
         if (sortByInput) sortByInput.value = sortBy;
         if (sortOrderInput) sortOrderInput.value = sortOrder;
 
+        var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
         var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
         var encodedPath = encodeURIComponent(path);
-        var url = '/gallery?path=' + encodedPath + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1' +
+        var url = '/gallery?path=' + encodedPath + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
             '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
             '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
             '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
@@ -1709,8 +1735,10 @@ document.addEventListener('keydown', function(e) {
         var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
         var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
         var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+        var colsInput = document.getElementById('cols-input');
+        var cols = (colsInput && colsInput.value) ? colsInput.value : (marker ? (marker.getAttribute('data-cols') || '4') : '4');
         var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
-        var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1' +
+        var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
             '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
             '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
             '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
@@ -1718,6 +1746,7 @@ document.addEventListener('keydown', function(e) {
             '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
+    window.refreshGallery = refreshGallery;
 
     function refreshSidebar() {
         var marker = document.getElementById('current-path-marker');
@@ -1778,12 +1807,13 @@ document.addEventListener('keydown', function(e) {
         var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
         var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
         var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+        var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
 
         var url = '/gallery?path=' + encodeURIComponent(path) +
             '&search=&mode=' + mode +
             '&sort_by=' + sortBy +
             '&sort_order=' + sortOrder +
-            '&page=1' +
+            '&page=1&cols=' + encodeURIComponent(cols) +
             '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
             '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
             '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
@@ -1950,7 +1980,8 @@ document.addEventListener('keydown', function(e) {
         var mode = document.getElementById('mode-input') ? document.getElementById('mode-input').value : 'folder';
         var sortBy = document.getElementById('sort-by-input') ? document.getElementById('sort-by-input').value : 'modified_at';
         var sortOrder = document.getElementById('sort-order-input') ? document.getElementById('sort-order-input').value : 'desc';
-        var url = '/gallery?path=' + encodeURIComponent(dirPath) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1';
+        var cols = document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4';
+        var url = '/gallery?path=' + encodeURIComponent(dirPath) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols);
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
 
