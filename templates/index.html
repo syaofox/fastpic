@@ -1442,8 +1442,8 @@ document.addEventListener('keydown', function(e) {
         if (total > 0) {
             if (delBtn) delBtn.classList.remove('hidden');
             if (countText) countText.textContent = '删除 (' + total + ')';
-            if (moveBtn) (imgCount > 0 ? moveBtn.classList.remove('hidden') : moveBtn.classList.add('hidden'));
-            if (fabMoveBtn) (imgCount > 0 ? fabMoveBtn.classList.remove('hidden') : fabMoveBtn.classList.add('hidden'));
+            if (moveBtn) (total > 0 ? moveBtn.classList.remove('hidden') : moveBtn.classList.add('hidden'));
+            if (fabMoveBtn) (total > 0 ? fabMoveBtn.classList.remove('hidden') : fabMoveBtn.classList.add('hidden'));
             if (fab) fab.classList.remove('hidden');
             if (fabCount) fabCount.textContent = '已选 ' + total + ' 项';
             if (scrollEl) scrollEl.classList.add('pb-24');
@@ -1616,8 +1616,15 @@ document.addEventListener('keydown', function(e) {
         var imgIds = imageIdsOrNull !== undefined && imageIdsOrNull !== null
             ? (Array.isArray(imageIdsOrNull) ? imageIdsOrNull : [imageIdsOrNull])
             : Array.from(_selectedImages);
-        if (imgIds.length === 0) return;
+        var folderPaths = (options && options.folderPaths) ? options.folderPaths : Array.from(_selectedFolders);
+        if (imgIds.length === 0 && folderPaths.length === 0) return;
         var fromModal = options && options.fromModal;
+
+        var titleText = '移动';
+        var descParts = [];
+        if (imgIds.length > 0) descParts.push(imgIds.length + ' 张图片');
+        if (folderPaths.length > 0) descParts.push(folderPaths.length + ' 个文件夹');
+        var descText = '将 ' + descParts.join(' 和 ') + ' 移动到：';
 
         var old = document.getElementById('move-dialog');
         if (old) old.remove();
@@ -1632,9 +1639,9 @@ document.addEventListener('keydown', function(e) {
                         '<div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">' +
                             '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>' +
                         '</div>' +
-                        '<h3 class="text-lg font-semibold text-slate-800">移动图片</h3>' +
+                        '<h3 class="text-lg font-semibold text-slate-800">' + titleText + '</h3>' +
                     '</div>' +
-                    '<div class="text-sm text-slate-500">将 ' + imgIds.length + ' 张图片移动到：</div>' +
+                    '<div class="text-sm text-slate-500 move-dialog-desc">' + descText + '</div>' +
                     '<nav id="move-breadcrumb" class="mt-2 flex items-center gap-1 text-sm text-slate-600 flex-wrap"></nav>' +
                 '</div>' +
                 '<div id="move-folder-list" class="flex-1 overflow-y-auto p-4 min-h-0"></div>' +
@@ -1707,41 +1714,63 @@ document.addEventListener('keydown', function(e) {
             confirmBtn.disabled = true;
             confirmBtn.textContent = '移动中...';
 
-            fetch('/api/move-images', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ids: imgIds, target_path: currentPath})
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
+            var promises = [];
+            if (imgIds.length > 0) {
+                promises.push(
+                    fetch('/api/move-images', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: imgIds, target_path: currentPath})
+                    }).then(function(r) { return r.json(); })
+                );
+            }
+            if (folderPaths.length > 0) {
+                promises.push(
+                    fetch('/api/move-folders', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({paths: folderPaths, target_path: currentPath})
+                    }).then(function(r) { return r.json(); })
+                );
+            }
+
+            Promise.all(promises).then(function(results) {
+                var totalMoved = 0;
+                var allErrors = [];
+                results.forEach(function(data) {
+                    totalMoved += (data.moved || 0);
+                    if (data.errors && data.errors.length) allErrors = allErrors.concat(data.errors);
+                });
+
                 overlay.remove();
-                if (data.moved > 0) {
-                    var moved = data.moved;
-                    var errs = data.errors || [];
+                if (totalMoved > 0) {
                     if (fromModal && options && options.onSuccess) {
                         options.onSuccess();
                     } else {
                         imgIds.forEach(function(id) { _selectedImages.delete(id); });
+                        folderPaths.forEach(function(p) { _selectedFolders.delete(p); });
                         updateDeleteButton();
                         if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
                     }
-                    if (errs.length > 0) {
-                        alert('已移动 ' + moved + ' 张，失败 ' + errs.length + ' 张：' + errs.join('；'));
+                    if (allErrors.length > 0) {
+                        alert('已移动 ' + totalMoved + ' 项，失败 ' + allErrors.length + ' 项：' + allErrors.join('；'));
                     }
-                    if (!fromModal) refreshGallery();
+                    if (!fromModal) {
+                        refreshGallery();
+                        if (folderPaths.length > 0) refreshSidebar();
+                    }
                 } else {
-                    if (data.errors && data.errors.length > 0) {
-                        errorEl.textContent = data.errors.join('；');
+                    if (allErrors.length > 0) {
+                        errorEl.textContent = allErrors.join('；');
                         errorEl.classList.remove('hidden');
                     } else {
-                        errorEl.textContent = '所选图片已在目标位置';
+                        errorEl.textContent = '所选内容已在目标位置';
                         errorEl.classList.remove('hidden');
                     }
                     confirmBtn.disabled = false;
                     confirmBtn.textContent = '移动到这里';
                 }
-            })
-            .catch(function(err) {
+            }).catch(function(err) {
                 console.error('移动失败:', err);
                 errorEl.textContent = '请求失败: ' + err;
                 errorEl.classList.remove('hidden');
