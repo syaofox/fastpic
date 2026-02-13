@@ -187,6 +187,11 @@
                     <!-- 退出全屏图标 -->
                     <svg id="fullscreen-exit-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 9L4 4m5 0H4v5m16-5l-5 5m5-5h-5v5M4 20l5-5m-5 5h5v-5m11 5l-5-5m5 5h-5v-5"/></svg>
                 </button>
+                <button type="button" id="modal-move-btn" onclick="window.showMoveDialogForCurrentImage && window.showMoveDialogForCurrentImage(); event.stopPropagation();"
+                        class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
+                        title="移动到其他文件夹">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                </button>
                 <button type="button" id="modal-delete-btn" onclick="deleteCurrentImage(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-red-500/80 text-white/80 hover:text-white transition-all"
                         title="删除当前图片">
@@ -1346,9 +1351,12 @@ document.addEventListener('keydown', function(e) {
         });
     }
 
-    window.showMoveDialog = function() {
-        var imgIds = Array.from(_selectedImages);
+    window.showMoveDialog = function(imageIdsOrNull, options) {
+        var imgIds = imageIdsOrNull !== undefined && imageIdsOrNull !== null
+            ? (Array.isArray(imageIdsOrNull) ? imageIdsOrNull : [imageIdsOrNull])
+            : Array.from(_selectedImages);
         if (imgIds.length === 0) return;
+        var fromModal = options && options.fromModal;
 
         var old = document.getElementById('move-dialog');
         if (old) old.remove();
@@ -1449,13 +1457,17 @@ document.addEventListener('keydown', function(e) {
                 if (data.moved > 0) {
                     var moved = data.moved;
                     var errs = data.errors || [];
-                    imgIds.forEach(function(id) { _selectedImages.delete(id); });
+                    if (fromModal && options && options.onSuccess) {
+                        options.onSuccess();
+                    } else {
+                        imgIds.forEach(function(id) { _selectedImages.delete(id); });
+                        updateDeleteButton();
+                        if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
+                    }
                     if (errs.length > 0) {
                         alert('已移动 ' + moved + ' 张，失败 ' + errs.length + ' 张：' + errs.join('；'));
                     }
-                    updateDeleteButton();
-                    if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
-                    refreshGallery();
+                    if (!fromModal) refreshGallery();
                 } else {
                     if (data.errors && data.errors.length > 0) {
                         errorEl.textContent = data.errors.join('；');
@@ -1483,6 +1495,26 @@ document.addEventListener('keydown', function(e) {
 
         renderBreadcrumb();
         loadSubfolders();
+    };
+
+    window.showMoveDialogForCurrentImage = function() {
+        if (modalImageIds.length === 0 || modalIndex >= modalImageIds.length) return;
+        var id = modalImageIds[modalIndex];
+        if (!id) return;
+        window.showMoveDialog([id], {
+            fromModal: true,
+            onSuccess: function() {
+                modalImages.splice(modalIndex, 1);
+                modalImageIds.splice(modalIndex, 1);
+                if (modalImages.length === 0) {
+                    document.getElementById('modal').classList.add('hidden');
+                } else {
+                    if (modalIndex >= modalImages.length) modalIndex = modalImages.length - 1;
+                    document.getElementById('modal-img').src = modalImages[modalIndex];
+                }
+                refreshGalleryFromModal();
+            }
+        });
     };
 
     function refreshGallery() {
