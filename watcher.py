@@ -21,6 +21,7 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileDelete
 
 from scanner import IMAGE_EXTENSIONS, _cache_filename, _relative_path, _generate_thumbnail
 from models import Image, async_session_factory
+from scan_state import begin_scan, end_scan
 
 from sqlmodel import select
 
@@ -200,22 +201,26 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
         key = src
         path_events[key] = ev
 
-    processed = 0
-    for key, ev in path_events.items():
-        event_type, src, dst, ts = ev
-        try:
-            if event_type == "created":
-                await _process_created(photos_dir, cache_dir, Path(src))
-            elif event_type == "deleted":
-                await _process_deleted(photos_dir, cache_dir, Path(src))
-            elif event_type == "moved":
-                await _process_moved(photos_dir, cache_dir, Path(src), Path(dst))
-            processed += 1
-        except Exception as e:
-            print(f"[watcher] 处理事件失败 ({event_type} {src}): {e}", flush=True)
+    begin_scan()
+    try:
+        processed = 0
+        for key, ev in path_events.items():
+            event_type, src, dst, ts = ev
+            try:
+                if event_type == "created":
+                    await _process_created(photos_dir, cache_dir, Path(src))
+                elif event_type == "deleted":
+                    await _process_deleted(photos_dir, cache_dir, Path(src))
+                elif event_type == "moved":
+                    await _process_moved(photos_dir, cache_dir, Path(src), Path(dst))
+                processed += 1
+            except Exception as e:
+                print(f"[watcher] 处理事件失败 ({event_type} {src}): {e}", flush=True)
 
-    if processed:
-        print(f"[watcher] 批量处理 {processed} 个文件变化", flush=True)
+        if processed:
+            print(f"[watcher] 批量处理 {processed} 个文件变化", flush=True)
+    finally:
+        end_scan()
 
 
 def start_watcher(photos_dir: Path, cache_dir: Path, loop: asyncio.AbstractEventLoop) -> Observer:

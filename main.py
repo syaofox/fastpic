@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, init_db, get_async_session
 from scanner import scan_photos, cleanup_database, _cache_filename
+from scan_state import begin_scan, end_scan, is_scanning
 from watcher import start_watcher
 
 PHOTOS_DIR = Path(__file__).parent / "photos"
@@ -45,9 +46,9 @@ APP_VERSION = _get_version()
 PHOTOS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
 
-
 async def _background_scan():
     """后台扫描包装：先清理再扫描，捕获并打印异常"""
+    begin_scan()
     try:
         # 先清理不一致数据
         await cleanup_database(PHOTOS_DIR, CACHE_DIR)
@@ -58,6 +59,8 @@ async def _background_scan():
         import traceback
         print(f"[scan] 扫描失败: {e}")
         traceback.print_exc()
+    finally:
+        end_scan()
 
 
 @asynccontextmanager
@@ -89,7 +92,7 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     path = request.url.path
     # 白名单：登录页和 favicon 不需要验证
-    if path == "/login" or path == "/favicon.ico":
+    if path in ("/login", "/favicon.ico", "/api/scan-status"):
         return await call_next(request)
     token = request.cookies.get("fp_session")
     if not token or not hmac.compare_digest(token, _SESSION_TOKEN):
@@ -601,11 +604,21 @@ async def get_image_info(
     }
 
 
+@app.get("/api/scan-status")
+async def get_scan_status():
+    """返回当前是否有扫描任务在进行"""
+    return {"scanning": is_scanning()}
+
+
 @app.post("/scan")
 async def trigger_scan():
     """手动触发扫描"""
-    n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
-    return {"scanned": n}
+    begin_scan()
+    try:
+        n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
+        return {"scanned": n}
+    finally:
+        end_scan()
 
 
 @app.post("/api/cleanup")
