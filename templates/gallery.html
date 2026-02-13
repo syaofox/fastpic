@@ -223,6 +223,9 @@
     </div>
     {% endfor %}
     {% endif %}
+    {% if not append and subfolders and images %}
+    <div class="folder-image-separator" style="grid-column: 1 / -1; height: 0; margin-bottom: 1rem;"></div>
+    {% endif %}
     {% for img in images %}
     <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white cursor-pointer"
          data-type="image" data-image-id="{{ img.id }}" data-relative-path="{{ img.relative_path }}"
