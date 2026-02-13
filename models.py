@@ -1,4 +1,5 @@
 import os
+import re
 
 from sqlmodel import Field, SQLModel, create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -8,6 +9,14 @@ _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.environ.
 os.makedirs(_DATA_DIR, exist_ok=True)
 DATABASE_URL = f"sqlite:///{_DATA_DIR}/fastpic.db"
 ASYNC_DATABASE_URL = f"sqlite+aiosqlite:///{_DATA_DIR}/fastpic.db"
+
+# 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
+_NATURAL_PAD = 10
+
+
+def natural_sort_key(s: str) -> str:
+    """将字符串转为自然排序键：数字段左补零，使 1<2<10<100"""
+    return re.sub(r"\d+", lambda m: m.group(0).zfill(_NATURAL_PAD), s or "")
 
 
 class Image(SQLModel, table=True):
@@ -20,6 +29,8 @@ class Image(SQLModel, table=True):
     file_size: int = Field(default=0, index=True)
     width: int = 0
     height: int = 0
+    filename_natural: str | None = Field(default=None, index=True)
+    relative_path_natural: str | None = Field(default=None, index=True)
 
 
 # 同步引擎用于 create_all
@@ -30,9 +41,45 @@ async_session_factory = async_sessionmaker(
 )
 
 
+def _run_natural_sort_migration() -> None:
+    """为已有表添加 filename_natural / relative_path_natural 列并回填"""
+    from sqlalchemy import text
+
+    with sync_engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(images)"))
+        cols = {row[1] for row in r.fetchall()}
+        if "filename_natural" not in cols:
+            conn.execute(text("ALTER TABLE images ADD COLUMN filename_natural TEXT"))
+            conn.execute(text("ALTER TABLE images ADD COLUMN relative_path_natural TEXT"))
+            conn.commit()
+        # 回填：对空值用 natural_sort_key 生成并更新
+        r = conn.execute(
+            text("SELECT id, filename, relative_path FROM images WHERE filename_natural IS NULL")
+        )
+        rows = r.fetchall()
+        if rows:
+            for row in rows:
+                kid, fn, rp = row
+                nfn = natural_sort_key(fn or "")
+                nrp = natural_sort_key(rp or "")
+                conn.execute(
+                    text("UPDATE images SET filename_natural = :nfn, relative_path_natural = :nrp WHERE id = :kid"),
+                    {"nfn": nfn, "nrp": nrp, "kid": kid},
+                )
+            conn.commit()
+        # 创建索引以加速排序
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_images_filename_natural ON images(filename_natural)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_images_relative_path_natural ON images(relative_path_natural)"))
+            conn.commit()
+        except Exception:
+            pass
+
+
 def init_db() -> None:
     """创建数据库表"""
     SQLModel.metadata.create_all(sync_engine)
+    _run_natural_sort_migration()
 
 
 async def get_async_session():

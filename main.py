@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Image, init_db, get_async_session
+from models import Image, init_db, get_async_session, natural_sort_key
 from scanner import scan_photos, cleanup_database, _cache_filename
 from scan_state import begin_scan, end_scan, is_scanning
 from watcher import start_watcher
@@ -214,9 +214,18 @@ async def sidebar_folder_tree(request: Request, session: AsyncSession = Depends(
     )
 
 
-async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list[dict]:
+async def _get_subfolders(
+    session: AsyncSession,
+    path: str,
+    path_filter,
+    sort_by: str = "filename",
+    sort_order: str = "asc",
+) -> list[dict]:
     """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。
-    同时扫描文件系统，确保空文件夹也能显示。"""
+    同时扫描文件系统，确保空文件夹也能显示。
+    子文件夹按 sort_by/sort_order 参与排序。"""
+    from sqlalchemy import func
+
     # 1) 从数据库中提取子文件夹名
     subfolder_stmt = select(Image.relative_path)
     if path:
@@ -239,17 +248,35 @@ async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list
             if child.is_dir() and not child.name.startswith("."):
                 subfolder_names.add(child.name)
 
-    # 3) 预计算每个子文件夹的图片数（含递归子目录），O(N)
+    # 3) 预计算每个子文件夹的图片数及排序用字段（含递归子目录），O(N)
     subfolder_img_counts: dict[str, int] = {}
+    subfolder_max_modified: dict[str, float] = {}
+    subfolder_max_size: dict[str, int] = {}
     for rel in all_paths:
         parts = rel.split("/")
         if len(parts) > path_depth + 1:
             sub_name = parts[path_depth]
             subfolder_img_counts[sub_name] = subfolder_img_counts.get(sub_name, 0) + 1
 
+    # 批量查询每个子文件夹的 max(modified_at) 和 max(file_size)
+    for name in subfolder_names:
+        full_path = f"{path}/{name}" if path else name
+        escaped_sub = _escape_like(full_path)
+        sub_path_filter = Image.relative_path.like(f"{escaped_sub}/%", escape="\\")
+        agg_stmt = select(
+            func.max(Image.modified_at).label("max_modified"),
+            func.max(Image.file_size).label("max_size"),
+        ).where(sub_path_filter)
+        agg_result = await session.execute(agg_stmt)
+        row = agg_result.fetchone()
+        if row and row[0] is not None:
+            subfolder_max_modified[name] = row[0]
+        if row and row[1] is not None:
+            subfolder_max_size[name] = row[1]
+
     # 4) 为每个子文件夹取缩略图
     subfolders: list[dict] = []
-    for name in sorted(subfolder_names):
+    for name in subfolder_names:
         full_path = f"{path}/{name}" if path else name
         escaped_sub = _escape_like(full_path)
         sub_path_filter = Image.relative_path.like(f"{escaped_sub}/%", escape="\\")
@@ -266,7 +293,22 @@ async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list
             "full_path": full_path,
             "thumbnails": thumbnails,
             "image_count": subfolder_img_counts.get(name, 0),
+            "_sort_key_filename": natural_sort_key(name),
+            "_sort_key_folder_filename": natural_sort_key(full_path),
+            "_sort_key_modified_at": subfolder_max_modified.get(name, 0.0),
+            "_sort_key_file_size": subfolder_max_size.get(name, 0),
         })
+
+    # 5) 按 sort_by / sort_order 排序（filename/folder_filename 已用自然排序键）
+    sort_col_map = {
+        "filename": "_sort_key_filename",
+        "folder_filename": "_sort_key_folder_filename",
+        "modified_at": "_sort_key_modified_at",
+        "file_size": "_sort_key_file_size",
+    }
+    key = sort_col_map.get(sort_by, "_sort_key_filename")
+    reverse = sort_order == "desc"
+    subfolders.sort(key=lambda s: s[key], reverse=reverse)
 
     return subfolders
 
@@ -313,10 +355,17 @@ async def gallery(
     # 根据列数计算每页数量，确保能被整除
     per_page = _per_page_for_cols(cols)
 
-    # 排序字段映射（folder_filename: 先按所在文件夹，再按图片名）
+    # 排序字段映射（folder_filename: 先按所在文件夹，再按图片名；filename/folder_filename 用自然排序）
+    from sqlalchemy import case
     sort_columns = {
-        "filename": Image.filename,
-        "folder_filename": Image.relative_path,
+        "filename": case(
+            (Image.filename_natural.is_(None), Image.filename),
+            else_=Image.filename_natural,
+        ),
+        "folder_filename": case(
+            (Image.relative_path_natural.is_(None), Image.relative_path),
+            else_=Image.relative_path_natural,
+        ),
         "modified_at": Image.modified_at,
         "file_size": Image.file_size,
     }
@@ -408,10 +457,10 @@ async def gallery(
             count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
     total = (await session.execute(count_stmt)).scalar() or 0
 
-    # 子文件夹（仅文件夹模式、首页且无搜索/过滤时）
+    # 子文件夹（仅文件夹模式、首页且无搜索/过滤时），参与排序且排在文件前
     subfolders: list[dict] = []
     if mode == "folder" and page == 1 and not search and not has_filters:
-        subfolders = await _get_subfolders(session, path, path_filter)
+        subfolders = await _get_subfolders(session, path, path_filter, sort_by, sort_order)
 
     # 分页
     offset = (page - 1) * per_page
@@ -472,9 +521,16 @@ async def api_folder_images(
     path = (path or "").strip().strip("/")
     mode = "waterfall" if mode == "waterfall" else "folder"
 
+    from sqlalchemy import case
     sort_columns = {
-        "filename": Image.filename,
-        "folder_filename": Image.relative_path,
+        "filename": case(
+            (Image.filename_natural.is_(None), Image.filename),
+            else_=Image.filename_natural,
+        ),
+        "folder_filename": case(
+            (Image.relative_path_natural.is_(None), Image.relative_path),
+            else_=Image.relative_path_natural,
+        ),
         "modified_at": Image.modified_at,
         "file_size": Image.file_size,
     }
@@ -867,6 +923,8 @@ async def move_images(
         # 更新数据库
         img.relative_path = new_rel
         img.filename = dest_path.name
+        img.filename_natural = natural_sort_key(dest_path.name)
+        img.relative_path_natural = natural_sort_key(new_rel)
         img.modified_at = os.path.getmtime(dest_path)
         img.file_size = dest_path.stat().st_size
 
@@ -1054,6 +1112,8 @@ async def upload_images(
             if existing_record:
                 # 更新已有记录
                 existing_record.filename = dest.name
+                existing_record.filename_natural = natural_sort_key(dest.name)
+                existing_record.relative_path_natural = natural_sort_key(rel_path)
                 existing_record.modified_at = modified_at
                 existing_record.file_size = file_size
                 existing_record.width = width
@@ -1068,6 +1128,8 @@ async def upload_images(
                     file_size=file_size,
                     width=width,
                     height=height,
+                    filename_natural=natural_sort_key(dest.name),
+                    relative_path_natural=natural_sort_key(rel_path),
                 )
                 session.add(record)
 

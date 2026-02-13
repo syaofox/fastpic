@@ -6,7 +6,7 @@ from PIL import Image as PILImage
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Image, async_session_factory
+from models import Image, async_session_factory, natural_sort_key
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 THUMBNAIL_WIDTH = 300
@@ -109,6 +109,8 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                     file_size=file_size,
                     width=width,
                     height=height,
+                    filename_natural=natural_sort_key(filename),
+                    relative_path_natural=natural_sort_key(rel_path),
                 )
                 session.add(record)
                 count += 1

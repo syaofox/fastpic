@@ -20,7 +20,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileDeletedEvent, FileMovedEvent
 
 from scanner import IMAGE_EXTENSIONS, _cache_filename, _relative_path, _generate_thumbnail
-from models import Image, async_session_factory
+from models import Image, async_session_factory, natural_sort_key
 from scan_state import begin_scan, end_scan
 
 from sqlmodel import select
@@ -95,6 +95,8 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
                 file_size=file_size,
                 width=width,
                 height=height,
+                filename_natural=natural_sort_key(full_path.name),
+                relative_path_natural=natural_sort_key(rel_path),
             )
             session.add(record)
             await session.commit()
@@ -146,6 +148,8 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
             # 更新记录
             img.relative_path = dst_rel
             img.filename = dst_path.name
+            img.filename_natural = natural_sort_key(dst_path.name)
+            img.relative_path_natural = natural_sort_key(dst_rel)
             if dst_path.exists():
                 img.modified_at = os.path.getmtime(dst_path)
                 img.file_size = os.path.getsize(dst_path)
