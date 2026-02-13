@@ -1297,6 +1297,14 @@ document.addEventListener('keydown', function(e) {
         });
     }
 
+    function getCurrentPathForMove() {
+        var marker = document.getElementById('current-path-marker');
+        var path = marker ? (marker.getAttribute('data-path') || '') : '';
+        var pathInput = document.querySelector('[name=path]');
+        if (pathInput) path = pathInput.value || path;
+        return path || '';
+    }
+
     window.showMoveDialog = function(imageIdsOrNull, options) {
         var imgIds = imageIdsOrNull !== undefined && imageIdsOrNull !== null
             ? (Array.isArray(imageIdsOrNull) ? imageIdsOrNull : [imageIdsOrNull])
@@ -1332,7 +1340,7 @@ document.addEventListener('keydown', function(e) {
 
         document.body.appendChild(overlay);
 
-        var currentPath = '';
+        var currentPath = (options && options.initialPath !== undefined) ? options.initialPath : getCurrentPathForMove();
         var breadcrumbEl = overlay.querySelector('#move-breadcrumb');
         var listEl = overlay.querySelector('#move-folder-list');
         var confirmBtn = overlay.querySelector('.move-confirm-btn');
@@ -1449,6 +1457,7 @@ document.addEventListener('keydown', function(e) {
         if (!id) return;
         window.showMoveDialog([id], {
             fromModal: true,
+            initialPath: getCurrentPathForMove(),
             onSuccess: function() {
                 modalImages.splice(modalIndex, 1);
                 modalImageIds.splice(modalIndex, 1);
