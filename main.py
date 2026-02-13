@@ -196,6 +196,21 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
     )
 
 
+@app.get("/api/sidebar-folder-tree")
+async def sidebar_folder_tree(request: Request, session: AsyncSession = Depends(get_async_session)):
+    """返回侧栏文件夹树 HTML 片段，用于无刷新更新"""
+    path = request.query_params.get("path", "")
+    result = await session.execute(select(Image.relative_path))
+    rel_paths = [r[0] for r in result.fetchall()]
+    folder_tree = _get_folder_tree(rel_paths)
+    nested_tree = _build_nested_tree(folder_tree)
+    folder_counts = _compute_folder_counts(rel_paths)
+    return templates.TemplateResponse(
+        "partials/folder_tree.html",
+        {"request": request, "nested_tree": nested_tree, "folder_counts": folder_counts, "current_path": path},
+    )
+
+
 async def _get_subfolders(session: AsyncSession, path: str, path_filter) -> list[dict]:
     """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。
     同时扫描文件系统，确保空文件夹也能显示。"""

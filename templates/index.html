@@ -11,58 +11,8 @@
                 </button>
             </div>
             <div class="space-y-0" id="folder-tree">
-                {% set is_root = (request.query_params.get('path') or '') == '' %}
-                <a href="/" data-path="" class="folder-link flex items-center px-3 py-2 rounded transition-colors {{ 'bg-blue-50 text-blue-600' if is_root else 'hover:bg-slate-100 text-slate-700' }}"
-                   hx-get="/gallery?path=&search=&page=1"
-                   hx-target="#gallery-container"
-                   hx-swap="innerHTML"
-                   hx-include="#mode-input, #sort-by-input, #sort-order-input"
-                   hx-on:click="document.querySelector('[name=path]').value = ''">
-                    <span class="truncate">/ 全部</span>
-                    {% if folder_counts.get('', 0) > 0 %}
-                    <span class="ml-auto text-xs {{ 'text-blue-400' if is_root else 'text-slate-400' }} pl-2 flex-shrink-0">{{ folder_counts.get('', 0) }}</span>
-                    {% endif %}
-                </a>
-                {% macro render_folder(prefix, children, depth) %}
-                {% for part, sub in children.items() %}
-                {% set path_parts = prefix + [part] %}
-                {% set path_str = path_parts|join('/') %}
-                {% set is_current = path_str == (request.query_params.get('path') or '') %}
-                <div class="folder-node" data-path="{{ path_str }}">
-                    <div class="flex items-center group" style="padding-left: {{ 12 + depth * 16 }}px;">
-                        {% if sub %}
-                        <button type="button" class="folder-toggle w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 group-hover:text-slate-700 transition-colors"
-                                data-expanded="false"
-                                onclick="toggleFolder(this); event.stopPropagation();"
-                                aria-label="展开">
-                            <svg class="chevron w-3 h-3 transition-transform" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2L8 6 4 10"/></svg>
-                        </button>
-                        {% else %}
-                        <span class="w-5 flex-shrink-0"></span>
-                        {% endif %}
-                        <a href="?path={{ path_str|urlencode_path }}"
-                           data-path="{{ path_str }}"
-                           class="folder-link flex-1 min-w-0 flex items-center px-2 py-1.5 rounded transition-colors {{ 'bg-blue-50 text-blue-600' if is_current else 'hover:bg-slate-100 text-slate-700' }}"
-                           hx-get="/gallery?path={{ path_str|urlencode_path }}&search=&page=1"
-                           hx-target="#gallery-container"
-                           hx-swap="innerHTML"
-                           hx-include="#mode-input, #sort-by-input, #sort-order-input"
-                           hx-on:click="document.querySelector('[name=path]').value = '{{ path_str }}'">
-                            <span class="truncate">{{ part }}</span>
-                            {% if folder_counts.get(path_str, 0) > 0 %}
-                            <span class="ml-auto text-xs {{ 'text-blue-400' if is_current else 'text-slate-400' }} pl-2 flex-shrink-0">{{ folder_counts.get(path_str, 0) }}</span>
-                            {% endif %}
-                        </a>
-                    </div>
-                    {% if sub %}
-                    <div class="folder-children hidden">
-                        {{ render_folder(path_parts, sub, depth + 1) }}
-                    </div>
-                    {% endif %}
-                </div>
-                {% endfor %}
-                {% endmacro %}
-                {{ render_folder([], nested_tree, 0) }}
+                {% set current_path = request.query_params.get('path') or '' %}
+                {% include "partials/folder_tree.html" with context %}
             </div>
         </div>
         <div class="px-4 py-2 border-t border-slate-100 flex-shrink-0">
@@ -1332,13 +1282,9 @@ document.addEventListener('keydown', function(e) {
         Promise.all(promises).then(function(results) {
             // 退出选择模式
             exitSelectMode();
-            // 如果删除了文件夹，需要重新加载整个页面以更新侧栏文件夹树
-            if (folderPaths.length > 0) {
-                window.location.reload();
-                return;
-            }
-            // 仅删除了图片，刷新画廊即可
+            // 刷新画廊和侧栏文件夹树
             refreshGallery();
+            if (folderPaths.length > 0) refreshSidebar();
         }).catch(function(err) {
             console.error('删除失败:', err);
             alert('删除失败，请查看控制台日志');
@@ -1531,6 +1477,23 @@ document.addEventListener('keydown', function(e) {
             '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
             '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+    }
+
+    function refreshSidebar() {
+        var marker = document.getElementById('current-path-marker');
+        var path = marker ? (marker.getAttribute('data-path') || '') : '';
+        var pathInput = document.querySelector('[name=path]');
+        if (pathInput) path = pathInput.value || path;
+        fetch('/api/sidebar-folder-tree?path=' + encodeURIComponent(path))
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                var el = document.getElementById('folder-tree');
+                if (el) {
+                    el.innerHTML = html;
+                    if (typeof htmx !== 'undefined') htmx.process(el);
+                }
+            })
+            .catch(function(err) { console.error('刷新侧栏失败:', err); });
     }
 
     // HTMX 加载新内容后，如果处于选择模式，需要更新新内容的复选框状态
