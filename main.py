@@ -296,7 +296,7 @@ async def gallery(
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）
     mode: folder=仅当前层文件+子文件夹, waterfall=递归所有图片,无文件夹无文件名
-    sort_by: filename / modified_at / file_size
+    sort_by: filename / folder_filename / modified_at / file_size
     sort_order: asc / desc
     filter_filename: 文件名包含指定字符串
     filter_size_min/max: 文件大小范围（字节）
@@ -313,14 +313,10 @@ async def gallery(
     # 根据列数计算每页数量，确保能被整除
     per_page = _per_page_for_cols(cols)
 
-    # 瀑布流模式强制使用默认排序
-    if mode == "waterfall":
-        sort_by = "modified_at"
-        sort_order = "desc"
-
-    # 排序字段映射
+    # 排序字段映射（folder_filename: 先按所在文件夹，再按图片名）
     sort_columns = {
         "filename": Image.filename,
+        "folder_filename": Image.relative_path,
         "modified_at": Image.modified_at,
         "file_size": Image.file_size,
     }
@@ -478,6 +474,7 @@ async def api_folder_images(
 
     sort_columns = {
         "filename": Image.filename,
+        "folder_filename": Image.relative_path,
         "modified_at": Image.modified_at,
         "file_size": Image.file_size,
     }

@@ -40,6 +40,8 @@
                         <input type="hidden" name="path" id="path-input" value="{{ request.query_params.get('path', '') or '' }}">
                         <input type="hidden" name="mode" id="mode-input" value="{{ request.query_params.get('mode', 'folder') }}">
                         <input type="hidden" name="cols" id="cols-input" value="4">
+                        <input type="hidden" name="sort_by" id="sort-by-input" value="modified_at">
+                        <input type="hidden" name="sort_order" id="sort-order-input" value="desc">
                         <input type="search"
                                id="dir-search-input"
                                placeholder="搜索文件夹路径，如：2024、旅行、厦门..."
@@ -70,7 +72,7 @@
                  hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1&cols=4"
                  hx-trigger="load"
                  hx-swap="innerHTML"
-                 hx-include="#cols-input">
+                 hx-include="#cols-input, #sort-by-input, #sort-order-input">
                 <div class="flex justify-center items-center h-64 text-slate-500">
                     <span class="htmx-indicator">加载中...</span>
                 </div>
@@ -718,6 +720,21 @@ document.addEventListener('keydown', function(e) {
 
     initThumbnailSize();
 
+    // 排序设定持久化
+    (function initSortSettings() {
+        const SORT_BY_KEY = 'fastpic_sort_by';
+        const SORT_ORDER_KEY = 'fastpic_sort_order';
+        const validSortBy = ['filename', 'folder_filename', 'modified_at', 'file_size'];
+        const validSortOrder = ['asc', 'desc'];
+        var sortByInput = document.getElementById('sort-by-input');
+        var sortOrderInput = document.getElementById('sort-order-input');
+        if (!sortByInput || !sortOrderInput) return;
+        var savedBy = localStorage.getItem(SORT_BY_KEY);
+        var savedOrder = localStorage.getItem(SORT_ORDER_KEY);
+        if (savedBy && validSortBy.indexOf(savedBy) >= 0) sortByInput.value = savedBy;
+        if (savedOrder && validSortOrder.indexOf(savedOrder) >= 0) sortOrderInput.value = savedOrder;
+    })();
+
     function positionThumbnailSizePopover(btn, popover) {
         const rect = btn.getBoundingClientRect();
         const popW = 200;
@@ -1284,6 +1301,8 @@ document.addEventListener('keydown', function(e) {
         var sortOrderInput = document.getElementById('sort-order-input');
         if (sortByInput) sortByInput.value = sortBy;
         if (sortOrderInput) sortOrderInput.value = sortOrder;
+        localStorage.setItem('fastpic_sort_by', sortBy);
+        localStorage.setItem('fastpic_sort_order', sortOrder);
 
         var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
         var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};

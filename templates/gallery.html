@@ -1,7 +1,5 @@
 {% if not append %}
 <div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" class="hidden"></div>
-<input type="hidden" id="sort-by-input" name="sort_by" value="{{ sort_by }}">
-<input type="hidden" id="sort-order-input" name="sort_order" value="{{ sort_order }}">
 <!-- 顶栏：面包屑 + 操作按钮 -->
 <div class="gallery-top-bar flex items-center gap-3 flex-wrap">
     <!-- 面包屑 -->
@@ -127,7 +125,6 @@
             </div>
         </div>
     </div>
-    {% if mode == 'folder' %}
     <div class="relative" id="sort-wrapper">
         <button type="button" id="sort-btn" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="排序">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/></svg>
@@ -137,6 +134,10 @@
             <button type="button" class="sort-field-option w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors flex items-center justify-between {{ 'text-blue-600 font-medium' if sort_by == 'filename' else 'text-slate-700' }}" data-sort-field="filename">
                 文件名称
                 {% if sort_by == 'filename' %}<svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{% endif %}
+            </button>
+            <button type="button" class="sort-field-option w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors flex items-center justify-between {{ 'text-blue-600 font-medium' if sort_by == 'folder_filename' else 'text-slate-700' }}" data-sort-field="folder_filename">
+                文件夹+文件名
+                {% if sort_by == 'folder_filename' %}<svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{% endif %}
             </button>
             <button type="button" class="sort-field-option w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors flex items-center justify-between {{ 'text-blue-600 font-medium' if sort_by == 'modified_at' else 'text-slate-700' }}" data-sort-field="modified_at">
                 修改时间
@@ -157,7 +158,6 @@
             </button>
         </div>
     </div>
-    {% endif %}
     <!-- 分隔线 -->
     <div class="w-px h-5 bg-slate-200 mx-1"></div>
     <!-- 选择模式按钮 -->
