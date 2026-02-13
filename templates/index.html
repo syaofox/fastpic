@@ -323,11 +323,57 @@ function prevImage() {
     refreshImageInfoIfVisible();
 }
 
-function nextImage() {
+function nextImage(fromSlideshow) {
     if (modalImages.length === 0) return;
-    modalIndex = (modalIndex + 1) % modalImages.length;
+    if (modalIndex === modalImages.length - 1) {
+        if (!fromSlideshow) {
+            showCustomConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
+                modalIndex = 0;
+                document.getElementById('modal-img').src = modalImages[modalIndex];
+                refreshImageInfoIfVisible();
+            });
+            return;
+        }
+        modalIndex = 0;
+    } else {
+        modalIndex = modalIndex + 1;
+    }
     document.getElementById('modal-img').src = modalImages[modalIndex];
     refreshImageInfoIfVisible();
+}
+
+function showCustomConfirm(message, confirmText, onConfirm, onCancel) {
+    var old = document.getElementById('custom-confirm-dialog');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'custom-confirm-dialog';
+    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40';
+    overlay.innerHTML =
+        '<div class="bg-white rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6" onclick="event.stopPropagation()">' +
+            '<p class="text-slate-700 mb-6 text-center">' + escapeHtml(message) + '</p>' +
+            '<div class="flex justify-center gap-3">' +
+                '<button type="button" class="custom-confirm-cancel px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                '<button type="button" class="custom-confirm-ok px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">' + escapeHtml(confirmText || '确定') + '</button>' +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('.custom-confirm-ok').addEventListener('click', function() {
+        overlay.remove();
+        if (onConfirm) onConfirm();
+    });
+    overlay.querySelector('.custom-confirm-cancel').addEventListener('click', function() {
+        overlay.remove();
+        if (onCancel) onCancel();
+    });
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) {
+            overlay.remove();
+            if (onCancel) onCancel();
+        }
+    });
 }
 
 function refreshImageInfoIfVisible() {
@@ -351,7 +397,7 @@ function startSlideshow() {
     if (modalImages.length <= 1) return;
     if (slideshowTimer) return;
     slideshowTimer = setInterval(function() {
-        nextImage();
+        nextImage(true);
     }, slideshowInterval * 1000);
     // 更新按钮外观
     var playIcon = document.getElementById('slideshow-play-icon');
