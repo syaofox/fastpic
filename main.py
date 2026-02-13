@@ -8,7 +8,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request, Depends, UploadFile, File, Form
+from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -474,6 +474,44 @@ async def debug_path_count(
     )
     sample_paths = [r[0] for r in result.fetchall()]
     return {"path": path, "total": total, "sample_paths": sample_paths}
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """将字节数格式化为可读字符串，如 1.2 MB"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
+@app.get("/api/image-info/{image_id:int}")
+async def get_image_info(
+    image_id: int,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """获取单张图片的详细信息，用于大图模式下的信息弹框"""
+    from datetime import datetime
+
+    result = await session.execute(select(Image).where(Image.id == image_id))
+    img = result.scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="图片不存在或已被删除")
+
+    full_path = str((PHOTOS_DIR / img.relative_path).resolve())
+    modified_dt = datetime.fromtimestamp(img.modified_at)
+    modified_str = modified_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    return {
+        "full_path": full_path,
+        "filename": img.filename,
+        "relative_path": img.relative_path,
+        "resolution": f"{img.width} × {img.height}" if (img.width and img.height) else "—",
+        "file_size": _format_file_size(img.file_size or 0),
+        "modified_at": modified_str,
+    }
 
 
 @app.post("/scan")
