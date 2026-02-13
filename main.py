@@ -454,6 +454,83 @@ async def gallery(
     )
 
 
+@app.get("/api/folder-images")
+async def api_folder_images(
+    path: str = "",
+    mode: str = "folder",
+    sort_by: str = "modified_at",
+    sort_order: str = "desc",
+    filter_filename: str = "",
+    filter_size_min: str = "",
+    filter_size_max: str = "",
+    filter_date_from: str = "",
+    filter_date_to: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """获取当前文件夹/模式下的全部图片（用于大图浏览模式，无分页）"""
+    from datetime import datetime as _dt
+
+    path = (path or "").strip().strip("/")
+    mode = "waterfall" if mode == "waterfall" else "folder"
+
+    sort_columns = {
+        "filename": Image.filename,
+        "modified_at": Image.modified_at,
+        "file_size": Image.file_size,
+    }
+    sort_col = sort_columns.get(sort_by, Image.modified_at)
+    sort_order = "asc" if sort_order == "asc" else "desc"
+    order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
+
+    stmt = select(Image).order_by(order_clause)
+    if path:
+        escaped = _escape_like(path)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == path)
+        )
+        stmt = stmt.where(path_filter)
+    if mode == "folder":
+        if path:
+            escaped = _escape_like(path)
+            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
+        else:
+            stmt = stmt.where(~Image.relative_path.like("%/%"))
+
+    filter_filename = (filter_filename or "").strip()
+    if filter_filename:
+        stmt = stmt.where(Image.filename.ilike(f"%{_escape_like(filter_filename)}%", escape="\\"))
+    _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
+    _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
+    if _size_min is not None:
+        stmt = stmt.where(Image.file_size >= _size_min)
+    if _size_max is not None:
+        stmt = stmt.where(Image.file_size <= _size_max)
+    _date_from_ts = None
+    _date_to_ts = None
+    if filter_date_from:
+        try:
+            _date_from_ts = _dt.strptime(filter_date_from, "%Y-%m-%d").timestamp()
+        except ValueError:
+            pass
+    if filter_date_to:
+        try:
+            _date_to_ts = _dt.strptime(filter_date_to, "%Y-%m-%d").timestamp() + 86399
+        except ValueError:
+            pass
+    if _date_from_ts is not None:
+        stmt = stmt.where(Image.modified_at >= _date_from_ts)
+    if _date_to_ts is not None:
+        stmt = stmt.where(Image.modified_at <= _date_to_ts)
+
+    result = await session.execute(stmt)
+    images = list(result.scalars().all())
+    return {
+        "urls": ["/photos/" + img.relative_path for img in images],
+        "ids": [img.id for img in images],
+    }
+
+
 @app.get("/debug/path-count")
 async def debug_path_count(
     path: str = "",

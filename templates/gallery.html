@@ -1,5 +1,5 @@
 {% if not append %}
-<div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" class="hidden"></div>
+<div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" class="hidden"></div>
 <input type="hidden" id="sort-by-input" name="sort_by" value="{{ sort_by }}">
 <input type="hidden" id="sort-order-input" name="sort_order" value="{{ sort_order }}">
 <!-- 顶栏：面包屑 + 操作按钮 -->
@@ -245,7 +245,7 @@
         <div class="select-overlay hidden absolute inset-0 bg-blue-500/10 z-[5] pointer-events-none rounded-lg ring-2 ring-blue-500"></div>
         <a href="/photos/{{ img.relative_path }}"
            class="block image-nav-link"
-           onclick="event.preventDefault(); if(!window._selectMode) { openModal('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}]); }">
+           onclick="event.preventDefault(); if(!window._selectMode) { (window.openModalFromGallery || openModal)('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}]); }">
             <div class="overflow-hidden bg-slate-100 {{ 'aspect-square' if mode == 'folder' else '' }}">
                 <img src="/cache/{{ img.relative_path|cache_key }}"
                      alt="{{ img.filename }}"

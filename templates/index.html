@@ -258,11 +258,44 @@ function openModal(photoUrl, index, allUrls, allIds) {
     modalIndex = index;
     document.getElementById('modal-img').src = photoUrl;
     document.getElementById('modal').classList.remove('hidden');
-    // 同步间隔、播放模式和序号显示
     _updateIntervalUI(slideshowInterval);
     _updateSlideshowModeUI(slideshowMode);
     _updateModalImageCounter();
 }
+
+function openModalFromGallery(photoUrl, index, pageUrls, pageIds) {
+    openModal(photoUrl, index, pageUrls, pageIds);
+    var marker = document.getElementById('current-path-marker');
+    if (!marker) return;
+    var total = parseInt(marker.getAttribute('data-total') || '0', 10);
+    if (total <= pageUrls.length) return;
+    var params = new URLSearchParams({
+        path: marker.getAttribute('data-path') || '',
+        mode: marker.getAttribute('data-mode') || 'folder',
+        sort_by: marker.getAttribute('data-sort-by') || 'modified_at',
+        sort_order: marker.getAttribute('data-sort-order') || 'desc',
+        filter_filename: marker.getAttribute('data-filter-filename') || '',
+        filter_size_min: marker.getAttribute('data-filter-size-min') || '',
+        filter_size_max: marker.getAttribute('data-filter-size-max') || '',
+        filter_date_from: marker.getAttribute('data-filter-date-from') || '',
+        filter_date_to: marker.getAttribute('data-filter-date-to') || ''
+    });
+    fetch('/api/folder-images?' + params.toString())
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.urls || !data.ids || data.urls.length === 0) return;
+            var currentId = modalImageIds[modalIndex];
+            var newIndex = data.ids.indexOf(currentId);
+            if (newIndex < 0) newIndex = data.urls.indexOf(modalImages[modalIndex]);
+            if (newIndex < 0) newIndex = 0;
+            modalImages = data.urls;
+            modalImageIds = data.ids;
+            modalIndex = newIndex;
+            _updateModalImageCounter();
+        })
+        .catch(function(err) { console.error('加载全部图片失败:', err); });
+}
+window.openModalFromGallery = openModalFromGallery;
 
 function closeModal(e) {
     if (e.target.id === 'modal' || e.target.id === 'modal-overlay') {
