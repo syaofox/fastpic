@@ -181,7 +181,7 @@
     </div>
 </div>
 
-<div id="gallery-grid" class="{{ 'gallery-flex' if mode == 'folder' else '' }}">
+<div id="gallery-grid" class="{{ 'gallery-flex' if mode == 'folder' else '' }}" data-cols="{{ cols }}">
 {% endif %}
     {% if not append %}
     {% for sub in subfolders %}

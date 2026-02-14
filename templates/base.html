@@ -66,6 +66,8 @@
             flex: 0 0 auto;
             min-width: 0;
             width: calc(25% - 0.75rem); /* 默认 4 列 */
+            /* 仅对 border/shadow 做过渡，避免列数变化时 width 产生缩小动画 */
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
         #gallery-grid.gallery-flex[data-cols="2"] > .selectable-item { width: calc(50% - 0.5rem); }
         #gallery-grid.gallery-flex[data-cols="3"] > .selectable-item { width: calc(33.333% - 0.667rem); }
