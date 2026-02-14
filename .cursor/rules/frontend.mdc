@@ -1,0 +1,49 @@
+---
+description: 前端风格与公共模式（Jinja2、HTMX、Tailwind）
+globs: "**/templates/**/*.html,**/*.html"
+alwaysApply: false
+---
+
+# 前端风格与复用
+
+## 前端风格
+
+- **布局**：页面一律继承 `templates/base.html`，使用 `{% block content %}`；公共片段放 `templates/partials/`，用 `{% include "partials/xxx.html" with context %}`。
+- **样式**：Tailwind CDN（与 base 一致）；主色 `blue-500/600`，中性色 `slate-*`；圆角 `rounded-lg`，输入/按钮统一 `focus:ring-2 focus:ring-blue-500 focus:border-blue-500`；滚动条与 base 一致（`scrollbar-width: thin` + webkit）。
+- **脚本**：无独立打包；脚本放在 base 的 block 之后或页面底部；跨页入口（如 `toggleSidebar`、`showCreateFolderDialog`）挂在 `window.xxx`。
+- **语言**：`lang="zh-CN"`，提示/按钮用简体中文。
+
+## HTMX 约定
+
+- **列表刷新**：`hx-get` + `hx-target="#gallery-container"`（或对应容器）+ `hx-swap="innerHTML"`；全局状态用 `hx-include="#cols-input, #sort-by-input, ..."` 指向隐藏 input。
+- **参数一致**：链接/按钮触发替换时，`hx-get` 的 query 带齐 path、mode、sort_by、sort_order、page、cols、filter_*，与 main.py 的 `/gallery` 等一致。
+- **路径编码**：URL 中的路径/搜索词用模板过滤器 `|urlencode_path`，避免中文或特殊字符问题。
+- **首次加载**：容器内放“加载中...”或 `htmx-indicator`，用 `hx-trigger="load"` 触发首次请求。
+
+## 公共模式与复用
+
+- **面包屑**：与 gallery.html 一致，用 `breadcrumb_parts` 循环，每段链接的 `hx-get` 带齐当前 mode/sort/filter 参数。
+- **状态**：用隐藏的 `data-path`、`data-mode`、`data-sort-by` 等放在 `#current-path-marker` 或容器上，供 JS 拼出正确的 `hx-get` URL。
+- **文件夹树**：复用 `templates/partials/folder_tree.html` 的 macro `render_folder`；链接带 `hx-include="#mode-input, #sort-by-input, #sort-order-input, #cols-input"`，并同步 `document.querySelector('[name=path]').value`。
+- **筛选**：筛选条件与 gallery 的 `filter_*` 参数对应；刷新时把 filter 参数一并写入 `hx-get`。
+- **扫描条**：base 已通过 `/api/scan-status` 轮询实现，新页面无需重复。
+
+## 示例
+
+```html
+<!-- 正确：新页继承 base，block 内写主结构 -->
+{% extends "base.html" %}
+{% block content %}
+<div class="flex h-screen">...</div>
+{% endblock %}
+```
+
+```html
+<!-- 正确：刷新按钮带齐参数 + hx-include -->
+<button hx-get="/gallery?path={{ path|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}"
+        hx-target="#gallery-container"
+        hx-swap="innerHTML"
+        hx-include="#cols-input, #sort-by-input, #sort-order-input">
+    刷新
+</button>
+```

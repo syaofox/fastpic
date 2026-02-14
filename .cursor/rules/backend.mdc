@@ -1,0 +1,40 @@
+---
+description: 后端代码风格与公共函数复用（FastAPI、SQLModel、路径/搜索工具）
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# 后端代码风格与复用
+
+## 代码风格
+
+- **路由与 Session**：路由与对外 API 用 `async def`，Session 统一 `Depends(get_async_session)`。内部纯计算/IO 用同步 `def`，在路由里用 `await asyncio.to_thread(...)` 调用（参考 main.py 中 `_get_folder_tree_cached`）。
+- **路径规范**：路径参数统一 `path = (path or "").strip().strip("/")`，避免首尾空格与多余斜杠。
+- **错误与响应**：`raise HTTPException(status_code=4xx/5xx, detail="简短中文描述")`；页面用 `templates.TemplateResponse(...)`，重定向用 `RedirectResponse(url=..., status_code=302)`。
+- **命名**：仅模块内部使用的函数以单下划线前缀（如 `_escape_like`）；可跨模块复用的放在 models.py（如 `natural_sort_key`）或独立工具模块。
+
+## 公共函数与复用
+
+- **SQL LIKE 转义**：做 `ilike`/`like` 前对用户输入用 `_escape_like(value)`（main.py 约 137 行），避免 `%`/`_` 被当作通配符。
+- **简繁与拼音**：中文搜索可复用 `_to_simplified`、`_to_traditional`、`_to_pinyin_lower`、`_search_match`；OpenCC 懒加载见 main.py。
+- **自然排序**：用 models.py 的 `natural_sort_key(s)`，模型中维护 `filename_natural`/`relative_path_natural` 用于 DB 排序。
+- **文件夹树**：扁平转嵌套用 `_build_nested_tree`；按路径统计用 `_compute_folder_counts`；带 TTL 缓存参考 `_get_folder_tree_cached`（asyncio.Lock + 时间戳）。
+- **缩略图与扫描**：scanner.py 的 `_cache_filename(relative_path)` 供模板与后端共用；扫描用 `async_session_factory` 分批提交（BATCH_SIZE）。
+- **版本号**：从 pyproject.toml 读取时使用与 `_get_version()` 相同的正则，保持单一来源。
+
+## 示例
+
+```python
+# 正确：路径规范 + _escape_like 再 like
+path = (path or "").strip().strip("/")
+escaped = _escape_like(user_input)
+stmt = stmt.where(Image.filename.ilike(f"%{escaped}%", escape="\\"))
+
+# 错误：直接拼接导致注入或误匹配
+stmt = stmt.where(Image.filename.ilike(f"%{user_input}%"))
+```
+
+```python
+# 正确：同步重计算在路由内用 to_thread
+folder_tree = await asyncio.to_thread(_get_folder_tree, rel_paths)
+```
