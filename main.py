@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import shutil
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import quote
@@ -185,14 +186,49 @@ def _build_nested_tree(flat_folders: list[list[str]]) -> dict:
     return root
 
 
+# ── 文件夹树短期缓存（60 秒），创建/删除文件夹时失效 ──
+_FOLDER_TREE_CACHE_TTL = 60.0
+_folder_tree_cache: dict | None = None
+_folder_tree_cache_lock = asyncio.Lock()
+
+
+def _invalidate_folder_tree_cache() -> None:
+    """创建/删除文件夹后调用，使缓存失效"""
+    global _folder_tree_cache
+    _folder_tree_cache = None
+
+
+async def _get_folder_tree_cached(rel_paths: list[str]) -> tuple[list[list[str]], dict, dict[str, int]]:
+    """获取 folder_tree、nested_tree、folder_counts，带 60 秒缓存"""
+    global _folder_tree_cache
+    async with _folder_tree_cache_lock:
+        now = time.monotonic()
+        if _folder_tree_cache is not None:
+            ts = _folder_tree_cache.get("ts", 0)
+            if now - ts < _FOLDER_TREE_CACHE_TTL:
+                return (
+                    _folder_tree_cache["folder_tree"],
+                    _folder_tree_cache["nested_tree"],
+                    _folder_tree_cache["folder_counts"],
+                )
+        folder_tree = await asyncio.to_thread(_get_folder_tree, rel_paths)
+        nested_tree = _build_nested_tree(folder_tree)
+        folder_counts = _compute_folder_counts(rel_paths)
+        _folder_tree_cache = {
+            "ts": now,
+            "folder_tree": folder_tree,
+            "nested_tree": nested_tree,
+            "folder_counts": folder_counts,
+        }
+        return folder_tree, nested_tree, folder_counts
+
+
 @app.get("/")
 async def index(request: Request, session: AsyncSession = Depends(get_async_session)):
     """返回主页框架"""
     result = await session.execute(select(Image.relative_path))
     rel_paths = [r[0] for r in result.fetchall()]
-    folder_tree = _get_folder_tree(rel_paths)
-    nested_tree = _build_nested_tree(folder_tree)
-    folder_counts = _compute_folder_counts(rel_paths)
+    folder_tree, nested_tree, folder_counts = await _get_folder_tree_cached(rel_paths)
     return templates.TemplateResponse(
         "index.html",
         {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree, "folder_counts": folder_counts, "version": APP_VERSION},
@@ -205,9 +241,7 @@ async def sidebar_folder_tree(request: Request, session: AsyncSession = Depends(
     path = request.query_params.get("path", "")
     result = await session.execute(select(Image.relative_path))
     rel_paths = [r[0] for r in result.fetchall()]
-    folder_tree = _get_folder_tree(rel_paths)
-    nested_tree = _build_nested_tree(folder_tree)
-    folder_counts = _compute_folder_counts(rel_paths)
+    folder_tree, nested_tree, folder_counts = await _get_folder_tree_cached(rel_paths)
     return templates.TemplateResponse(
         "partials/folder_tree.html",
         {"request": request, "nested_tree": nested_tree, "folder_counts": folder_counts, "current_path": path},
@@ -223,80 +257,68 @@ async def _get_subfolders(
 ) -> list[dict]:
     """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。
     同时扫描文件系统，确保空文件夹也能显示。
-    子文件夹按 sort_by/sort_order 参与排序。"""
-    from sqlalchemy import func
-
-    # 1) 从数据库中提取子文件夹名
-    subfolder_stmt = select(Image.relative_path)
-    if path:
-        subfolder_stmt = subfolder_stmt.where(path_filter)
-    subfolder_stmt = subfolder_stmt.distinct()
-    result = await session.execute(subfolder_stmt)
-    all_paths = [r[0] for r in result.fetchall()]
-
+    子文件夹按 sort_by/sort_order 参与排序。
+    优化：用 1 次批量查询替代 N*2 次查询，避免子目录多时卡顿。"""
     path_depth = len(path.split("/")) if path else 0
-    subfolder_names: set[str] = set()
-    for rel in all_paths:
-        parts = rel.split("/")
-        if len(parts) > path_depth + 1:
-            subfolder_names.add(parts[path_depth])
+    path_prefix = path + "/" if path else ""
 
-    # 2) 从文件系统中扫描实际子目录（捕获空文件夹）
+    # 1) 一次查询获取所有子文件夹下的图片（relative_path, modified_at, file_size）
+    # 条件：路径在 path 下且至少有一层子目录
+    batch_stmt = select(Image.relative_path, Image.modified_at, Image.file_size)
+    if path:
+        escaped = _escape_like(path_prefix)
+        batch_stmt = batch_stmt.where(
+            Image.relative_path.like(f"{escaped}%", escape="\\"),
+            Image.relative_path.like(f"{escaped}%/%", escape="\\"),
+        )
+    else:
+        batch_stmt = batch_stmt.where(Image.relative_path.like("%/%"))
+    result = await session.execute(batch_stmt)
+    rows = result.fetchall()
+
+    # 2) 在 Python 中按子文件夹分组，计算 count、max、取前 4 张缩略图
+    subfolder_data: dict[str, list[tuple[str, float, int]]] = {}
+    for rel, mod, size in rows:
+        parts = rel.split("/")
+        if len(parts) <= path_depth:
+            continue
+        sub_name = parts[path_depth]
+        if sub_name not in subfolder_data:
+            subfolder_data[sub_name] = []
+        subfolder_data[sub_name].append((rel, mod or 0.0, size or 0))
+
+    # 3) 从文件系统补充空文件夹
     fs_dir = PHOTOS_DIR / path if path else PHOTOS_DIR
     if fs_dir.is_dir():
         for child in fs_dir.iterdir():
             if child.is_dir() and not child.name.startswith("."):
-                subfolder_names.add(child.name)
+                if child.name not in subfolder_data:
+                    subfolder_data[child.name] = []
 
-    # 3) 预计算每个子文件夹的图片数及排序用字段（含递归子目录），O(N)
-    subfolder_img_counts: dict[str, int] = {}
-    subfolder_max_modified: dict[str, float] = {}
-    subfolder_max_size: dict[str, int] = {}
-    for rel in all_paths:
-        parts = rel.split("/")
-        if len(parts) > path_depth + 1:
-            sub_name = parts[path_depth]
-            subfolder_img_counts[sub_name] = subfolder_img_counts.get(sub_name, 0) + 1
-
-    # 批量查询每个子文件夹的 max(modified_at) 和 max(file_size)
-    for name in subfolder_names:
-        full_path = f"{path}/{name}" if path else name
-        escaped_sub = _escape_like(full_path)
-        sub_path_filter = Image.relative_path.like(f"{escaped_sub}/%", escape="\\")
-        agg_stmt = select(
-            func.max(Image.modified_at).label("max_modified"),
-            func.max(Image.file_size).label("max_size"),
-        ).where(sub_path_filter)
-        agg_result = await session.execute(agg_stmt)
-        row = agg_result.fetchone()
-        if row and row[0] is not None:
-            subfolder_max_modified[name] = row[0]
-        if row and row[1] is not None:
-            subfolder_max_size[name] = row[1]
-
-    # 4) 为每个子文件夹取缩略图
+    # 4) 构建 subfolders 列表
     subfolders: list[dict] = []
-    for name in subfolder_names:
+    for name, items in subfolder_data.items():
         full_path = f"{path}/{name}" if path else name
-        escaped_sub = _escape_like(full_path)
-        sub_path_filter = Image.relative_path.like(f"{escaped_sub}/%", escape="\\")
-        thumb_stmt = (
-            select(Image.relative_path)
-            .where(sub_path_filter)
-            .order_by(Image.modified_at.desc())
-            .limit(4)
-        )
-        thumb_result = await session.execute(thumb_stmt)
-        thumbnails = [r[0] for r in thumb_result.fetchall()]
+        if items:
+            items_sorted = sorted(items, key=lambda x: x[1], reverse=True)
+            count = len(items)
+            max_mod = items_sorted[0][1] if items_sorted else 0.0
+            max_size = max((x[2] for x in items), default=0)
+            thumbnails = [x[0] for x in items_sorted[:4]]
+        else:
+            count = 0
+            max_mod = 0.0
+            max_size = 0
+            thumbnails = []
         subfolders.append({
             "name": name,
             "full_path": full_path,
             "thumbnails": thumbnails,
-            "image_count": subfolder_img_counts.get(name, 0),
+            "image_count": count,
             "_sort_key_filename": natural_sort_key(name),
             "_sort_key_folder_filename": natural_sort_key(full_path),
-            "_sort_key_modified_at": subfolder_max_modified.get(name, 0.0),
-            "_sort_key_file_size": subfolder_max_size.get(name, 0),
+            "_sort_key_modified_at": max_mod,
+            "_sort_key_file_size": max_size,
         })
 
     # 5) 按 sort_by / sort_order 排序（filename/folder_filename 已用自然排序键）
@@ -1093,6 +1115,8 @@ async def delete_folders(
             total_folders += 1
 
     await session.commit()
+    if total_folders > 0:
+        _invalidate_folder_tree_cache()
     return {"deleted_images": total_images, "deleted_folders": total_folders}
 
 
@@ -1120,6 +1144,7 @@ async def create_folder(body: CreateFolderRequest):
 
     folder_path.mkdir(parents=True, exist_ok=True)
     rel = f"{parent}/{name}" if parent else name
+    _invalidate_folder_tree_cache()
     print(f"[api] 创建文件夹: {rel}", flush=True)
     return {"ok": True, "path": rel}
 
