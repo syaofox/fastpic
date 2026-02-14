@@ -147,7 +147,7 @@
                     <!-- 退出全屏图标 -->
                     <svg id="fullscreen-exit-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 9L4 4m5 0H4v5m16-5l-5 5m5-5h-5v5M4 20l5-5m-5 5h5v-5m11 5l-5-5m5 5h-5v-5"/></svg>
                 </button>
-                <button type="button" id="modal-info-btn" onclick="showImageInfo(); event.stopPropagation();"
+                <button type="button" id="modal-info-btn" onclick="toggleImageInfo(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
                         title="图片信息">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -173,21 +173,11 @@
         <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
         <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">›</button>
         <div id="modal-image-counter" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/50 text-white/90 text-sm font-medium" onclick="event.stopPropagation()">1/1</div>
-    </div>
-</div>
-
-<!-- 图片信息弹框 -->
-<div id="image-info-popup" class="fixed inset-0 z-[60] hidden flex items-center justify-center" onclick="closeImageInfoPopup(event)">
-    <div id="image-info-overlay" class="absolute inset-0 bg-black/60"></div>
-    <div class="relative z-10 bg-slate-800/95 backdrop-blur rounded-xl shadow-xl border border-white/10 max-w-lg w-[90vw] max-h-[80vh] overflow-hidden" onclick="event.stopPropagation()">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-            <span class="text-sm font-semibold text-white">图片信息</span>
-            <button type="button" onclick="closeImageInfoPopup(event)" class="p-1.5 rounded hover:bg-white/10 text-white/80 hover:text-white transition-colors" title="关闭">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-        </div>
-        <div id="image-info-content" class="p-4 overflow-y-auto max-h-[60vh] text-sm text-white/90 space-y-2 font-mono">
-            <div class="text-white/50">加载中...</div>
+        <!-- 图片信息：内嵌在左下角，由「图片信息」按钮开关 -->
+        <div id="modal-image-info-panel" class="absolute bottom-4 left-4 z-10 hidden max-w-md rounded-lg bg-black/60 backdrop-blur border border-white/10 shadow-xl overflow-hidden" onclick="event.stopPropagation()">
+            <div id="image-info-content" class="p-3 text-xs text-white/90 space-y-1.5 font-mono max-h-[40vh] overflow-y-auto">
+                <div class="text-white/50">加载中...</div>
+            </div>
         </div>
     </div>
 </div>
@@ -319,6 +309,9 @@ function closeModal(e) {
         stopSlideshow();
         if (document.fullscreenElement) document.exitFullscreen();
         document.getElementById('modal').classList.add('hidden');
+        var panel = document.getElementById('modal-image-info-panel');
+        if (panel) panel.classList.add('hidden');
+        _updateImageInfoBtnState(false);
     }
 }
 
@@ -326,21 +319,50 @@ function closeModalAndStopSlideshow() {
     stopSlideshow();
     if (document.fullscreenElement) document.exitFullscreen();
     document.getElementById('modal').classList.add('hidden');
+    var panel = document.getElementById('modal-image-info-panel');
+    if (panel) panel.classList.add('hidden');
+    _updateImageInfoBtnState(false);
 }
 
+function _updateImageInfoBtnState(active) {
+    var btn = document.getElementById('modal-info-btn');
+    if (!btn) return;
+    if (active) {
+        btn.classList.add('bg-blue-500/60', 'text-white');
+        btn.classList.remove('bg-white/15', 'text-white/80');
+    } else {
+        btn.classList.remove('bg-blue-500/60', 'text-white');
+        btn.classList.add('bg-white/15', 'text-white/80');
+    }
+}
+
+function toggleImageInfo() {
+    var panel = document.getElementById('modal-image-info-panel');
+    if (!panel) return;
+    if (panel.classList.contains('hidden')) {
+        showImageInfo();
+    } else {
+        panel.classList.add('hidden');
+        _updateImageInfoBtnState(false);
+    }
+}
+
+/** 加载并显示当前图片信息到左下角面板（不负责开关面板，仅填充内容并显示） */
 function showImageInfo() {
+    var panel = document.getElementById('modal-image-info-panel');
+    var content = document.getElementById('image-info-content');
+    if (!panel || !content) return;
+
     if (modalImageIds.length === 0 || modalIndex < 0 || modalIndex >= modalImageIds.length) {
-        var content = document.getElementById('image-info-content');
         content.innerHTML = '<div class="text-white/70">暂无图片信息</div>';
-        document.getElementById('image-info-popup').classList.remove('hidden');
-        document.getElementById('image-info-popup').classList.add('flex');
+        panel.classList.remove('hidden');
+        _updateImageInfoBtnState(true);
         return;
     }
     var imageId = modalImageIds[modalIndex];
-    var content = document.getElementById('image-info-content');
     content.innerHTML = '<div class="text-white/50">加载中...</div>';
-    document.getElementById('image-info-popup').classList.remove('hidden');
-    document.getElementById('image-info-popup').classList.add('flex');
+    panel.classList.remove('hidden');
+    _updateImageInfoBtnState(true);
 
     fetch('/api/image-info/' + imageId)
         .then(function(res) {
@@ -352,22 +374,15 @@ function showImageInfo() {
         })
         .then(function(data) {
             content.innerHTML =
-                '<div class="flex justify-between gap-4"><span class="text-white/50 flex-shrink-0">完整路径</span><span class="break-all text-right">' + escapeHtml(data.full_path) + '</span></div>' +
-                '<div class="flex justify-between gap-4"><span class="text-white/50 flex-shrink-0">文件名</span><span class="break-all text-right">' + escapeHtml(data.filename) + '</span></div>' +
-                '<div class="flex justify-between gap-4"><span class="text-white/50 flex-shrink-0">分辨率</span><span>' + escapeHtml(data.resolution) + '</span></div>' +
-                '<div class="flex justify-between gap-4"><span class="text-white/50 flex-shrink-0">文件大小</span><span>' + escapeHtml(data.file_size) + '</span></div>' +
-                '<div class="flex justify-between gap-4"><span class="text-white/50 flex-shrink-0">修改时间</span><span>' + escapeHtml(data.modified_at) + '</span></div>';
+                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">完整路径</span><span class="break-all text-right">' + escapeHtml(data.full_path) + '</span></div>' +
+                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件名</span><span class="break-all text-right">' + escapeHtml(data.filename) + '</span></div>' +
+                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">分辨率</span><span>' + escapeHtml(data.resolution) + '</span></div>' +
+                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件大小</span><span>' + escapeHtml(data.file_size) + '</span></div>' +
+                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">修改时间</span><span>' + escapeHtml(data.modified_at) + '</span></div>';
         })
         .catch(function(err) {
             content.innerHTML = '<div class="text-red-300">' + escapeHtml(String(err)) + '</div>';
         });
-}
-
-function closeImageInfoPopup(e) {
-    if (e.target.id === 'image-info-popup' || e.target.id === 'image-info-overlay' || e.target.closest('button')) {
-        document.getElementById('image-info-popup').classList.add('hidden');
-        document.getElementById('image-info-popup').classList.remove('flex');
-    }
 }
 
 function escapeHtml(s) {
@@ -448,8 +463,8 @@ function showCustomConfirm(message, confirmText, onConfirm, onCancel) {
 }
 
 function refreshImageInfoIfVisible() {
-    var popup = document.getElementById('image-info-popup');
-    if (popup && !popup.classList.contains('hidden')) {
+    var panel = document.getElementById('modal-image-info-panel');
+    if (panel && !panel.classList.contains('hidden')) {
         showImageInfo();
     }
 }
