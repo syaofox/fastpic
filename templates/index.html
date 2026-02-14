@@ -254,6 +254,19 @@ let slideshowTimer = null;
 let slideshowInterval = parseFloat(localStorage.getItem('fastpic_slideshow_interval') || '2');
 let slideshowMode = localStorage.getItem('fastpic_slideshow_mode') || 'loop';
 
+/** 大图模式预加载前后各 N 张，提升左右切换流畅度 */
+var MODAL_PRELOAD_COUNT = 2;
+function preloadModalImages(centerIndex) {
+    if (!modalImages.length) return;
+    var start = Math.max(0, centerIndex - MODAL_PRELOAD_COUNT);
+    var end = Math.min(modalImages.length - 1, centerIndex + MODAL_PRELOAD_COUNT);
+    for (var i = start; i <= end; i++) {
+        if (i === centerIndex) continue;
+        var img = new Image();
+        img.src = modalImages[i];
+    }
+}
+
 function openModal(photoUrl, index, allUrls, allIds) {
     modalImages = allUrls;
     modalImageIds = allIds || [];
@@ -263,6 +276,7 @@ function openModal(photoUrl, index, allUrls, allIds) {
     _updateIntervalUI(slideshowInterval);
     _updateSlideshowModeUI(slideshowMode);
     _updateModalImageCounter();
+    preloadModalImages(modalIndex);
 }
 
 function openModalFromGallery(photoUrl, index, pageUrls, pageIds) {
@@ -294,6 +308,7 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds) {
             modalImageIds = data.ids;
             modalIndex = newIndex;
             _updateModalImageCounter();
+            preloadModalImages(modalIndex);
         })
         .catch(function(err) { console.error('加载全部图片失败:', err); });
 }
@@ -368,6 +383,7 @@ function prevImage() {
     document.getElementById('modal-img').src = modalImages[modalIndex];
     _updateModalImageCounter();
     refreshImageInfoIfVisible();
+    preloadModalImages(modalIndex);
 }
 
 function nextImage(fromSlideshow) {
@@ -379,6 +395,7 @@ function nextImage(fromSlideshow) {
                 document.getElementById('modal-img').src = modalImages[modalIndex];
                 _updateModalImageCounter();
                 refreshImageInfoIfVisible();
+                preloadModalImages(modalIndex);
             });
             return;
         }
@@ -393,6 +410,7 @@ function nextImage(fromSlideshow) {
     document.getElementById('modal-img').src = modalImages[modalIndex];
     _updateModalImageCounter();
     refreshImageInfoIfVisible();
+    preloadModalImages(modalIndex);
 }
 
 function showCustomConfirm(message, confirmText, onConfirm, onCancel) {
@@ -598,6 +616,7 @@ function deleteCurrentImage() {
             document.getElementById('modal-img').src = modalImages[modalIndex];
             _updateModalImageCounter();
             refreshImageInfoIfVisible();
+            preloadModalImages(modalIndex);
             // 刷新画廊（后台更新网格）
             refreshGalleryFromModal();
         }
