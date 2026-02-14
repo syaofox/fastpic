@@ -589,42 +589,41 @@ function deleteCurrentImage() {
     var imageId = modalImageIds[modalIndex];
     if (!imageId) return;
 
-    // 简单确认
-    if (!confirm('确定要删除这张图片吗？此操作不可恢复。')) return;
+    showCustomConfirm('确定要删除这张图片吗？此操作不可恢复。', '删除', function() {
+        var btn = document.getElementById('modal-delete-btn');
+        if (btn) btn.disabled = true;
 
-    var btn = document.getElementById('modal-delete-btn');
-    if (btn) btn.disabled = true;
+        fetch('/api/delete-images', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ids: [imageId]})
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            // 从列表中移除当前图片
+            modalImages.splice(modalIndex, 1);
+            modalImageIds.splice(modalIndex, 1);
 
-    fetch('/api/delete-images', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ids: [imageId]})
-    }).then(function(r) { return r.json(); }).then(function(data) {
-        // 从列表中移除当前图片
-        modalImages.splice(modalIndex, 1);
-        modalImageIds.splice(modalIndex, 1);
-
-        if (modalImages.length === 0) {
-            // 没有图片了，关闭模态框并刷新画廊
-            document.getElementById('modal').classList.add('hidden');
-            refreshGalleryFromModal();
-        } else {
-            // 调整索引，显示下一张（或最后一张）
-            if (modalIndex >= modalImages.length) {
-                modalIndex = modalImages.length - 1;
+            if (modalImages.length === 0) {
+                // 没有图片了，关闭模态框并刷新画廊
+                document.getElementById('modal').classList.add('hidden');
+                refreshGalleryFromModal();
+            } else {
+                // 调整索引，显示下一张（或最后一张）
+                if (modalIndex >= modalImages.length) {
+                    modalIndex = modalImages.length - 1;
+                }
+                document.getElementById('modal-img').src = modalImages[modalIndex];
+                _updateModalImageCounter();
+                refreshImageInfoIfVisible();
+                preloadModalImages(modalIndex);
+                // 刷新画廊（后台更新网格）
+                refreshGalleryFromModal();
             }
-            document.getElementById('modal-img').src = modalImages[modalIndex];
-            _updateModalImageCounter();
-            refreshImageInfoIfVisible();
-            preloadModalImages(modalIndex);
-            // 刷新画廊（后台更新网格）
-            refreshGalleryFromModal();
-        }
-        if (btn) btn.disabled = false;
-    }).catch(function(err) {
-        console.error('删除失败:', err);
-        alert('删除失败');
-        if (btn) btn.disabled = false;
+            if (btn) btn.disabled = false;
+        }).catch(function(err) {
+            console.error('删除失败:', err);
+            alert('删除失败');
+            if (btn) btn.disabled = false;
+        });
     });
 }
 
