@@ -137,6 +137,104 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# ── 搜索框：简繁 + 拼音匹配（懒加载） ──
+_opencc_s2t = None
+_opencc_t2s = None
+
+
+def _get_opencc_s2t():
+    global _opencc_s2t
+    if _opencc_s2t is None:
+        try:
+            from opencc import OpenCC
+            _opencc_s2t = OpenCC("s2t")
+        except Exception:
+            _opencc_s2t = False
+    return _opencc_s2t
+
+
+def _get_opencc_t2s():
+    global _opencc_t2s
+    if _opencc_t2s is None:
+        try:
+            from opencc import OpenCC
+            _opencc_t2s = OpenCC("t2s")
+        except Exception:
+            _opencc_t2s = False
+    return _opencc_t2s
+
+
+def _to_simplified(s: str) -> str:
+    """转为简体（用于匹配）"""
+    cc = _get_opencc_t2s()
+    if not cc:
+        return s
+    try:
+        return cc.convert(s)
+    except Exception:
+        return s
+
+
+def _to_traditional(s: str) -> str:
+    """转为繁体（用于匹配）"""
+    cc = _get_opencc_s2t()
+    if not cc:
+        return s
+    try:
+        return cc.convert(s)
+    except Exception:
+        return s
+
+
+def _to_pinyin_lower(s: str) -> str:
+    """将中文转为小写无声调拼音并拼接（如 厦门 -> xiamen），非中文保留原样并转小写。"""
+    try:
+        from pypinyin import lazy_pinyin, Style
+        parts = lazy_pinyin(s, style=Style.NORMAL)
+        return "".join(p).lower() if (p := [x.strip() for x in parts if x]) else s.lower()
+    except Exception:
+        return s.lower()
+
+
+def _search_match(query: str, target: str) -> bool:
+    """判断 query 是否匹配 target：支持模糊、简繁、拼音。
+    - 原始/小写模糊
+    - 简体/繁体互相匹配
+    - 拼音匹配（如 xiamen 匹配 厦门）
+    """
+    if not query or not target:
+        return False
+    q = query.strip()
+    t = target
+    # 1) 原始模糊（不区分大小写）
+    if q.lower() in t.lower():
+        return True
+    # 2) 简繁
+    try:
+        q_s, q_t = _to_simplified(q), _to_traditional(q)
+        t_s, t_t = _to_simplified(t), _to_traditional(t)
+        if q_s and q_s in t_s:
+            return True
+        if q_t and q_t in t_t:
+            return True
+    except Exception:
+        pass
+    # 3) 拼音：把目标转成拼音再匹配（支持输入拼音搜中文路径）
+    try:
+        t_py = _to_pinyin_lower(t)
+        q_lower = q.lower()
+        if q_lower in t_py:
+            return True
+        # 若 query 含中文，也把 query 转拼音，看是否在 target 的拼音里
+        if any("\u4e00" <= c <= "\u9fff" for c in q):
+            q_py = _to_pinyin_lower(q)
+            if q_py and q_py in t_py:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _get_folder_tree(rel_paths: list[str]) -> list[list[str]]:
     """从 relative_path 列表 + 文件系统提取文件夹树，返回 [['2024'], ['2024','01'], ...]
     同时扫描文件系统，确保空文件夹也出现在树中。"""
@@ -788,11 +886,10 @@ async def search_dirs(
                 _scan_all_dirs(child, child_path)
     _scan_all_dirs(PHOTOS_DIR)
 
-    # 模糊匹配：搜索词在目录路径中出现（不区分大小写）
-    q_lower = q.lower()
+    # 模糊匹配 + 简繁匹配 + 拼音匹配
     matched = []
     for dir_path, count in sorted(full_dir_counts.items()):
-        if q_lower in dir_path.lower():
+        if _search_match(q, dir_path):
             matched.append({"path": dir_path, "image_count": count})
             if len(matched) >= limit:
                 break
