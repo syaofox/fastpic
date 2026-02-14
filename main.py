@@ -9,8 +9,10 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
-from fastapi.responses import RedirectResponse
+import tempfile
+import zipfile
+from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -948,6 +950,121 @@ async def delete_images(
 
     await session.commit()
     return {"deleted": deleted}
+
+
+# ---------- 下载 API ----------
+
+
+def _resolve_and_validate_relative_path(relative_path: str) -> Path | None:
+    """校验 relative_path 在 PHOTOS_DIR 下，返回绝对路径或 None"""
+    rel = (relative_path or "").strip().strip("/")
+    if not rel or ".." in rel or rel.startswith("/"):
+        return None
+    full = (PHOTOS_DIR / rel).resolve()
+    try:
+        full.relative_to(PHOTOS_DIR.resolve())
+    except ValueError:
+        return None
+    return full if full.is_file() else None
+
+
+@app.get("/api/download/image")
+async def download_image(
+    id: int | None = None,
+    relative_path: str | None = None,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """单图下载：按 id 或 relative_path 返回原图，Content-Disposition: attachment"""
+    if id is not None:
+        result = await session.execute(select(Image).where(Image.id == id))
+        img = result.scalar_one_or_none()
+        if not img:
+            raise HTTPException(status_code=404, detail="图片不存在")
+        rel = img.relative_path
+        filename = img.filename
+    elif relative_path:
+        full = _resolve_and_validate_relative_path(relative_path)
+        if not full:
+            raise HTTPException(status_code=400, detail="路径不合法或文件不存在")
+        rel = relative_path.strip().strip("/")
+        filename = full.name
+    else:
+        raise HTTPException(status_code=400, detail="请提供 id 或 relative_path")
+    file_path = PHOTOS_DIR / rel
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{quote(filename)}"'},
+    )
+
+
+class DownloadZipRequest(BaseModel):
+    image_ids: list[int] = []
+    folder_paths: list[str] = []
+
+
+@app.post("/api/download/zip")
+async def download_zip(
+    body: DownloadZipRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """批量下载：将选中的图片 ID 和文件夹路径（含子目录）打包为 ZIP"""
+    rel_paths: set[str] = set()
+
+    if body.image_ids:
+        result = await session.execute(select(Image.relative_path).where(Image.id.in_(body.image_ids)))
+        for row in result.fetchall():
+            rel_paths.add(row[0])
+
+    for raw_path in body.folder_paths or []:
+        path = (raw_path or "").strip().strip("/")
+        if not path or ".." in path or path.startswith("/"):
+            continue
+        escaped = _escape_like(path)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == path)
+        )
+        result = await session.execute(select(Image.relative_path).where(path_filter))
+        for row in result.fetchall():
+            rel_paths.add(row[0])
+
+    # 只保留磁盘上存在的文件
+    existing = []
+    for rp in rel_paths:
+        full = PHOTOS_DIR / rp
+        if full.is_file():
+            existing.append(rp)
+
+    if not existing:
+        raise HTTPException(status_code=400, detail="没有可下载的文件")
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for rp in existing:
+                full = PHOTOS_DIR / rp
+                if full.is_file():
+                    zf.write(full, rp)
+        background_tasks.add_task(os.unlink, tmp_path)
+        return FileResponse(
+            path=tmp_path,
+            filename="download.zip",
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="download.zip"'},
+        )
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail="打包下载失败")
 
 
 @app.get("/api/subfolders")

@@ -89,11 +89,26 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
             移动
         </button>
+        <button type="button" id="select-mode-fab-download" class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.downloadSelected && window.downloadSelected()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            下载
+        </button>
         <button type="button" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onclick="window.toggleSelectMode && window.toggleSelectMode()">取消选择</button>
         <button type="button" id="select-mode-fab-delete" class="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.confirmDeleteSelected && window.confirmDeleteSelected()">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             删除
         </button>
+    </div>
+</div>
+
+<!-- 批量下载打包中提示（打包 ZIP 时显示） -->
+<div id="download-loading-overlay" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+    <div class="bg-white rounded-xl shadow-xl px-8 py-6 flex flex-col items-center gap-4 min-w-[220px]">
+        <svg class="w-10 h-10 animate-spin text-slate-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="text-sm font-medium text-slate-700">正在打包，请稍候...</p>
     </div>
 </div>
 
@@ -156,6 +171,11 @@
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
                         title="移动到其他文件夹">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                </button>
+                <button type="button" id="modal-download-btn" onclick="downloadCurrentImage(); event.stopPropagation();"
+                        class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
+                        title="下载当前图片">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 </button>
                 <button type="button" id="modal-delete-btn" onclick="deleteCurrentImage(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-red-500/80 text-white/80 hover:text-white transition-all"
@@ -640,6 +660,20 @@ function deleteCurrentImage() {
             if (btn) btn.disabled = false;
         });
     });
+}
+
+function downloadCurrentImage() {
+    if (modalImages.length === 0) return;
+    var imageId = modalImageIds[modalIndex];
+    if (imageId != null) {
+        window.location.href = '/api/download/image?id=' + encodeURIComponent(imageId);
+    } else {
+        var url = modalImages[modalIndex];
+        if (url && url.indexOf('/photos/') === 0) {
+            var rel = url.slice('/photos/'.length);
+            window.location.href = '/api/download/image?relative_path=' + encodeURIComponent(rel);
+        }
+    }
 }
 
 function refreshGalleryFromModal() {
@@ -1432,6 +1466,8 @@ document.addEventListener('keydown', function(e) {
         if (delBtn) delBtn.classList.add('hidden');
         var moveBtn = document.getElementById('move-selected-btn');
         if (moveBtn) moveBtn.classList.add('hidden');
+        var downloadBtn = document.getElementById('download-selected-btn');
+        if (downloadBtn) downloadBtn.classList.add('hidden');
         // 隐藏底部固定操作栏
         var fab = document.getElementById('select-mode-fab');
         if (fab) fab.classList.add('hidden');
@@ -1471,6 +1507,7 @@ document.addEventListener('keydown', function(e) {
         var imgCount = _selectedImages.size;
         var delBtn = document.getElementById('delete-selected-btn');
         var moveBtn = document.getElementById('move-selected-btn');
+        var downloadBtn = document.getElementById('download-selected-btn');
         var fabMoveBtn = document.getElementById('select-mode-fab-move');
         var countText = document.getElementById('delete-count-text');
         var fab = document.getElementById('select-mode-fab');
@@ -1478,6 +1515,7 @@ document.addEventListener('keydown', function(e) {
         var scrollEl = document.getElementById('scroll-container');
         if (total > 0) {
             if (delBtn) delBtn.classList.remove('hidden');
+            if (downloadBtn) downloadBtn.classList.remove('hidden');
             if (countText) countText.textContent = '删除 (' + total + ')';
             if (moveBtn) (total > 0 ? moveBtn.classList.remove('hidden') : moveBtn.classList.add('hidden'));
             if (fabMoveBtn) (total > 0 ? fabMoveBtn.classList.remove('hidden') : fabMoveBtn.classList.add('hidden'));
@@ -1486,6 +1524,7 @@ document.addEventListener('keydown', function(e) {
             if (scrollEl) scrollEl.classList.add('pb-24');
         } else {
             if (delBtn) delBtn.classList.add('hidden');
+            if (downloadBtn) downloadBtn.classList.add('hidden');
             if (moveBtn) moveBtn.classList.add('hidden');
             if (fabMoveBtn) fabMoveBtn.classList.add('hidden');
             if (fab) fab.classList.add('hidden');
@@ -1552,6 +1591,47 @@ document.addEventListener('keydown', function(e) {
         // 显示自定义确认对话框
         showDeleteConfirmDialog(msg, function() {
             executeDelete(Array.from(_selectedImages), Array.from(_selectedFolders));
+        });
+    };
+
+    window.downloadSelected = function() {
+        var imgCount = _selectedImages.size;
+        var folderCount = _selectedFolders.size;
+        if (imgCount === 0 && folderCount === 0) return;
+        if (imgCount === 1 && folderCount === 0) {
+            var id = Array.from(_selectedImages)[0];
+            window.location.href = '/api/download/image?id=' + encodeURIComponent(id);
+            return;
+        }
+        var btn = document.getElementById('select-mode-fab-download');
+        var overlay = document.getElementById('download-loading-overlay');
+        if (btn) btn.disabled = true;
+        if (overlay) overlay.classList.remove('hidden');
+        fetch('/api/download/zip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_ids: Array.from(_selectedImages),
+                folder_paths: Array.from(_selectedFolders)
+            })
+        }).then(function(r) {
+            if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || '下载失败'); });
+            return r.blob();
+        }).then(function(blob) {
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'download.zip';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }).catch(function(err) {
+            alert(err.message || '下载失败');
+        }).finally(function() {
+            if (btn) btn.disabled = false;
+            if (overlay) overlay.classList.add('hidden');
         });
     };
 
