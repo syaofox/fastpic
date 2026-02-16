@@ -580,12 +580,13 @@ async def gallery(
         has_filters = True
 
     # 文件夹模式：仅当前层直接文件，不含子文件夹下的图片
+    # 例外：按标签筛选且 path 为空时，显示所有带该标签的图片（否则根目录下通常无图）
     if mode == "folder":
         if path:
             escaped = _escape_like(path)
             direct_filter = ~Image.relative_path.like(f"{escaped}/%/%", escape="\\")
             stmt = stmt.where(direct_filter)
-        else:
+        elif not filter_tag:
             stmt = stmt.where(~Image.relative_path.like("%/%"))
 
     # 总数（需要复制相同的过滤条件）
@@ -611,7 +612,7 @@ async def gallery(
     if mode == "folder":
         if path:
             count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
-        else:
+        elif not filter_tag:
             count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
     total = (await session.execute(count_stmt)).scalar() or 0
 
