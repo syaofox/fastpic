@@ -23,9 +23,9 @@ COPY . .
 # ---------- 阶段 2: 运行时镜像 ----------
 FROM python:3.12-slim AS runtime
 
-# 时区支持（安装 tzdata 以支持 TZ 环境变量）
+# 时区支持 + ffmpeg（视频缩略图生成）
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    && apt-get install -y --no-install-recommends tzdata ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户（默认 UID/GID 1000，可通过构建参数覆盖）
