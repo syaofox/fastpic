@@ -441,7 +441,7 @@ function showImageInfo() {
                 tagsHtml += '<span class="modal-tag-pill inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-red-500/60 cursor-pointer text-xs" data-tag="' + escapeAttr(t) + '" title="点击移除">#' + escapeHtml(t) + ' <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></span>';
             });
             tagsHtml += '</span></div>';
-            tagsHtml += '<div class="mt-2 relative"><input type="text" id="modal-add-tag-input" placeholder="添加标签（输入后按 Enter）..." class="w-full px-2 py-1 text-sm bg-white/10 border border-white/20 rounded text-white placeholder-white/50 focus:outline-none focus:ring-1 focus:ring-white/50" data-image-id="' + imageId + '"><div id="modal-tag-suggestions" class="hidden absolute left-0 right-0 top-full z-20 mt-1 max-h-32 overflow-y-auto bg-slate-800 rounded border border-white/10 text-sm shadow-lg"></div></div>';
+            tagsHtml += '<div class="mt-2 relative"><input type="text" id="modal-add-tag-input" placeholder="添加标签（点击输入框选择或输入后按 Enter）..." class="w-full px-2 py-1 text-sm bg-white/10 border border-white/20 rounded text-white placeholder-white/50 focus:outline-none focus:ring-1 focus:ring-white/50" data-image-id="' + imageId + '"><div id="modal-tag-suggestions" class="hidden absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto bg-slate-800 rounded border border-white/10 text-sm shadow-lg"></div></div>';
 
             content.innerHTML =
                 '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">完整路径</span><span class="break-all text-right">' + escapeHtml(data.full_path) + '</span></div>' +
@@ -492,38 +492,50 @@ function _bindModalTagHandlers(container, imageId) {
     var addInput = container.querySelector('#modal-add-tag-input');
     var suggestions = container.querySelector('#modal-tag-suggestions');
     if (addInput && suggestions) {
-        var debounceTimer;
-        addInput.addEventListener('input', function() {
-            clearTimeout(debounceTimer);
-            var q = addInput.value.trim();
-            if (q.length < 1) { suggestions.classList.add('hidden'); return; }
-            debounceTimer = setTimeout(function() {
-                fetch('/api/tags?q=' + encodeURIComponent(q) + '&limit=10')
+        var allTagsCache = [];
+        function renderTagButtons(tags) {
+            suggestions.innerHTML = '';
+            tags.forEach(function(t) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'block w-full text-left px-3 py-2 hover:bg-white/10 text-white/90';
+                btn.textContent = '#' + t.name + (t.count > 0 ? ' (' + t.count + ')' : '');
+                btn.addEventListener('click', function() {
+                    fetch('/api/images/' + imageId + '/tags', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tags: [t.name] })
+                    }).then(function(r) { return r.json(); }).then(function() {
+                        addInput.value = '';
+                        suggestions.classList.add('hidden');
+                        showImageInfo();
+                    });
+                });
+                suggestions.appendChild(btn);
+            });
+            suggestions.classList.toggle('hidden', !suggestions.children.length);
+            suggestions.style.minWidth = addInput.offsetWidth + 'px';
+        }
+        function loadAndShowTags(q) {
+            if (allTagsCache.length > 0) {
+                var filtered = q ? allTagsCache.filter(function(t) { return t.name.toLowerCase().indexOf(q.toLowerCase()) >= 0; }) : allTagsCache;
+                renderTagButtons(filtered);
+            } else {
+                fetch('/api/tags?limit=200')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        suggestions.innerHTML = '';
-                        (data.tags || []).forEach(function(t) {
-                            var btn = document.createElement('button');
-                            btn.type = 'button';
-                            btn.className = 'block w-full text-left px-3 py-2 hover:bg-white/10 text-white/90';
-                            btn.textContent = '#' + t.name + (t.count > 0 ? ' (' + t.count + ')' : '');
-                            btn.addEventListener('click', function() {
-                                fetch('/api/images/' + imageId + '/tags', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ tags: [t.name] })
-                                }).then(function(r) { return r.json(); }).then(function() {
-                                    addInput.value = '';
-                                    suggestions.classList.add('hidden');
-                                    showImageInfo();
-                                });
-                            });
-                            suggestions.appendChild(btn);
-                        });
-                        suggestions.classList.toggle('hidden', !suggestions.children.length);
-                        suggestions.style.minWidth = addInput.offsetWidth + 'px';
+                        allTagsCache = data.tags || [];
+                        var filtered = q ? allTagsCache.filter(function(t) { return t.name.toLowerCase().indexOf(q.toLowerCase()) >= 0; }) : allTagsCache;
+                        renderTagButtons(filtered);
                     });
-            }, 200);
+            }
+        }
+        addInput.addEventListener('focus', function() {
+            loadAndShowTags(addInput.value.trim());
+        });
+        addInput.addEventListener('input', function() {
+            var q = addInput.value.trim();
+            loadAndShowTags(q);
         });
         addInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
@@ -542,12 +554,24 @@ function _bindModalTagHandlers(container, imageId) {
                 }
             }
         });
-        document.addEventListener('click', function closeSuggestions(ev) {
-            if (!addInput.contains(ev.target) && !suggestions.contains(ev.target)) {
-                suggestions.classList.add('hidden');
-                document.removeEventListener('click', closeSuggestions);
+        var closeListenerActive = false;
+        function setupCloseOnClickOutside() {
+            if (closeListenerActive) return;
+            closeListenerActive = true;
+            function closeSuggestions(ev) {
+                if (!addInput.contains(ev.target) && !suggestions.contains(ev.target)) {
+                    suggestions.classList.add('hidden');
+                    closeListenerActive = false;
+                    document.removeEventListener('click', closeSuggestions);
+                }
             }
-        });
+            setTimeout(function() { document.addEventListener('click', closeSuggestions); }, 0);
+        }
+        var origRenderTagButtons = renderTagButtons;
+        renderTagButtons = function(tags) {
+            origRenderTagButtons(tags);
+            if (tags.length > 0) setupCloseOnClickOutside();
+        };
     }
 }
 
