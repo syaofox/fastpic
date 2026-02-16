@@ -899,6 +899,14 @@ class RenameTagRequest(BaseModel):
     name: str
 
 
+class MergeTagRequest(BaseModel):
+    target: str
+
+
+class BatchDeleteTagsRequest(BaseModel):
+    names: list[str]
+
+
 @app.put("/api/tags/{tag_name:path}")
 async def rename_tag(
     tag_name: str,
@@ -943,6 +951,76 @@ async def delete_tag(
     await session.delete(tag)
     await session.commit()
     return {"deleted": True}
+
+
+@app.post("/api/tags/{tag_name:path}/merge")
+async def merge_tag(
+    tag_name: str,
+    body: MergeTagRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """将标签 A 合并到 B：A 下所有图片改为 B，再删除 A"""
+    tag_name = tag_name.strip()
+    target_name = (body.target or "").strip()
+    if not tag_name:
+        raise HTTPException(status_code=400, detail="源标签名不能为空")
+    if not target_name:
+        raise HTTPException(status_code=400, detail="目标标签名不能为空")
+    if tag_name == target_name:
+        raise HTTPException(status_code=400, detail="源标签与目标标签相同")
+    result = await session.execute(select(Tag).where(Tag.name == tag_name))
+    source_tag = result.scalar_one_or_none()
+    if not source_tag:
+        raise HTTPException(status_code=404, detail="源标签不存在")
+    target_result = await session.execute(select(Tag).where(Tag.name == target_name))
+    target_tag = target_result.scalar_one_or_none()
+    if not target_tag:
+        raise HTTPException(status_code=404, detail="目标标签不存在")
+    # 获取源标签关联的所有图片 id
+    img_result = await session.execute(
+        select(ImageTag.image_id).where(ImageTag.tag_id == source_tag.id)
+    )
+    image_ids = [r[0] for r in img_result.fetchall()]
+    # 对每张图片：若尚无目标标签则添加，再移除源标签
+    for image_id in image_ids:
+        has_target = await session.execute(
+            select(ImageTag).where(
+                ImageTag.image_id == image_id,
+                ImageTag.tag_id == target_tag.id,
+            )
+        )
+        if has_target.scalar_one_or_none() is None:
+            session.add(ImageTag(image_id=image_id, tag_id=target_tag.id))
+        await session.execute(
+            delete(ImageTag).where(
+                ImageTag.image_id == image_id,
+                ImageTag.tag_id == source_tag.id,
+            )
+        )
+    await session.delete(source_tag)
+    await session.commit()
+    return {"merged": True, "images_updated": len(image_ids)}
+
+
+@app.post("/api/tags/batch-delete")
+async def batch_delete_tags(
+    body: BatchDeleteTagsRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """批量删除多个标签"""
+    names = [n.strip() for n in (body.names or []) if (n or "").strip()]
+    if not names:
+        raise HTTPException(status_code=400, detail="请至少选择一个标签")
+    deleted = 0
+    for tag_name in names:
+        result = await session.execute(select(Tag).where(Tag.name == tag_name))
+        tag = result.scalar_one_or_none()
+        if tag:
+            await session.execute(delete(ImageTag).where(ImageTag.tag_id == tag.id))
+            await session.delete(tag)
+            deleted += 1
+    await session.commit()
+    return {"deleted": deleted}
 
 
 @app.get("/api/images/{image_id:int}/tags")

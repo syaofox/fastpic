@@ -151,12 +151,26 @@
                         <button type="button" onclick="loadTags()" class="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors">刷新</button>
                     </div>
                 </div>
+                <div id="tags-batch-actions" class="hidden mb-4 flex items-center gap-3">
+                    <span id="tags-selected-count" class="text-sm text-slate-600">已选 0 项</span>
+                    <button type="button" id="tags-merge-btn" onclick="mergeSelectedTags()"
+                            class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        合并到...
+                    </button>
+                    <button type="button" id="tags-batch-delete-btn" onclick="batchDeleteSelectedTags()"
+                            class="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        批量删除
+                    </button>
+                </div>
                 <div id="tags-list-container" class="border border-slate-200 rounded-lg overflow-hidden">
                     <div id="tags-list-loading" class="p-8 text-center text-slate-500 text-sm">加载中...</div>
                     <div id="tags-list-empty" class="hidden p-8 text-center text-slate-500 text-sm">暂无标签，可在图片预览中添加</div>
                     <table id="tags-list-table" class="hidden w-full text-sm">
                         <thead class="bg-slate-50 border-b border-slate-200">
                             <tr>
+                                <th class="w-10 px-2 py-3">
+                                    <input type="checkbox" id="tags-select-all" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" title="全选">
+                                </th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-700">标签名</th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-700">关联图片数</th>
                                 <th class="text-right px-4 py-3 font-medium text-slate-700">操作</th>
@@ -255,6 +269,26 @@
             </button>
         </div>
     </div>
+    <div id="settings-modal-merge" class="hidden w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-xl" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b border-slate-200">
+            <h3 class="text-base font-semibold text-slate-800">合并到</h3>
+        </div>
+        <div class="px-6 py-4">
+            <p class="text-sm text-slate-600 mb-3">将选中的标签合并到以下目标标签：</p>
+            <select id="settings-merge-target" class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </select>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+            <button type="button" id="settings-merge-cancel"
+                    class="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                取消
+            </button>
+            <button type="button" id="settings-merge-confirm"
+                    class="px-4 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors">
+                合并
+            </button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -265,6 +299,7 @@ function settingsModalCloseIfOverlay(e) {
         document.getElementById('settings-modal-prompt').classList.add('hidden');
         document.getElementById('settings-modal-confirm').classList.add('hidden');
         document.getElementById('settings-modal-alert').classList.add('hidden');
+        document.getElementById('settings-modal-merge').classList.add('hidden');
     }
 }
 
@@ -528,10 +563,41 @@ function triggerRebuild() {
 // 标签管理
 var tagsSearchDebounceTimer = null;
 var tagsSearchInput = document.getElementById('tags-search-input');
+var tagsListCache = [];
 if (tagsSearchInput) tagsSearchInput.addEventListener('input', function() {
     clearTimeout(tagsSearchDebounceTimer);
     tagsSearchDebounceTimer = setTimeout(loadTags, 300);
 });
+
+function getSelectedTagNames() {
+    var rows = document.querySelectorAll('#tags-list-body tr[data-tag-name]');
+    var names = [];
+    rows.forEach(function(row) {
+        var cb = row.querySelector('.tag-row-checkbox');
+        if (cb && cb.checked) names.push(row.getAttribute('data-tag-name'));
+    });
+    return names;
+}
+
+function updateTagsBatchActions() {
+    var actions = document.getElementById('tags-batch-actions');
+    var countEl = document.getElementById('tags-selected-count');
+    var mergeBtn = document.getElementById('tags-merge-btn');
+    var batchDelBtn = document.getElementById('tags-batch-delete-btn');
+    var selectAll = document.getElementById('tags-select-all');
+    var rows = document.querySelectorAll('#tags-list-body .tag-row-checkbox');
+    var selected = getSelectedTagNames();
+    if (selected.length > 0) {
+        actions.classList.remove('hidden');
+        countEl.textContent = '已选 ' + selected.length + ' 项';
+        mergeBtn.disabled = selected.length < 2;
+        batchDelBtn.disabled = false;
+    } else {
+        actions.classList.add('hidden');
+    }
+    selectAll.checked = rows.length > 0 && selected.length === rows.length;
+    selectAll.indeterminate = rows.length > 0 && selected.length > 0 && selected.length < rows.length;
+}
 
 function loadTags() {
     var loading = document.getElementById('tags-list-loading');
@@ -543,6 +609,7 @@ function loadTags() {
     loading.classList.remove('hidden');
     empty.classList.add('hidden');
     table.classList.add('hidden');
+    document.getElementById('tags-batch-actions').classList.add('hidden');
 
     var url = '/api/tags?limit=200';
     if (q) url += '&q=' + encodeURIComponent(q);
@@ -550,6 +617,7 @@ function loadTags() {
     fetch(url).then(function(r) { return r.json(); }).then(function(data) {
         loading.classList.add('hidden');
         var tags = data.tags || [];
+        tagsListCache = tags;
         if (tags.length === 0) {
             empty.classList.remove('hidden');
         } else {
@@ -559,6 +627,7 @@ function loadTags() {
                 var name = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
                 var attVal = raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 return '<tr class="hover:bg-slate-50" data-tag-name="' + attVal + '">' +
+                    '<td class="w-10 px-2 py-3"><input type="checkbox" class="tag-row-checkbox rounded border-slate-300 text-blue-600 focus:ring-blue-500"></td>' +
                     '<td class="px-4 py-3 text-slate-800">#' + name + '</td>' +
                     '<td class="px-4 py-3 text-slate-600">' + (t.count || 0) + '</td>' +
                     '<td class="px-4 py-3 text-right">' +
@@ -572,11 +641,99 @@ function loadTags() {
             body.querySelectorAll('.tag-delete-btn').forEach(function(btn) {
                 btn.onclick = function() { deleteTag(btn.closest('tr').getAttribute('data-tag-name')); };
             });
+            body.querySelectorAll('.tag-row-checkbox').forEach(function(cb) {
+                cb.onchange = updateTagsBatchActions;
+            });
         }
+        var selectAllEl = document.getElementById('tags-select-all');
+        selectAllEl.onchange = function() {
+            var checked = selectAllEl.checked;
+            body.querySelectorAll('.tag-row-checkbox').forEach(function(cb) { cb.checked = checked; });
+            updateTagsBatchActions();
+        };
     }).catch(function(err) {
         loading.classList.add('hidden');
         empty.classList.remove('hidden');
         empty.textContent = '加载失败: ' + err;
+    });
+}
+
+function mergeSelectedTags() {
+    var selected = getSelectedTagNames();
+    if (selected.length < 2) {
+        showSettingsAlert('请至少选择两个标签进行合并');
+        return;
+    }
+    var selectEl = document.getElementById('settings-merge-target');
+    selectEl.innerHTML = tagsListCache.map(function(t) {
+        var name = (t.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        var val = (t.name || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return '<option value="' + val + '">#' + name + '</option>';
+    }).join('');
+    var overlay = document.getElementById('settings-modal-overlay');
+    var modal = document.getElementById('settings-modal-merge');
+    overlay.classList.remove('hidden');
+    modal.classList.remove('hidden');
+
+    function close() {
+        overlay.classList.add('hidden');
+        modal.classList.add('hidden');
+    }
+
+    document.getElementById('settings-merge-cancel').onclick = close;
+    document.getElementById('settings-merge-confirm').onclick = function() {
+        var targetName = selectEl.value;
+        if (!targetName) {
+            showSettingsAlert('请选择目标标签');
+            return;
+        }
+        var toMerge = selected.filter(function(n) { return n !== targetName; });
+        if (toMerge.length === 0) {
+            showSettingsAlert('目标标签已在选中列表中，无需合并');
+            close();
+            return;
+        }
+        close();
+        var promises = toMerge.map(function(name) {
+            return fetch('/api/tags/' + encodeURIComponent(name) + '/merge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target: targetName })
+            });
+        });
+        Promise.all(promises).then(function(responses) {
+            var failed = responses.filter(function(r) { return !r.ok; });
+            if (failed.length > 0) {
+                failed[0].json().then(function(d) { showSettingsAlert('合并失败: ' + (d.detail || '未知错误')); });
+            } else {
+                loadTags();
+            }
+        }).catch(function(err) {
+            showSettingsAlert('合并失败: ' + err.message);
+        });
+    };
+}
+
+function batchDeleteSelectedTags() {
+    var selected = getSelectedTagNames();
+    if (selected.length === 0) {
+        showSettingsAlert('请先选择要删除的标签');
+        return;
+    }
+    showSettingsConfirm('确认批量删除', '确定要删除选中的 ' + selected.length + ' 个标签吗？将同时移除这些标签在所有图片上的关联。', function() {
+        fetch('/api/tags/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ names: selected })
+        }).then(function(r) {
+            if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });
+            return r.json();
+        }).then(function(data) {
+            loadTags();
+            showSettingsAlert('已删除 ' + (data.deleted || 0) + ' 个标签');
+        }).catch(function(err) {
+            showSettingsAlert('批量删除失败: ' + err.message);
+        });
     });
 }
 
