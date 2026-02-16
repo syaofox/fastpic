@@ -115,7 +115,9 @@
 
 <!-- 大图预览模态框 -->
 <div id="modal" class="fixed inset-0 z-50 hidden" onclick="closeModal(event)">
-    <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex items-center justify-center">
+    <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex flex-row">
+        <!-- 左侧：主内容区（点击空白区域关闭） -->
+        <div class="flex-1 min-w-0 relative flex items-center justify-center" onclick="if(event.target===this) closeModalAndStopSlideshow();">
         <!-- 顶部工具栏 -->
         <div class="absolute top-0 left-0 right-0 flex items-center justify-between p-4 z-10" onclick="event.stopPropagation()">
             <!-- 左侧：幻灯片控件 -->
@@ -195,9 +197,10 @@
         <video id="modal-video" class="max-w-[90vw] max-h-[90vh] object-contain hidden" controls onclick="event.stopPropagation()"></video>
         <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">›</button>
         <div id="modal-image-counter" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/50 text-white/90 text-sm font-medium" onclick="event.stopPropagation()">1/1</div>
-        <!-- 图片信息：内嵌在左下角，由「图片信息」按钮开关 -->
-        <div id="modal-image-info-panel" class="absolute bottom-4 left-4 z-10 hidden max-w-md rounded-lg bg-black/60 backdrop-blur border border-white/10 shadow-xl overflow-hidden" onclick="event.stopPropagation()">
-            <div id="image-info-content" class="p-3 text-xs text-white/90 space-y-1.5 font-mono max-h-[40vh] overflow-y-auto">
+        </div>
+        <!-- 右侧：图片信息面板（由「图片信息」按钮开关） -->
+        <div id="modal-image-info-panel" class="hidden flex-shrink-0 w-72 h-full bg-black/60 backdrop-blur border-l border-white/10 flex flex-col overflow-hidden" onclick="event.stopPropagation()">
+            <div id="image-info-content" class="flex-1 p-4 text-sm text-white/90 space-y-3 font-mono overflow-y-auto">
                 <div class="text-white/50">加载中...</div>
             </div>
         </div>
