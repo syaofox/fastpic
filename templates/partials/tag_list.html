@@ -1,0 +1,22 @@
+{% if all_tags %}
+<div class="mt-4 pt-4 border-t border-slate-100">
+    <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">标签</h3>
+    <div class="space-y-0.5 max-h-48 overflow-y-auto">
+        {% for t in all_tags %}
+        <a href="#"
+           class="tag-link flex items-center px-2 py-1.5 rounded transition-colors hover:bg-slate-100 text-slate-700 text-sm"
+           data-tag="{{ t.name }}"
+           hx-get="/gallery?path=&search=&mode=folder&sort_by=modified_at&sort_order=desc&page=1&filter_tag={{ t.name|urlencode_path }}"
+           hx-target="#gallery-container"
+           hx-swap="innerHTML"
+           hx-include="#cols-input, #sort-by-input, #sort-order-input, #mode-input"
+           hx-on:click="document.querySelector('[name=path]').value = '';">
+            <span class="truncate"># {{ t.name }}</span>
+            {% if t.count > 0 %}
+            <span class="ml-auto text-xs text-slate-400 pl-2 flex-shrink-0">{{ t.count }}</span>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}

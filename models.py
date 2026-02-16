@@ -34,6 +34,20 @@ class Image(SQLModel, table=True):
     media_type: str = Field(default="image", index=True)  # "image" | "video"
 
 
+class Tag(SQLModel, table=True):
+    __tablename__ = "tags"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+
+
+class ImageTag(SQLModel, table=True):
+    __tablename__ = "image_tags"
+
+    image_id: int = Field(foreign_key="images.id", primary_key=True)
+    tag_id: int = Field(foreign_key="tags.id", primary_key=True)
+
+
 # 同步引擎用于 create_all
 sync_engine = create_engine(DATABASE_URL, echo=False)
 async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
@@ -95,11 +109,34 @@ def _run_media_type_migration() -> None:
             pass
 
 
+def _run_tags_migration() -> None:
+    """创建 tags 和 image_tags 表（若不存在）"""
+    from sqlalchemy import text
+
+    with sync_engine.connect() as conn:
+        r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='tags'"))
+        if r.fetchone() is None:
+            conn.execute(text(
+                "CREATE TABLE tags (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, name VARCHAR NOT NULL)"
+            ))
+            conn.execute(text("CREATE UNIQUE INDEX ix_tags_name ON tags (name)"))
+            conn.commit()
+        r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='image_tags'"))
+        if r.fetchone() is None:
+            conn.execute(text(
+                "CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, "
+                "PRIMARY KEY (image_id, tag_id), "
+                "FOREIGN KEY(image_id) REFERENCES images (id), FOREIGN KEY(tag_id) REFERENCES tags (id))"
+            ))
+            conn.commit()
+
+
 def init_db() -> None:
     """创建数据库表"""
     SQLModel.metadata.create_all(sync_engine)
     _run_natural_sort_migration()
     _run_media_type_migration()
+    _run_tags_migration()
 
 
 async def get_async_session():

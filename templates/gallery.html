@@ -1,12 +1,12 @@
 {% if not append %}
-<div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" class="hidden"></div>
+<div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" data-filter-tag="{{ filter_tag or '' }}" class="hidden"></div>
 <!-- 顶栏：面包屑 + 操作按钮 -->
 <div class="gallery-top-bar flex items-center gap-3 flex-wrap">
     <!-- 面包屑 -->
     <nav class="text-sm text-slate-600 flex items-center flex-shrink-0">
         <a href="/"
            class="hover:text-blue-600 transition-colors"
-           hx-get="/gallery?path=&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}"
+           hx-get="/gallery?path=&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
            hx-on:click="document.querySelector('[name=path]').value = ''">全部文件夹</a>
@@ -18,7 +18,7 @@
         {% else %}
         <a href="?path={{ seg_path|urlencode_path }}"
            class="hover:text-blue-600 transition-colors"
-           hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}"
+           hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
            hx-on:click="document.querySelector('[name=path]').value = '{{ seg_path }}'">{{ breadcrumb_parts[i] }}</a>
@@ -43,7 +43,7 @@
         </div>
     </div>
     <button type="button" id="view-mode-btn" class="p-2 rounded transition-colors {{ 'bg-blue-100 text-blue-600' if mode == 'folder' else 'bg-slate-100 text-slate-700 hover:bg-slate-100' }}" title="{{ '切换到瀑布流' if mode == 'folder' else '切换到文件夹' }}"
-            hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ 'waterfall' if mode == 'folder' else 'folder' }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}"
+            hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ 'waterfall' if mode == 'folder' else 'folder' }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
             hx-target="#gallery-container"
             hx-swap="innerHTML"
             hx-on:click="document.querySelector('[name=mode]').value = '{{ 'waterfall' if mode == 'folder' else 'folder' }}'">
@@ -107,6 +107,13 @@
                         <option value="52428800" {{ 'selected' if filter_size_max == '52428800' }}>50 MB</option>
                     </select>
                 </div>
+            </div>
+            <!-- 标签 -->
+            <div class="mb-3">
+                <label class="block text-xs font-medium text-slate-500 mb-1">标签</label>
+                <input type="text" id="filter-tag-input" placeholder="输入标签名，如：风景"
+                       value="{{ filter_tag or '' }}"
+                       class="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             </div>
             <!-- 修改日期 -->
             <div class="mb-4">
@@ -204,7 +211,7 @@
         <div class="select-overlay hidden absolute inset-0 bg-blue-500/10 z-[5] pointer-events-none rounded-lg ring-2 ring-blue-500"></div>
         <a href="?path={{ sub.full_path|urlencode_path }}"
            class="block folder-nav-link"
-           hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}"
+           hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
            onclick="if(window._selectMode){event.stopPropagation();event.preventDefault();window.handleItemClick(event,this.closest('.selectable-item'));return false;}"
@@ -269,13 +276,25 @@
             {% if mode == 'folder' %}
             <div class="px-2 py-1 text-xs text-slate-600 truncate">{{ img.filename }}</div>
             {% endif %}
+            {% set all_img_tags = (image_tags_map|default({})).get(img.id, []) %}
+            {% set img_tags = all_img_tags[:3] %}
+            {% if img_tags %}
+            <div class="px-2 pb-1 flex flex-wrap gap-1 text-xs">
+                {% for t in img_tags %}
+                <span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">#{{ t }}</span>
+                {% endfor %}
+                {% if all_img_tags|length > 3 %}
+                <span class="text-slate-400">+{{ (all_img_tags|length) - 3 }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
         </a>
     </div>
     {% endfor %}
 {% if has_next %}
 <div class="scroll-sentinel"
      style="height: 4px;"
-     hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page={{ page + 1 }}&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}"
+     hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page={{ page + 1 }}&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
      hx-trigger="intersect once root:#scroll-container threshold:0"
      hx-swap="beforeend"
      hx-target="#gallery-grid">

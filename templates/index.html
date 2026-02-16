@@ -14,6 +14,7 @@
                 {% set current_path = request.query_params.get('path') or '' %}
                 {% include "partials/folder_tree.html" with context %}
             </div>
+            {% include "partials/tag_list.html" with context %}
         </div>
         <div class="px-4 py-2 border-t border-slate-100 flex-shrink-0">
             <span class="text-xs text-slate-400">FastPic v{{ version }}</span>
@@ -338,7 +339,8 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds, pageMediaTypes
         filter_size_min: marker.getAttribute('data-filter-size-min') || '',
         filter_size_max: marker.getAttribute('data-filter-size-max') || '',
         filter_date_from: marker.getAttribute('data-filter-date-from') || '',
-        filter_date_to: marker.getAttribute('data-filter-date-to') || ''
+        filter_date_to: marker.getAttribute('data-filter-date-to') || '',
+        filter_tag: marker.getAttribute('data-filter-tag') || ''
     });
     fetch('/api/folder-images?' + params.toString())
         .then(function(r) { return r.json(); })
@@ -433,12 +435,23 @@ function showImageInfo() {
             return res.json();
         })
         .then(function(data) {
+            var tags = data.tags || [];
+            var tagsHtml = '<div class="flex justify-between gap-3 mt-2 pt-2 border-t border-white/20"><span class="text-white/50 flex-shrink-0">标签</span><span class="flex flex-wrap gap-1 justify-end">';
+            tags.forEach(function(t) {
+                tagsHtml += '<span class="modal-tag-pill inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-red-500/60 cursor-pointer text-xs" data-tag="' + escapeAttr(t) + '" title="点击移除">#' + escapeHtml(t) + ' <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></span>';
+            });
+            tagsHtml += '</span></div>';
+            tagsHtml += '<div class="mt-2 relative"><input type="text" id="modal-add-tag-input" placeholder="添加标签（输入后按 Enter）..." class="w-full px-2 py-1 text-sm bg-white/10 border border-white/20 rounded text-white placeholder-white/50 focus:outline-none focus:ring-1 focus:ring-white/50" data-image-id="' + imageId + '"><div id="modal-tag-suggestions" class="hidden absolute left-0 right-0 top-full z-20 mt-1 max-h-32 overflow-y-auto bg-slate-800 rounded border border-white/10 text-sm shadow-lg"></div></div>';
+
             content.innerHTML =
                 '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">完整路径</span><span class="break-all text-right">' + escapeHtml(data.full_path) + '</span></div>' +
                 '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件名</span><span class="break-all text-right">' + escapeHtml(data.filename) + '</span></div>' +
                 '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">分辨率</span><span>' + escapeHtml(data.resolution) + '</span></div>' +
                 '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件大小</span><span>' + escapeHtml(data.file_size) + '</span></div>' +
-                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">修改时间</span><span>' + escapeHtml(data.modified_at) + '</span></div>';
+                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">修改时间</span><span>' + escapeHtml(data.modified_at) + '</span></div>' +
+                tagsHtml;
+
+            _bindModalTagHandlers(content, imageId);
         })
         .catch(function(err) {
             content.innerHTML = '<div class="text-red-300">' + escapeHtml(String(err)) + '</div>';
@@ -450,6 +463,92 @@ function escapeHtml(s) {
     var div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+}
+
+function escapeAttr(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function _bindModalTagHandlers(container, imageId) {
+    if (!container) return;
+    container.addEventListener('click', function(e) {
+        var pill = e.target.closest('.modal-tag-pill');
+        if (pill) {
+            e.preventDefault();
+            e.stopPropagation();
+            var tag = pill.getAttribute('data-tag');
+            if (!tag) return;
+            fetch('/api/images/' + imageId + '/tags/' + encodeURIComponent(tag), { method: 'DELETE' })
+                .then(function(r) { return r.json(); })
+                .then(function() { showImageInfo(); });
+        }
+    });
+    var addInput = container.querySelector('#modal-add-tag-input');
+    var suggestions = container.querySelector('#modal-tag-suggestions');
+    if (addInput && suggestions) {
+        var debounceTimer;
+        addInput.addEventListener('input', function() {
+            clearTimeout(debounceTimer);
+            var q = addInput.value.trim();
+            if (q.length < 1) { suggestions.classList.add('hidden'); return; }
+            debounceTimer = setTimeout(function() {
+                fetch('/api/tags?q=' + encodeURIComponent(q) + '&limit=10')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        suggestions.innerHTML = '';
+                        (data.tags || []).forEach(function(t) {
+                            var btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'block w-full text-left px-3 py-2 hover:bg-white/10 text-white/90';
+                            btn.textContent = '#' + t.name + (t.count > 0 ? ' (' + t.count + ')' : '');
+                            btn.addEventListener('click', function() {
+                                fetch('/api/images/' + imageId + '/tags', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ tags: [t.name] })
+                                }).then(function(r) { return r.json(); }).then(function() {
+                                    addInput.value = '';
+                                    suggestions.classList.add('hidden');
+                                    showImageInfo();
+                                });
+                            });
+                            suggestions.appendChild(btn);
+                        });
+                        suggestions.classList.toggle('hidden', !suggestions.children.length);
+                        suggestions.style.minWidth = addInput.offsetWidth + 'px';
+                    });
+            }, 200);
+        });
+        addInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var tag = addInput.value.trim();
+                if (tag) {
+                    fetch('/api/images/' + imageId + '/tags', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tags: [tag] })
+                    }).then(function(r) { return r.json(); }).then(function() {
+                        addInput.value = '';
+                        if (suggestions) suggestions.classList.add('hidden');
+                        showImageInfo();
+                    });
+                }
+            }
+        });
+        document.addEventListener('click', function closeSuggestions(ev) {
+            if (!addInput.contains(ev.target) && !suggestions.contains(ev.target)) {
+                suggestions.classList.add('hidden');
+                document.removeEventListener('click', closeSuggestions);
+            }
+        });
+    }
 }
 
 function prevImage() {
@@ -730,13 +829,16 @@ function refreshGalleryFromModal() {
         '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
         '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
         '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-        '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
+        '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
+        '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
     htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
 }
 
 document.addEventListener('keydown', function(e) {
     const modal = document.getElementById('modal');
     if (modal.classList.contains('hidden')) return;
+    var active = document.activeElement;
+    var isEditable = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
     if (e.key === 'Escape') {
         if (document.fullscreenElement) {
             document.exitFullscreen();
@@ -744,11 +846,11 @@ document.addEventListener('keydown', function(e) {
             stopSlideshow(); modal.classList.add('hidden');
         }
     }
-    if (e.key === 'ArrowLeft') { stopSlideshow(); prevImage(); }
-    if (e.key === 'ArrowRight') { stopSlideshow(); nextImage(); }
-    if (e.key === 'Delete' || e.key === 'Backspace') { deleteCurrentImage(); }
-    if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
-    if (e.key === 'f' || e.key === 'F') { toggleModalFullscreen(); }
+    if (e.key === 'ArrowLeft' && !isEditable) { stopSlideshow(); prevImage(); }
+    if (e.key === 'ArrowRight' && !isEditable) { stopSlideshow(); nextImage(); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditable) { deleteCurrentImage(); }
+    if (e.key === ' ' && !isEditable) { e.preventDefault(); toggleSlideshow(); }
+    if ((e.key === 'f' || e.key === 'F') && !isEditable) { toggleModalFullscreen(); }
 });
 
 // 大图模式：触摸滑动切换图片
@@ -1424,7 +1526,8 @@ document.addEventListener('keydown', function(e) {
             '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
             '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
             '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
+            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
+            '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
 
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
@@ -2006,7 +2109,8 @@ document.addEventListener('keydown', function(e) {
             '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
             '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
             '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
+            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
+            '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
     window.refreshGallery = refreshGallery;
@@ -2046,7 +2150,8 @@ document.addEventListener('keydown', function(e) {
         filter_size_min: '',
         filter_size_max: '',
         filter_date_from: '',
-        filter_date_to: ''
+        filter_date_to: '',
+        filter_tag: ''
     };
 
     function readFilterState() {
@@ -2055,12 +2160,14 @@ document.addEventListener('keydown', function(e) {
         var sMax = document.getElementById('filter-size-max-input');
         var dFrom = document.getElementById('filter-date-from-input');
         var dTo = document.getElementById('filter-date-to-input');
+        var tagInput = document.getElementById('filter-tag-input');
         return {
             filter_filename: fn ? fn.value.trim() : '',
             filter_size_min: sMin ? sMin.value : '',
             filter_size_max: sMax ? sMax.value : '',
             filter_date_from: dFrom ? dFrom.value : '',
-            filter_date_to: dTo ? dTo.value : ''
+            filter_date_to: dTo ? dTo.value : '',
+            filter_tag: tagInput ? tagInput.value.trim() : ''
         };
     }
 
@@ -2081,7 +2188,8 @@ document.addEventListener('keydown', function(e) {
             '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
             '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
             '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '');
+            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
+            '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
 
         htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
     }
@@ -2133,6 +2241,7 @@ document.addEventListener('keydown', function(e) {
         if (e.target.closest('#filter-clear-btn')) {
             // 重置所有输入
             var fn = document.getElementById('filter-filename-input');
+            var tagInput = document.getElementById('filter-tag-input');
             var sMin = document.getElementById('filter-size-min-input');
             var sMax = document.getElementById('filter-size-max-input');
             var dFrom = document.getElementById('filter-date-from-input');
@@ -2142,7 +2251,8 @@ document.addEventListener('keydown', function(e) {
             if (sMax) sMax.value = '';
             if (dFrom) dFrom.value = '';
             if (dTo) dTo.value = '';
-            _filterState = {filter_filename: '', filter_size_min: '', filter_size_max: '', filter_date_from: '', filter_date_to: ''};
+            if (tagInput) tagInput.value = '';
+            _filterState = {filter_filename: '', filter_size_min: '', filter_size_max: '', filter_date_from: '', filter_date_to: '', filter_tag: ''};
             if (filterPopover) filterPopover.classList.add('hidden');
             triggerFilteredGallery(_filterState);
             return;
@@ -2358,6 +2468,7 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
             filterState.filter_size_max = marker.getAttribute('data-filter-size-max') || '';
             filterState.filter_date_from = marker.getAttribute('data-filter-date-from') || '';
             filterState.filter_date_to = marker.getAttribute('data-filter-date-to') || '';
+            filterState.filter_tag = marker.getAttribute('data-filter-tag') || '';
         }
     }
 });

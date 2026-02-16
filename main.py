@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Image, init_db, get_async_session, natural_sort_key
+from models import Image, Tag, ImageTag, init_db, get_async_session, natural_sort_key
 from scanner import scan_photos, scan_videos, cleanup_database, _cache_filename
 from scan_state import begin_scan, end_scan, is_scanning
 from watcher import start_watcher
@@ -327,12 +327,33 @@ async def _get_folder_tree_cached(rel_paths: list[str]) -> tuple[list[list[str]]
 @app.get("/")
 async def index(request: Request, session: AsyncSession = Depends(get_async_session)):
     """返回主页框架"""
+    from sqlalchemy import func
+
     result = await session.execute(select(Image.relative_path))
     rel_paths = [r[0] for r in result.fetchall()]
     folder_tree, nested_tree, folder_counts = await _get_folder_tree_cached(rel_paths)
+
+    # 标签列表（按使用数量降序）
+    tag_stmt = (
+        select(Tag.name, func.count(ImageTag.image_id).label("count"))
+        .outerjoin(ImageTag, ImageTag.tag_id == Tag.id)
+        .group_by(Tag.id, Tag.name)
+        .order_by(func.count(ImageTag.image_id).desc(), Tag.name)
+        .limit(100)
+    )
+    tag_result = await session.execute(tag_stmt)
+    all_tags = [{"name": r[0], "count": r[1] or 0} for r in tag_result.fetchall()]
+
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "folder_tree": folder_tree, "nested_tree": nested_tree, "folder_counts": folder_counts, "version": APP_VERSION},
+        {
+            "request": request,
+            "folder_tree": folder_tree,
+            "nested_tree": nested_tree,
+            "folder_counts": folder_counts,
+            "all_tags": all_tags,
+            "version": APP_VERSION,
+        },
     )
 
 
@@ -457,6 +478,7 @@ async def gallery(
     filter_size_max: str = "",
     filter_date_from: str = "",
     filter_date_to: str = "",
+    filter_tag: str = "",
     session: AsyncSession = Depends(get_async_session),
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）
@@ -466,6 +488,7 @@ async def gallery(
     filter_filename: 文件名包含指定字符串
     filter_size_min/max: 文件大小范围（字节）
     filter_date_from/to: 修改日期范围（ISO 格式日期字符串 YYYY-MM-DD）
+    filter_tag: 按标签过滤
     """
     from sqlalchemy import func
     import time as _time
@@ -548,6 +571,14 @@ async def gallery(
         stmt = stmt.where(Image.modified_at <= _date_to_ts)
         has_filters = True
 
+    # 标签过滤
+    filter_tag = (filter_tag or "").strip()
+    if filter_tag:
+        stmt = stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
+            Tag, Tag.id == ImageTag.tag_id
+        ).where(Tag.name == filter_tag)
+        has_filters = True
+
     # 文件夹模式：仅当前层直接文件，不含子文件夹下的图片
     if mode == "folder":
         if path:
@@ -573,6 +604,10 @@ async def gallery(
         count_stmt = count_stmt.where(Image.modified_at >= _date_from_ts)
     if _date_to_ts is not None:
         count_stmt = count_stmt.where(Image.modified_at <= _date_to_ts)
+    if filter_tag:
+        count_stmt = count_stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
+            Tag, Tag.id == ImageTag.tag_id
+        ).where(Tag.name == filter_tag)
     if mode == "folder":
         if path:
             count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
@@ -582,7 +617,7 @@ async def gallery(
 
     # 子文件夹（仅文件夹模式、首页且无搜索/过滤时），参与排序且排在文件前
     subfolders: list[dict] = []
-    if mode == "folder" and page == 1 and not search and not has_filters:
+    if mode == "folder" and page == 1 and not search and not has_filters and not filter_tag:
         subfolders = await _get_subfolders(session, path, path_filter, sort_by, sort_order)
 
     # 分页
@@ -593,6 +628,23 @@ async def gallery(
     has_next = len(images) > per_page
     if has_next:
         images = images[:per_page]
+
+    # 批量查询当前页图片的标签
+    image_tags_map: dict[int, list[str]] = {}
+    if images:
+        image_ids = [img.id for img in images if img.id]
+        if image_ids:
+            tag_stmt = (
+                select(ImageTag.image_id, Tag.name)
+                .join(Tag, Tag.id == ImageTag.tag_id)
+                .where(ImageTag.image_id.in_(image_ids))
+                .order_by(Tag.name)
+            )
+            tag_result = await session.execute(tag_stmt)
+            for img_id, tag_name in tag_result.fetchall():
+                if img_id not in image_tags_map:
+                    image_tags_map[img_id] = []
+                image_tags_map[img_id].append(tag_name)
 
     # 面包屑
     breadcrumb_parts = path.split("/") if path else []
@@ -619,8 +671,10 @@ async def gallery(
             "filter_size_max": filter_size_max,
             "filter_date_from": filter_date_from,
             "filter_date_to": filter_date_to,
+            "filter_tag": filter_tag,
             "has_filters": has_filters,
             "cols": cols,
+            "image_tags_map": image_tags_map,
         },
     )
 
@@ -636,6 +690,7 @@ async def api_folder_images(
     filter_size_max: str = "",
     filter_date_from: str = "",
     filter_date_to: str = "",
+    filter_tag: str = "",
     session: AsyncSession = Depends(get_async_session),
 ):
     """获取当前文件夹/模式下的全部图片（用于大图浏览模式，无分页）"""
@@ -702,6 +757,12 @@ async def api_folder_images(
     if _date_to_ts is not None:
         stmt = stmt.where(Image.modified_at <= _date_to_ts)
 
+    filter_tag = (filter_tag or "").strip()
+    if filter_tag:
+        stmt = stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
+            Tag, Tag.id == ImageTag.tag_id
+        ).where(Tag.name == filter_tag)
+
     result = await session.execute(stmt)
     images = list(result.scalars().all())
     return {
@@ -767,6 +828,15 @@ async def get_image_info(
     if not img:
         raise HTTPException(status_code=404, detail="图片不存在或已被删除")
 
+    # 查询该图片的标签
+    tag_result = await session.execute(
+        select(Tag.name)
+        .join(ImageTag, ImageTag.tag_id == Tag.id)
+        .where(ImageTag.image_id == image_id)
+        .order_by(Tag.name)
+    )
+    tags = [r[0] for r in tag_result.fetchall()]
+
     full_path = str((PHOTOS_DIR / img.relative_path).resolve())
     modified_dt = datetime.fromtimestamp(img.modified_at)
     modified_str = modified_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -778,7 +848,116 @@ async def get_image_info(
         "resolution": f"{img.width} × {img.height}" if (img.width and img.height) else "—",
         "file_size": _format_file_size(img.file_size or 0),
         "modified_at": modified_str,
+        "tags": tags,
     }
+
+
+# ── 标签 API ──
+
+
+class AddTagsRequest(BaseModel):
+    tags: list[str]
+
+
+@app.get("/api/tags")
+async def list_tags(
+    q: str = "",
+    limit: int = 50,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """列出所有标签及图片数量，支持 ?q= 模糊搜索"""
+    from sqlalchemy import func
+
+    stmt = (
+        select(Tag.name, func.count(ImageTag.image_id).label("count"))
+        .outerjoin(ImageTag, ImageTag.tag_id == Tag.id)
+        .group_by(Tag.id, Tag.name)
+        .order_by(func.count(ImageTag.image_id).desc(), Tag.name)
+    )
+    if q:
+        q_escaped = _escape_like(q.strip())
+        stmt = stmt.where(Tag.name.ilike(f"%{q_escaped}%", escape="\\"))
+    stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
+    rows = result.fetchall()
+    return {"tags": [{"name": r[0], "count": r[1] or 0} for r in rows]}
+
+
+@app.get("/api/images/{image_id:int}/tags")
+async def get_image_tags(
+    image_id: int,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """获取某图片的标签列表"""
+    result = await session.execute(select(Image).where(Image.id == image_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    tag_result = await session.execute(
+        select(Tag.name)
+        .join(ImageTag, ImageTag.tag_id == Tag.id)
+        .where(ImageTag.image_id == image_id)
+        .order_by(Tag.name)
+    )
+    tags = [r[0] for r in tag_result.fetchall()]
+    return {"tags": tags}
+
+
+@app.post("/api/images/{image_id:int}/tags")
+async def add_image_tags(
+    image_id: int,
+    body: AddTagsRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """为图片添加标签"""
+    result = await session.execute(select(Image).where(Image.id == image_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    added = 0
+    for name in (body.tags or []):
+        name = (name or "").strip()
+        if not name:
+            continue
+        # 获取或创建 Tag
+        tag_result = await session.execute(select(Tag).where(Tag.name == name))
+        tag = tag_result.scalar_one_or_none()
+        if not tag:
+            tag = Tag(name=name)
+            session.add(tag)
+            await session.flush()
+        # 检查是否已存在
+        existing = await session.execute(
+            select(ImageTag).where(ImageTag.image_id == image_id, ImageTag.tag_id == tag.id)
+        )
+        if existing.scalar_one_or_none() is None:
+            session.add(ImageTag(image_id=image_id, tag_id=tag.id))
+            added += 1
+    await session.commit()
+    return {"added": added}
+
+
+@app.delete("/api/images/{image_id:int}/tags/{tag_name:str}")
+async def remove_image_tag(
+    image_id: int,
+    tag_name: str,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """移除图片的指定标签"""
+    tag_name = tag_name.strip()
+    if not tag_name:
+        raise HTTPException(status_code=400, detail="标签名不能为空")
+    result = await session.execute(select(Tag).where(Tag.name == tag_name))
+    tag = result.scalar_one_or_none()
+    if not tag:
+        return {"removed": False}
+    link_result = await session.execute(
+        select(ImageTag).where(ImageTag.image_id == image_id, ImageTag.tag_id == tag.id)
+    )
+    link = link_result.scalar_one_or_none()
+    if link:
+        await session.delete(link)
+        await session.commit()
+        return {"removed": True}
+    return {"removed": False}
 
 
 @app.get("/api/scan-status")
