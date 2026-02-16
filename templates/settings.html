@@ -21,6 +21,14 @@
                     数据维护
                 </span>
             </button>
+            <button type="button" data-tab="tags"
+                    class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
+                    onclick="switchTab('tags')">
+                <span class="flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+                    标签管理
+                </span>
+            </button>
             <button type="button" data-tab="about"
                     class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
                     onclick="switchTab('about')">
@@ -132,6 +140,35 @@
             </div>
         </div>
 
+        <!-- ======== 标签管理 ======== -->
+        <div id="tab-tags" class="tab-content hidden">
+            <div class="bg-white rounded-xl border border-slate-200 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-base font-semibold text-slate-800">标签列表</h2>
+                    <div class="flex items-center gap-3">
+                        <input type="text" id="tags-search-input" placeholder="搜索标签..."
+                               class="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-44">
+                        <button type="button" onclick="loadTags()" class="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors">刷新</button>
+                    </div>
+                </div>
+                <div id="tags-list-container" class="border border-slate-200 rounded-lg overflow-hidden">
+                    <div id="tags-list-loading" class="p-8 text-center text-slate-500 text-sm">加载中...</div>
+                    <div id="tags-list-empty" class="hidden p-8 text-center text-slate-500 text-sm">暂无标签，可在图片预览中添加</div>
+                    <table id="tags-list-table" class="hidden w-full text-sm">
+                        <thead class="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th class="text-left px-4 py-3 font-medium text-slate-700">标签名</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-700">关联图片数</th>
+                                <th class="text-right px-4 py-3 font-medium text-slate-700">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tags-list-body" class="divide-y divide-slate-100">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <!-- ======== 关于 ======== -->
         <div id="tab-about" class="tab-content hidden">
             <div class="bg-white rounded-xl border border-slate-200 p-6">
@@ -163,7 +200,176 @@
     </div>
 </div>
 
+<!-- 自定义弹窗：统一风格 -->
+<div id="settings-modal-overlay" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/40" onclick="settingsModalCloseIfOverlay(event)">
+    <div id="settings-modal-prompt" class="hidden w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-xl" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b border-slate-200">
+            <h3 class="text-base font-semibold text-slate-800" id="settings-prompt-title">重命名标签</h3>
+        </div>
+        <div class="px-6 py-4">
+            <input type="text" id="settings-prompt-input"
+                   class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="请输入新标签名">
+            <p id="settings-prompt-error" class="hidden mt-2 text-sm text-red-600"></p>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+            <button type="button" id="settings-prompt-cancel"
+                    class="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                取消
+            </button>
+            <button type="button" id="settings-prompt-confirm"
+                    class="px-4 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors">
+                确定
+            </button>
+        </div>
+    </div>
+    <div id="settings-modal-confirm" class="hidden w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-xl" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b border-slate-200">
+            <h3 class="text-base font-semibold text-slate-800" id="settings-confirm-title">确认删除</h3>
+        </div>
+        <div class="px-6 py-4">
+            <p class="text-sm text-slate-600" id="settings-confirm-message"></p>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+            <button type="button" id="settings-confirm-cancel"
+                    class="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                取消
+            </button>
+            <button type="button" id="settings-confirm-ok"
+                    class="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors">
+                删除
+            </button>
+        </div>
+    </div>
+    <div id="settings-modal-alert" class="hidden w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-xl" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b border-slate-200">
+            <h3 class="text-base font-semibold text-slate-800">提示</h3>
+        </div>
+        <div class="px-6 py-4">
+            <p class="text-sm text-slate-600" id="settings-alert-message"></p>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-100 flex justify-end">
+            <button type="button" id="settings-alert-ok"
+                    class="px-4 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors">
+                确定
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
+// 自定义弹窗（统一风格）
+function settingsModalCloseIfOverlay(e) {
+    if (e.target.id === 'settings-modal-overlay') {
+        document.getElementById('settings-modal-overlay').classList.add('hidden');
+        document.getElementById('settings-modal-prompt').classList.add('hidden');
+        document.getElementById('settings-modal-confirm').classList.add('hidden');
+        document.getElementById('settings-modal-alert').classList.add('hidden');
+    }
+}
+
+function showSettingsPrompt(title, defaultValue, onConfirm) {
+    var overlay = document.getElementById('settings-modal-overlay');
+    var modal = document.getElementById('settings-modal-prompt');
+    var input = document.getElementById('settings-prompt-input');
+    var errorEl = document.getElementById('settings-prompt-error');
+    document.getElementById('settings-prompt-title').textContent = title;
+    input.value = defaultValue || '';
+    errorEl.classList.add('hidden');
+    modal.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+    input.focus();
+
+    function close() {
+        overlay.classList.add('hidden');
+        modal.classList.add('hidden');
+    }
+
+    function done() {
+        var val = input.value.trim();
+        close();
+        if (onConfirm) onConfirm(val);
+    }
+
+    document.getElementById('settings-prompt-cancel').onclick = function() { close(); };
+    document.getElementById('settings-prompt-confirm').onclick = function() { done(); };
+    input.onkeydown = function(e) {
+        if (e.key === 'Enter') done();
+        if (e.key === 'Escape') close();
+    };
+}
+
+function showSettingsPromptWithValidation(title, defaultValue, onConfirm, validate) {
+    var overlay = document.getElementById('settings-modal-overlay');
+    var modal = document.getElementById('settings-modal-prompt');
+    var input = document.getElementById('settings-prompt-input');
+    var errorEl = document.getElementById('settings-prompt-error');
+    document.getElementById('settings-prompt-title').textContent = title;
+    input.value = defaultValue || '';
+    errorEl.classList.add('hidden');
+    modal.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+    input.focus();
+
+    function close() {
+        overlay.classList.add('hidden');
+        modal.classList.add('hidden');
+    }
+
+    function tryConfirm() {
+        var val = input.value.trim();
+        var err = validate ? validate(val) : null;
+        if (err) {
+            errorEl.textContent = err;
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        close();
+        if (onConfirm) onConfirm(val);
+    }
+
+    document.getElementById('settings-prompt-cancel').onclick = function() { close(); };
+    document.getElementById('settings-prompt-confirm').onclick = tryConfirm;
+    input.onkeydown = function(e) {
+        if (e.key === 'Enter') tryConfirm();
+        if (e.key === 'Escape') close();
+    };
+    input.oninput = function() { errorEl.classList.add('hidden'); };
+}
+
+function showSettingsConfirm(title, message, onConfirm) {
+    var overlay = document.getElementById('settings-modal-overlay');
+    var modal = document.getElementById('settings-modal-confirm');
+    document.getElementById('settings-confirm-title').textContent = title;
+    document.getElementById('settings-confirm-message').textContent = message;
+    modal.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+
+    function close() {
+        overlay.classList.add('hidden');
+        modal.classList.add('hidden');
+    }
+
+    document.getElementById('settings-confirm-cancel').onclick = close;
+    document.getElementById('settings-confirm-ok').onclick = function() {
+        close();
+        if (onConfirm) onConfirm();
+    };
+}
+
+function showSettingsAlert(message) {
+    var overlay = document.getElementById('settings-modal-overlay');
+    var modal = document.getElementById('settings-modal-alert');
+    document.getElementById('settings-alert-message').textContent = message;
+    modal.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+
+    document.getElementById('settings-alert-ok').onclick = function() {
+        overlay.classList.add('hidden');
+        modal.classList.add('hidden');
+    };
+}
+
 // 标签页切换
 function switchTab(tabName) {
     // 更新按钮样式
@@ -182,6 +388,7 @@ function switchTab(tabName) {
     });
     var target = document.getElementById('tab-' + tabName);
     if (target) target.classList.remove('hidden');
+    if (tabName === 'tags') loadTags();
 }
 
 // 格式化文件大小
@@ -316,6 +523,99 @@ function triggerRebuild() {
             status.textContent = '重建失败: ' + err;
             status.className = 'text-sm text-red-500';
         });
+}
+
+// 标签管理
+var tagsSearchDebounceTimer = null;
+var tagsSearchInput = document.getElementById('tags-search-input');
+if (tagsSearchInput) tagsSearchInput.addEventListener('input', function() {
+    clearTimeout(tagsSearchDebounceTimer);
+    tagsSearchDebounceTimer = setTimeout(loadTags, 300);
+});
+
+function loadTags() {
+    var loading = document.getElementById('tags-list-loading');
+    var empty = document.getElementById('tags-list-empty');
+    var table = document.getElementById('tags-list-table');
+    var body = document.getElementById('tags-list-body');
+    var q = (document.getElementById('tags-search-input').value || '').trim();
+
+    loading.classList.remove('hidden');
+    empty.classList.add('hidden');
+    table.classList.add('hidden');
+
+    var url = '/api/tags?limit=200';
+    if (q) url += '&q=' + encodeURIComponent(q);
+
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        loading.classList.add('hidden');
+        var tags = data.tags || [];
+        if (tags.length === 0) {
+            empty.classList.remove('hidden');
+        } else {
+            table.classList.remove('hidden');
+            body.innerHTML = tags.map(function(t) {
+                var raw = t.name || '';
+                var name = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                var attVal = raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return '<tr class="hover:bg-slate-50" data-tag-name="' + attVal + '">' +
+                    '<td class="px-4 py-3 text-slate-800">#' + name + '</td>' +
+                    '<td class="px-4 py-3 text-slate-600">' + (t.count || 0) + '</td>' +
+                    '<td class="px-4 py-3 text-right">' +
+                    '<button type="button" class="tag-rename-btn text-blue-600 hover:text-blue-700 text-xs font-medium mr-2">重命名</button>' +
+                    '<button type="button" class="tag-delete-btn text-red-600 hover:text-red-700 text-xs font-medium">删除</button>' +
+                    '</td></tr>';
+            }).join('');
+            body.querySelectorAll('.tag-rename-btn').forEach(function(btn) {
+                btn.onclick = function() { renameTag(btn.closest('tr').getAttribute('data-tag-name')); };
+            });
+            body.querySelectorAll('.tag-delete-btn').forEach(function(btn) {
+                btn.onclick = function() { deleteTag(btn.closest('tr').getAttribute('data-tag-name')); };
+            });
+        }
+    }).catch(function(err) {
+        loading.classList.add('hidden');
+        empty.classList.remove('hidden');
+        empty.textContent = '加载失败: ' + err;
+    });
+}
+
+function renameTag(oldName) {
+    showSettingsPromptWithValidation('重命名标签', oldName, function(newName) {
+        if (newName === oldName) return;
+        fetch('/api/tags/' + encodeURIComponent(oldName), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName })
+        }).then(function(r) {
+            if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });
+            return r.json();
+        }).then(function() {
+            loadTags();
+        }).catch(function(err) {
+            showSettingsAlert('重命名失败: ' + err.message);
+        });
+    }, function(val) {
+        if (!val) return '标签名不能为空';
+        if (val === oldName) return '新名称与原名称相同';
+        return null;
+    });
+}
+
+function deleteTag(name) {
+    showSettingsConfirm('确认删除', '确定要删除标签「' + name + '」吗？将同时移除该标签在所有图片上的关联。', function() {
+        fetch('/api/tags/' + encodeURIComponent(name), { method: 'DELETE' })
+            .then(function(r) {
+                if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });
+                return r.json();
+            })
+            .then(function() {
+                loadTags();
+            })
+            .catch(function(err) {
+                showSettingsAlert('删除失败: ' + err.message);
+            });
+    });
 }
 
 // 页面加载时获取统计

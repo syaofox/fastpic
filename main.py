@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlmodel import select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, Tag, ImageTag, init_db, get_async_session, natural_sort_key
@@ -892,6 +893,56 @@ async def list_tags(
     result = await session.execute(stmt)
     rows = result.fetchall()
     return {"tags": [{"name": r[0], "count": r[1] or 0} for r in rows]}
+
+
+class RenameTagRequest(BaseModel):
+    name: str
+
+
+@app.put("/api/tags/{tag_name:path}")
+async def rename_tag(
+    tag_name: str,
+    body: RenameTagRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """重命名标签"""
+    tag_name = tag_name.strip()
+    new_name = (body.name or "").strip()
+    if not tag_name:
+        raise HTTPException(status_code=400, detail="原标签名不能为空")
+    if not new_name:
+        raise HTTPException(status_code=400, detail="新标签名不能为空")
+    if new_name == tag_name:
+        return {"renamed": True}
+    result = await session.execute(select(Tag).where(Tag.name == tag_name))
+    tag = result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    existing = await session.execute(select(Tag).where(Tag.name == new_name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="新名称已存在")
+    tag.name = new_name
+    await session.commit()
+    return {"renamed": True}
+
+
+@app.delete("/api/tags/{tag_name:path}")
+async def delete_tag(
+    tag_name: str,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """删除标签及所有关联"""
+    tag_name = tag_name.strip()
+    if not tag_name:
+        raise HTTPException(status_code=400, detail="标签名不能为空")
+    result = await session.execute(select(Tag).where(Tag.name == tag_name))
+    tag = result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    await session.execute(delete(ImageTag).where(ImageTag.tag_id == tag.id))
+    await session.delete(tag)
+    await session.commit()
+    return {"deleted": True}
 
 
 @app.get("/api/images/{image_id:int}/tags")
