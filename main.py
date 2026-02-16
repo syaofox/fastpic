@@ -26,6 +26,7 @@ from watcher import start_watcher
 
 PHOTOS_DIR = Path(__file__).parent / "photos"
 CACHE_DIR = Path(__file__).parent / "cache"
+STATIC_DIR = Path(__file__).parent / "static"
 PER_PAGE = 24
 
 # ── 访问密码保护 ──
@@ -133,6 +134,15 @@ async def logout():
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key="fp_session")
     return response
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """返回网站图标"""
+    favicon_path = STATIC_DIR / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(favicon_path, media_type="image/x-icon")
+    raise HTTPException(status_code=404)
 
 
 def _escape_like(value: str) -> str:
@@ -1693,5 +1703,6 @@ def _unique_dest(target_dir: Path, filename: str, ext: str) -> Path:
 
 
 # 静态目录挂载（放在路由之后，mount 会匹配前缀路径）
+STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/photos", StaticFiles(directory=str(PHOTOS_DIR)), name="photos")
 app.mount("/cache", StaticFiles(directory=str(CACHE_DIR)), name="cache")

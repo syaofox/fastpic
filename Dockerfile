@@ -19,6 +19,8 @@ RUN uv sync --frozen --no-install-project --no-dev
 
 # 拷贝应用源码
 COPY . .
+# 确保 static 目录存在（favicon.ico 等静态资源）
+RUN mkdir -p /app/static
 
 # ---------- 阶段 2: 运行时镜像 ----------
 FROM python:3.12-slim AS runtime
@@ -40,6 +42,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/*.py /app/
 COPY --from=builder /app/pyproject.toml /app/
 COPY --from=builder /app/templates /app/templates
+COPY --from=builder /app/static /app/static
 
 # 创建数据目录并设置权限
 RUN mkdir -p /app/photos /app/cache /app/data \
