@@ -20,7 +20,7 @@ from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, init_db, get_async_session, natural_sort_key
-from scanner import scan_photos, cleanup_database, _cache_filename
+from scanner import scan_photos, scan_videos, cleanup_database, _cache_filename
 from scan_state import begin_scan, end_scan, is_scanning
 from watcher import start_watcher
 
@@ -55,9 +55,10 @@ async def _background_scan():
     try:
         # 先清理不一致数据
         await cleanup_database(PHOTOS_DIR, CACHE_DIR)
-        # 再扫描新增图片
-        n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
-        print(f"[scan] 扫描完成，新增 {n} 张图片")
+        # 再扫描新增图片和视频
+        n_img = await scan_photos(PHOTOS_DIR, CACHE_DIR)
+        n_vid = await scan_videos(PHOTOS_DIR, CACHE_DIR)
+        print(f"[scan] 扫描完成，新增 {n_img} 张图片、{n_vid} 个视频")
     except Exception as e:
         import traceback
         print(f"[scan] 扫描失败: {e}")
@@ -706,6 +707,7 @@ async def api_folder_images(
     return {
         "urls": ["/photos/" + img.relative_path for img in images],
         "ids": [img.id for img in images],
+        "media_types": [getattr(img, "media_type", "image") for img in images],
     }
 
 
@@ -790,8 +792,9 @@ async def trigger_scan():
     """手动触发扫描"""
     begin_scan()
     try:
-        n = await scan_photos(PHOTOS_DIR, CACHE_DIR)
-        return {"scanned": n}
+        n_img = await scan_photos(PHOTOS_DIR, CACHE_DIR)
+        n_vid = await scan_videos(PHOTOS_DIR, CACHE_DIR)
+        return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
     finally:
         end_scan()
 

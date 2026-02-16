@@ -191,6 +191,7 @@
         </div>
         <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">‹</button>
         <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
+        <video id="modal-video" class="max-w-[90vw] max-h-[90vh] object-contain hidden" controls onclick="event.stopPropagation()"></video>
         <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">›</button>
         <div id="modal-image-counter" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/50 text-white/90 text-sm font-medium" onclick="event.stopPropagation()">1/1</div>
         <!-- 图片信息：内嵌在左下角，由「图片信息」按钮开关 -->
@@ -259,29 +260,62 @@ function toggleFolder(btn) {
 
 let modalImages = [];
 let modalImageIds = [];
+let modalMediaTypes = [];
 let modalIndex = 0;
 let slideshowTimer = null;
 let slideshowInterval = parseFloat(localStorage.getItem('fastpic_slideshow_interval') || '2');
 let slideshowMode = localStorage.getItem('fastpic_slideshow_mode') || 'loop';
 
-/** 大图模式预加载前后各 N 张，提升左右切换流畅度 */
+/** 根据 URL 推断媒体类型（无 mediaTypes 时回退） */
+function _inferMediaType(url) {
+    if (!url) return 'image';
+    var u = (url + '').toLowerCase();
+    if (u.match(/\.(mp4|webm|mov|mkv)(\?|$)/)) return 'video';
+    return 'image';
+}
+
+/** 大图模式预加载前后各 N 张，提升左右切换流畅度（仅图片） */
 var MODAL_PRELOAD_COUNT = 2;
 function preloadModalImages(centerIndex) {
     if (!modalImages.length) return;
+    var types = modalMediaTypes.length ? modalMediaTypes : modalImages.map(_inferMediaType);
     var start = Math.max(0, centerIndex - MODAL_PRELOAD_COUNT);
     var end = Math.min(modalImages.length - 1, centerIndex + MODAL_PRELOAD_COUNT);
     for (var i = start; i <= end; i++) {
         if (i === centerIndex) continue;
-        var img = new Image();
-        img.src = modalImages[i];
+        if (types[i] === 'image') {
+            var img = new Image();
+            img.src = modalImages[i];
+        }
     }
 }
 
-function openModal(photoUrl, index, allUrls, allIds) {
-    modalImages = allUrls;
+function _showModalContent(url, mediaType) {
+    var imgEl = document.getElementById('modal-img');
+    var vidEl = document.getElementById('modal-video');
+    if (!imgEl || !vidEl) return;
+    var mt = mediaType || _inferMediaType(url);
+    if (mt === 'video') {
+        imgEl.classList.add('hidden');
+        imgEl.removeAttribute('src');
+        vidEl.classList.remove('hidden');
+        vidEl.src = url;
+        vidEl.load();
+    } else {
+        vidEl.classList.add('hidden');
+        vidEl.pause();
+        vidEl.removeAttribute('src');
+        imgEl.classList.remove('hidden');
+        imgEl.src = url;
+    }
+}
+
+function openModal(photoUrl, index, allUrls, allIds, mediaTypes) {
+    modalImages = allUrls || [];
     modalImageIds = allIds || [];
+    modalMediaTypes = mediaTypes || modalImages.map(_inferMediaType);
     modalIndex = index;
-    document.getElementById('modal-img').src = photoUrl;
+    _showModalContent(photoUrl, modalMediaTypes[index]);
     document.getElementById('modal').classList.remove('hidden');
     _updateIntervalUI(slideshowInterval);
     _updateSlideshowModeUI(slideshowMode);
@@ -289,8 +323,8 @@ function openModal(photoUrl, index, allUrls, allIds) {
     preloadModalImages(modalIndex);
 }
 
-function openModalFromGallery(photoUrl, index, pageUrls, pageIds) {
-    openModal(photoUrl, index, pageUrls, pageIds);
+function openModalFromGallery(photoUrl, index, pageUrls, pageIds, pageMediaTypes) {
+    openModal(photoUrl, index, pageUrls, pageIds, pageMediaTypes);
     var marker = document.getElementById('current-path-marker');
     if (!marker) return;
     var total = parseInt(marker.getAttribute('data-total') || '0', 10);
@@ -316,17 +350,21 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds) {
             if (newIndex < 0) newIndex = 0;
             modalImages = data.urls;
             modalImageIds = data.ids;
+            modalMediaTypes = data.media_types || modalImages.map(_inferMediaType);
             modalIndex = newIndex;
+            _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
             _updateModalImageCounter();
             preloadModalImages(modalIndex);
         })
-        .catch(function(err) { console.error('加载全部图片失败:', err); });
+        .catch(function(err) { console.error('加载全部媒体失败:', err); });
 }
 window.openModalFromGallery = openModalFromGallery;
 
 function closeModal(e) {
     if (e.target.id === 'modal' || e.target.id === 'modal-overlay') {
         stopSlideshow();
+        var vid = document.getElementById('modal-video');
+        if (vid) { vid.pause(); vid.removeAttribute('src'); }
         if (document.fullscreenElement) document.exitFullscreen();
         document.getElementById('modal').classList.add('hidden');
         var panel = document.getElementById('modal-image-info-panel');
@@ -337,6 +375,8 @@ function closeModal(e) {
 
 function closeModalAndStopSlideshow() {
     stopSlideshow();
+    var vid = document.getElementById('modal-video');
+    if (vid) { vid.pause(); vid.removeAttribute('src'); }
     if (document.fullscreenElement) document.exitFullscreen();
     document.getElementById('modal').classList.add('hidden');
     var panel = document.getElementById('modal-image-info-panel');
@@ -415,7 +455,7 @@ function escapeHtml(s) {
 function prevImage() {
     if (modalImages.length === 0) return;
     modalIndex = (modalIndex - 1 + modalImages.length) % modalImages.length;
-    document.getElementById('modal-img').src = modalImages[modalIndex];
+    _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
     _updateModalImageCounter();
     refreshImageInfoIfVisible();
     preloadModalImages(modalIndex);
@@ -427,7 +467,7 @@ function nextImage(fromSlideshow) {
         if (!fromSlideshow) {
             showCustomConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
                 modalIndex = 0;
-                document.getElementById('modal-img').src = modalImages[modalIndex];
+                _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
                 _updateModalImageCounter();
                 refreshImageInfoIfVisible();
                 preloadModalImages(modalIndex);
@@ -442,7 +482,7 @@ function nextImage(fromSlideshow) {
     } else {
         modalIndex = modalIndex + 1;
     }
-    document.getElementById('modal-img').src = modalImages[modalIndex];
+    _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
     _updateModalImageCounter();
     refreshImageInfoIfVisible();
     preloadModalImages(modalIndex);
@@ -633,9 +673,10 @@ function deleteCurrentImage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ids: [imageId]})
         }).then(function(r) { return r.json(); }).then(function(data) {
-            // 从列表中移除当前图片
+            // 从列表中移除当前项
             modalImages.splice(modalIndex, 1);
             modalImageIds.splice(modalIndex, 1);
+            modalMediaTypes.splice(modalIndex, 1);
 
             if (modalImages.length === 0) {
                 // 没有图片了，关闭模态框并刷新画廊
@@ -646,7 +687,7 @@ function deleteCurrentImage() {
                 if (modalIndex >= modalImages.length) {
                     modalIndex = modalImages.length - 1;
                 }
-                document.getElementById('modal-img').src = modalImages[modalIndex];
+                _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
                 _updateModalImageCounter();
                 refreshImageInfoIfVisible();
                 preloadModalImages(modalIndex);
@@ -1937,11 +1978,12 @@ document.addEventListener('keydown', function(e) {
             onSuccess: function() {
                 modalImages.splice(modalIndex, 1);
                 modalImageIds.splice(modalIndex, 1);
+                modalMediaTypes.splice(modalIndex, 1);
                 if (modalImages.length === 0) {
                     document.getElementById('modal').classList.add('hidden');
                 } else {
                     if (modalIndex >= modalImages.length) modalIndex = modalImages.length - 1;
-                    document.getElementById('modal-img').src = modalImages[modalIndex];
+                    _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
                     _updateModalImageCounter();
                     refreshImageInfoIfVisible();
                 }

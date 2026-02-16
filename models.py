@@ -31,6 +31,7 @@ class Image(SQLModel, table=True):
     height: int = 0
     filename_natural: str | None = Field(default=None, index=True)
     relative_path_natural: str | None = Field(default=None, index=True)
+    media_type: str = Field(default="image", index=True)  # "image" | "video"
 
 
 # 同步引擎用于 create_all
@@ -76,10 +77,29 @@ def _run_natural_sort_migration() -> None:
             pass
 
 
+def _run_media_type_migration() -> None:
+    """为已有表添加 media_type 列并回填为 image"""
+    from sqlalchemy import text
+
+    with sync_engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(images)"))
+        cols = {row[1] for row in r.fetchall()}
+        if "media_type" not in cols:
+            conn.execute(text("ALTER TABLE images ADD COLUMN media_type TEXT DEFAULT 'image'"))
+            conn.execute(text("UPDATE images SET media_type = 'image' WHERE media_type IS NULL"))
+            conn.commit()
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_images_media_type ON images(media_type)"))
+            conn.commit()
+        except Exception:
+            pass
+
+
 def init_db() -> None:
     """创建数据库表"""
     SQLModel.metadata.create_all(sync_engine)
     _run_natural_sort_migration()
+    _run_media_type_migration()
 
 
 async def get_async_session():

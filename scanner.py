@@ -1,5 +1,6 @@
 import hashlib
 import os
+import subprocess
 from pathlib import Path
 
 from PIL import Image as PILImage
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Image, async_session_factory, natural_sort_key
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv"}
 THUMBNAIL_WIDTH = 300
 
 
@@ -41,6 +43,75 @@ def _generate_thumbnail(full_path: Path, cache_path: Path) -> bool:
     except Exception as e:
         print(f"[cache] 生成缩略图失败 {full_path}: {e}", flush=True)
         return False
+
+
+def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
+    """使用 ffprobe 获取视频宽高，失败时返回 (1920, 1080)"""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0",
+                str(full_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                return int(parts[0]), int(parts[1])
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError) as e:
+        print(f"[cache] ffprobe 失败 {full_path}: {e}", flush=True)
+    return 1920, 1080
+
+
+def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
+    """使用 ffmpeg 从视频第一帧提取缩略图并转为 WebP"""
+    try:
+        tmp_jpg = cache_path.with_suffix(".tmp.jpg")
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i", str(full_path),
+                "-vframes", "1",
+                "-q:v", "2",
+                str(tmp_jpg),
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0 or not tmp_jpg.exists():
+            raise RuntimeError("ffmpeg 提取帧失败")
+        try:
+            with PILImage.open(tmp_jpg) as img:
+                img.load()
+                if img.width > THUMBNAIL_WIDTH:
+                    ratio = THUMBNAIL_WIDTH / img.width
+                    new_size = (THUMBNAIL_WIDTH, int(img.height * ratio))
+                    thumb = img.resize(new_size, PILImage.Resampling.LANCZOS)
+                else:
+                    thumb = img.copy()
+                if thumb.mode in ("RGBA", "P"):
+                    thumb = thumb.convert("RGB")
+                thumb.save(cache_path, "WEBP", quality=85)
+        finally:
+            tmp_jpg.unlink(missing_ok=True)
+        return True
+    except Exception as e:
+        print(f"[cache] 视频缩略图失败 {full_path}: {e}", flush=True)
+        # 无 ffmpeg 时生成灰色占位图
+        try:
+            placeholder = PILImage.new("RGB", (THUMBNAIL_WIDTH, 169), (80, 80, 80))
+            placeholder.save(cache_path, "WEBP", quality=85)
+            return True
+        except Exception:
+            return False
 
 
 async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
@@ -111,6 +182,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                     height=height,
                     filename_natural=natural_sort_key(filename),
                     relative_path_natural=natural_sort_key(rel_path),
+                    media_type="image",
                 )
                 session.add(record)
                 count += 1
@@ -129,7 +201,81 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
         # 提交剩余
         if batch_count > 0:
             await session.commit()
-        print(f"[scan] 扫描完成，新增 {count} 条记录", flush=True)
+        print(f"[scan] 图片扫描完成，新增 {count} 条记录", flush=True)
+
+    return count
+
+
+async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
+    """
+    异步扫描 photos 目录中的视频文件，生成缩略图并写入数据库。
+    返回新扫描的视频数量。
+    """
+    photos_dir = photos_dir.resolve()
+    cache_dir = cache_dir.resolve()
+    count = 0
+
+    video_files: list[Path] = []
+    for ext in VIDEO_EXTENSIONS:
+        video_files.extend(photos_dir.rglob(f"*{ext}"))
+
+    if not video_files:
+        return 0
+
+    print(f"[scan] 发现 {len(video_files)} 个视频文件", flush=True)
+    BATCH_SIZE = 20
+
+    async with async_session_factory() as session:
+        batch_count = 0
+        for full_path in video_files:
+            if not full_path.is_file():
+                continue
+
+            rel_path = _relative_path(photos_dir, full_path)
+            modified_at = os.path.getmtime(full_path)
+            file_size = os.path.getsize(full_path)
+
+            result = await session.execute(
+                select(Image).where(Image.relative_path == rel_path)
+            )
+            if result.scalar_one_or_none():
+                continue
+
+            try:
+                width, height = _get_video_dimensions(full_path)
+                cache_name = _cache_filename(rel_path)
+                cache_path = cache_dir / cache_name
+                _generate_video_thumbnail(full_path, cache_path)
+
+                filename = full_path.name
+                record = Image(
+                    filename=filename,
+                    relative_path=rel_path,
+                    modified_at=modified_at,
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    filename_natural=natural_sort_key(filename),
+                    relative_path_natural=natural_sort_key(rel_path),
+                    media_type="video",
+                )
+                session.add(record)
+                count += 1
+                batch_count += 1
+
+                if batch_count >= BATCH_SIZE:
+                    await session.commit()
+                    print(f"[scan] 视频进度: {count}/{len(video_files)}", flush=True)
+                    batch_count = 0
+
+            except Exception as e:
+                print(f"[scan] 视频处理失败 {full_path}: {e}", flush=True)
+                continue
+
+        if batch_count > 0:
+            await session.commit()
+        if count:
+            print(f"[scan] 视频扫描完成，新增 {count} 条记录", flush=True)
 
     return count
 
@@ -206,7 +352,11 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
             if not cache_path.exists():
                 photo_path = photos_dir / img.relative_path
                 if photo_path.exists():
-                    if _generate_thumbnail(photo_path, cache_path):
+                    if getattr(img, "media_type", "image") == "video":
+                        ok = _generate_video_thumbnail(photo_path, cache_path)
+                    else:
+                        ok = _generate_thumbnail(photo_path, cache_path)
+                    if ok:
                         cache_regenerated += 1
 
         if cache_regenerated:

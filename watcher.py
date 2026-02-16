@@ -19,7 +19,15 @@ from threading import Thread
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileDeletedEvent, FileMovedEvent
 
-from scanner import IMAGE_EXTENSIONS, _cache_filename, _relative_path, _generate_thumbnail
+from scanner import (
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    _cache_filename,
+    _relative_path,
+    _generate_thumbnail,
+    _generate_video_thumbnail,
+    _get_video_dimensions,
+)
 from models import Image, async_session_factory, natural_sort_key
 from scan_state import begin_scan, end_scan
 
@@ -32,43 +40,47 @@ DEBOUNCE_SECONDS = 3.0
 POLL_INTERVAL = 2.0
 
 
-def _is_image(path: str) -> bool:
-    """判断文件路径是否为支持的图片格式"""
-    return Path(path).suffix.lower() in IMAGE_EXTENSIONS
+def _is_media(path: str) -> bool:
+    """判断文件路径是否为支持的图片或视频格式"""
+    return Path(path).suffix.lower() in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS)
+
+
+def _is_video(path: str) -> bool:
+    """判断文件路径是否为视频格式"""
+    return Path(path).suffix.lower() in VIDEO_EXTENSIONS
 
 
 class _PhotoEventHandler(FileSystemEventHandler):
-    """收集 photos 目录中的图片文件事件"""
+    """收集 photos 目录中的图片和视频文件事件"""
 
     def __init__(self, queue: Queue):
         super().__init__()
         self._queue = queue
 
     def on_created(self, event):
-        if not event.is_directory and _is_image(event.src_path):
+        if not event.is_directory and _is_media(event.src_path):
             self._queue.put(("created", event.src_path, None, time.monotonic()))
 
     def on_deleted(self, event):
-        if not event.is_directory and _is_image(event.src_path):
+        if not event.is_directory and _is_media(event.src_path):
             self._queue.put(("deleted", event.src_path, None, time.monotonic()))
 
     def on_moved(self, event):
         if not event.is_directory:
-            src_img = _is_image(event.src_path)
-            dst_img = _is_image(event.dest_path)
-            if src_img or dst_img:
+            src_media = _is_media(event.src_path)
+            dst_media = _is_media(event.dest_path)
+            if src_media or dst_media:
                 self._queue.put(("moved", event.src_path, event.dest_path, time.monotonic()))
 
 
 async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
-    """处理新增图片：生成缩略图 + 写入数据库"""
+    """处理新增图片或视频：生成缩略图 + 写入数据库"""
     if not full_path.exists() or not full_path.is_file():
         return
 
     rel_path = _relative_path(photos_dir, full_path)
 
     async with async_session_factory() as session:
-        # 已存在则跳过
         result = await session.execute(
             select(Image).where(Image.relative_path == rel_path)
         )
@@ -76,17 +88,23 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             return
 
         try:
-            from PIL import Image as PILImage
-            with PILImage.open(full_path) as img:
-                width, height = img.size
-
+            is_vid = _is_video(str(full_path))
             modified_at = os.path.getmtime(full_path)
             file_size = os.path.getsize(full_path)
 
-            # 生成缩略图
             cache_name = _cache_filename(rel_path)
             cache_path = cache_dir / cache_name
-            _generate_thumbnail(full_path, cache_path)
+
+            if is_vid:
+                width, height = _get_video_dimensions(full_path)
+                _generate_video_thumbnail(full_path, cache_path)
+                media_type = "video"
+            else:
+                from PIL import Image as PILImage
+                with PILImage.open(full_path) as img:
+                    width, height = img.size
+                _generate_thumbnail(full_path, cache_path)
+                media_type = "image"
 
             record = Image(
                 filename=full_path.name,
@@ -97,6 +115,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
                 height=height,
                 filename_natural=natural_sort_key(full_path.name),
                 relative_path_natural=natural_sort_key(rel_path),
+                media_type=media_type,
             )
             session.add(record)
             await session.commit()
@@ -155,14 +174,17 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
                 img.file_size = os.path.getsize(dst_path)
                 # 生成新缓存
                 new_cache = cache_dir / _cache_filename(dst_rel)
-                _generate_thumbnail(dst_path, new_cache)
+                if getattr(img, "media_type", "image") == "video":
+                    _generate_video_thumbnail(dst_path, new_cache)
+                else:
+                    _generate_thumbnail(dst_path, new_cache)
 
             session.add(img)
             await session.commit()
             print(f"[watcher] 移动: {src_rel} → {dst_rel}", flush=True)
         else:
             # 源记录不存在，当作新增处理
-            if dst_path.exists() and _is_image(str(dst_path)):
+            if dst_path.exists() and _is_media(str(dst_path)):
                 await _process_created(photos_dir, cache_dir, dst_path)
 
 

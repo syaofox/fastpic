@@ -235,8 +235,9 @@
     <div class="folder-image-separator" style="height: 0; margin-bottom: 1rem;"></div>
     {% endif %}
     {% for img in images %}
+    {% set mt = img.media_type|default('image') %}
     <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white cursor-pointer"
-         data-type="image" data-image-id="{{ img.id }}" data-relative-path="{{ img.relative_path }}"
+         data-type="{{ mt }}" data-image-id="{{ img.id }}" data-relative-path="{{ img.relative_path }}" data-media-type="{{ mt }}"
          {% if mode == 'waterfall' %}data-w="{{ img.width }}" data-h="{{ img.height }}"{% endif %}
          onclick="window.handleItemClick(event, this)">
         <!-- 选择复选框 -->
@@ -250,13 +251,20 @@
         <div class="select-overlay hidden absolute inset-0 bg-blue-500/10 z-[5] pointer-events-none rounded-lg ring-2 ring-blue-500"></div>
         <a href="/photos/{{ img.relative_path }}"
            class="block image-nav-link"
-           onclick="event.preventDefault(); if(!window._selectMode) { (window.openModalFromGallery || openModal)('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}]); }">
-            <div class="overflow-hidden bg-slate-100 {{ 'aspect-square' if mode == 'folder' else '' }}">
+           onclick="event.preventDefault(); if(!window._selectMode) { (window.openModalFromGallery || openModal)('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}'{{ i.media_type|default('image') }}'{% if not loop.last %},{% endif %}{% endfor %}]); }">
+            <div class="overflow-hidden bg-slate-100 {{ 'aspect-square' if mode == 'folder' else '' }} relative">
                 <img src="/cache/{{ img.relative_path|cache_key }}"
                      alt="{{ img.filename }}"
                      class="w-full {{ 'h-full object-cover' if mode == 'folder' else 'h-auto' }}"
                      loading="lazy"
                      onerror="this.style.visibility='hidden'">
+                {% if mt == 'video' %}
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div class="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center">
+                        <svg class="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                </div>
+                {% endif %}
             </div>
             {% if mode == 'folder' %}
             <div class="px-2 py-1 text-xs text-slate-600 truncate">{{ img.filename }}</div>
