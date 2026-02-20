@@ -313,6 +313,13 @@ function _showModalContent(url, mediaType) {
         vidEl.classList.remove('hidden');
         vidEl.src = url;
         vidEl.load();
+        var p = vidEl.play();
+        if (p && typeof p.then === 'function') {
+            p.catch(function() {
+                vidEl.muted = true;
+                vidEl.play().catch(function(){});
+            });
+        }
     } else {
         vidEl.classList.add('hidden');
         vidEl.pause();
