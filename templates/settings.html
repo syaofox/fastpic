@@ -137,6 +137,37 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 扫描重复文件 -->
+                <div class="bg-white rounded-xl border border-slate-200 p-6">
+                    <div class="flex items-start gap-4">
+                        <div class="w-10 h-10 rounded-lg bg-violet-50 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-semibold text-slate-800 mb-1">扫描重复文件</h3>
+                            <p class="text-sm text-slate-500 mb-3">扫描 photos 目录中内容相同的重复文件（基于 MD5），便于选择删除多余副本。</p>
+                            <div class="flex items-center gap-3">
+                                <button type="button" id="dup-scan-btn" onclick="triggerScanDuplicates()"
+                                        class="px-4 py-2 bg-violet-500 hover:bg-violet-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    开始扫描
+                                </button>
+                                <span id="dup-scan-status" class="text-sm text-slate-500"></span>
+                            </div>
+                            <div id="dup-result-empty" class="hidden mt-3 p-4 bg-slate-50 rounded-lg text-sm text-slate-600 text-center">未发现重复文件</div>
+                            <div id="dup-result-container" class="hidden mt-3">
+                                <div class="flex items-center justify-between mb-3">
+                                    <span id="dup-result-summary" class="text-sm text-slate-600"></span>
+                                    <button type="button" id="dup-delete-btn" onclick="deleteSelectedDuplicates()"
+                                            class="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                        删除选中项
+                                    </button>
+                                </div>
+                                <div id="dup-groups-list" class="space-y-4 max-h-96 overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -558,6 +589,113 @@ function triggerRebuild() {
             status.textContent = '重建失败: ' + err;
             status.className = 'text-sm text-red-500';
         });
+}
+
+// 扫描重复文件
+var dupGroupsCache = [];
+
+function triggerScanDuplicates() {
+    var btn = document.getElementById('dup-scan-btn');
+    var status = document.getElementById('dup-scan-status');
+    var emptyEl = document.getElementById('dup-result-empty');
+    var containerEl = document.getElementById('dup-result-container');
+    btn.disabled = true;
+    btn.textContent = '扫描中...';
+    status.textContent = '';
+    status.className = 'text-sm text-slate-500';
+    emptyEl.classList.add('hidden');
+    containerEl.classList.add('hidden');
+
+    fetch('/api/scan-duplicates', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            btn.textContent = '开始扫描';
+            dupGroupsCache = data.groups || [];
+            if (dupGroupsCache.length === 0) {
+                status.textContent = '扫描完成，未发现重复文件';
+                status.className = 'text-sm text-green-600';
+                emptyEl.classList.remove('hidden');
+            } else {
+                var totalDup = dupGroupsCache.reduce(function(sum, g) { return sum + g.items.length; }, 0);
+                status.textContent = '扫描完成，发现 ' + dupGroupsCache.length + ' 组重复，共 ' + totalDup + ' 个文件';
+                status.className = 'text-sm text-amber-600';
+                containerEl.classList.remove('hidden');
+                document.getElementById('dup-result-summary').textContent = '共 ' + dupGroupsCache.length + ' 组重复，勾选要删除的项';
+                renderDuplicateGroups(dupGroupsCache);
+                updateDupDeleteBtn();
+            }
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = '开始扫描';
+            status.textContent = '扫描失败: ' + err;
+            status.className = 'text-sm text-red-500';
+        });
+}
+
+function renderDuplicateGroups(groups) {
+    var listEl = document.getElementById('dup-groups-list');
+    listEl.innerHTML = groups.map(function(grp, gi) {
+        var itemsHtml = grp.items.map(function(item, ii) {
+            var pathEsc = (item.relative_path || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            var nameEsc = (item.filename || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            return '<div class="flex items-center gap-3 p-2 bg-white rounded border border-slate-100 hover:border-slate-200">' +
+                '<input type="checkbox" class="dup-item-checkbox rounded border-slate-300 text-red-600 focus:ring-red-500" data-id="' + item.id + '" title="勾选以删除">' +
+                '<img src="/cache/' + (item.cache_key || '') + '" alt="" class="w-12 h-12 object-cover rounded flex-shrink-0" onerror="this.style.display=\'none\'">' +
+                '<div class="flex-1 min-w-0">' +
+                '<div class="text-sm font-medium text-slate-800 truncate">' + nameEsc + '</div>' +
+                '<div class="text-xs text-slate-500 truncate">' + pathEsc + '</div>' +
+                '<div class="text-xs text-slate-400">' + formatSize(item.file_size || 0) + '</div>' +
+                '</div></div>';
+        }).join('');
+        return '<div class="border border-slate-200 rounded-lg p-3 bg-white">' +
+            '<div class="text-xs text-slate-500 mb-2">第 ' + (gi + 1) + ' 组（' + grp.items.length + ' 个相同文件）</div>' +
+            '<div class="space-y-1">' + itemsHtml + '</div></div>';
+    }).join('');
+    listEl.querySelectorAll('.dup-item-checkbox').forEach(function(cb) {
+        cb.onchange = updateDupDeleteBtn;
+    });
+}
+
+function getSelectedDupIds() {
+    var ids = [];
+    document.querySelectorAll('.dup-item-checkbox:checked').forEach(function(cb) {
+        var id = parseInt(cb.getAttribute('data-id'), 10);
+        if (!isNaN(id)) ids.push(id);
+    });
+    return ids;
+}
+
+function updateDupDeleteBtn() {
+    var btn = document.getElementById('dup-delete-btn');
+    var count = getSelectedDupIds().length;
+    btn.disabled = count === 0;
+    btn.textContent = count > 0 ? '删除选中项 (' + count + ')' : '删除选中项';
+}
+
+function deleteSelectedDuplicates() {
+    var ids = getSelectedDupIds();
+    if (ids.length === 0) {
+        showSettingsAlert('请先勾选要删除的重复项');
+        return;
+    }
+    showSettingsConfirm('确认删除', '确定要删除选中的 ' + ids.length + ' 个重复文件吗？将同时删除原图和数据库记录，此操作不可恢复。', function() {
+        fetch('/api/delete-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+        }).then(function(r) {
+            if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });
+            return r.json();
+        }).then(function(data) {
+            showSettingsAlert('已删除 ' + (data.deleted || 0) + ' 个文件');
+            loadStats();
+            triggerScanDuplicates();
+        }).catch(function(err) {
+            showSettingsAlert('删除失败: ' + err.message);
+        });
+    });
 }
 
 // 标签管理

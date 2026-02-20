@@ -1127,6 +1127,65 @@ async def trigger_cleanup():
     return result
 
 
+def _compute_file_md5(photos_dir: Path, relative_path: str) -> str | None:
+    """同步计算文件 MD5，文件不存在返回 None"""
+    import hashlib
+    full_path = photos_dir / relative_path
+    if not full_path.is_file():
+        return None
+    try:
+        return hashlib.md5(full_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+@app.post("/api/scan-duplicates")
+async def scan_duplicates(session: AsyncSession = Depends(get_async_session)):
+    """扫描重复文件：按 file_size 分组后对同大小文件计算 MD5，返回重复组"""
+    from collections import defaultdict
+
+    result = await session.execute(select(Image))
+    all_images = list(result.scalars().all())
+    photos_dir = PHOTOS_DIR.resolve()
+
+    # 阶段一：按 file_size 分组
+    by_size: dict[int, list[Image]] = defaultdict(list)
+    for img in all_images:
+        by_size[img.file_size].append(img)
+
+    # 只处理 size 相同的组（可能重复）
+    candidate_groups = [g for g in by_size.values() if len(g) > 1]
+    if not candidate_groups:
+        return {"groups": []}
+
+    # 阶段二：对候选组内文件计算 MD5，按 hash 分组
+    by_hash: dict[str, list[dict]] = defaultdict(list)
+    for group in candidate_groups:
+        for img in group:
+            h = await asyncio.to_thread(_compute_file_md5, photos_dir, img.relative_path)
+            if h is None:
+                continue
+            by_hash[h].append({
+                "id": img.id,
+                "relative_path": img.relative_path,
+                "filename": img.filename,
+                "file_size": img.file_size,
+                "cache_key": _cache_filename(img.relative_path),
+            })
+
+    # 只保留真正的重复组（hash 相同且数量 > 1）
+    groups = []
+    for content_hash, items in by_hash.items():
+        if len(items) > 1:
+            groups.append({
+                "content_hash": content_hash,
+                "file_size": items[0]["file_size"],
+                "items": items,
+            })
+
+    return {"groups": groups}
+
+
 def _stats_folder_and_cache(photos_dir: Path, cache_dir: Path) -> tuple[int, int, int]:
     """同步统计文件夹数量和缓存信息，返回 (folder_count, cache_count, cache_size)"""
     folder_count = 0
