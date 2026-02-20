@@ -420,13 +420,15 @@ async def _get_subfolders(
             subfolder_data[sub_name] = []
         subfolder_data[sub_name].append((rel, mod or 0.0, size or 0))
 
-    # 3) 从文件系统补充空文件夹
+    # 3) 从文件系统补充空文件夹（iterdir 在线程中执行，避免阻塞事件循环）
     fs_dir = PHOTOS_DIR / path if path else PHOTOS_DIR
     if fs_dir.is_dir():
-        for child in fs_dir.iterdir():
-            if child.is_dir() and not child.name.startswith("."):
-                if child.name not in subfolder_data:
-                    subfolder_data[child.name] = []
+        children = await asyncio.to_thread(
+            lambda: [c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")]
+        )
+        for child in children:
+            if child.name not in subfolder_data:
+                subfolder_data[child.name] = []
 
     # 4) 构建 subfolders 列表
     subfolders: list[dict] = []
@@ -1125,6 +1127,22 @@ async def trigger_cleanup():
     return result
 
 
+def _stats_folder_and_cache(photos_dir: Path, cache_dir: Path) -> tuple[int, int, int]:
+    """同步统计文件夹数量和缓存信息，返回 (folder_count, cache_count, cache_size)"""
+    folder_count = 0
+    for dirpath, dirnames, _ in os.walk(photos_dir):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        folder_count += len(dirnames)
+    cache_count = 0
+    cache_size = 0
+    if cache_dir.exists():
+        for f in cache_dir.iterdir():
+            if f.suffix == ".webp":
+                cache_count += 1
+                cache_size += f.stat().st_size
+    return folder_count, cache_count, cache_size
+
+
 @app.get("/api/stats")
 async def get_stats(session: AsyncSession = Depends(get_async_session)):
     """获取数据库和文件系统统计信息"""
@@ -1135,21 +1153,10 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
     # 数据库总文件大小
     total_size = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
 
-    # 文件夹数量（从文件系统统计）
-    folder_count = 0
-    for dirpath, dirnames, _ in os.walk(PHOTOS_DIR):
-        # 排除隐藏文件夹
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-        folder_count += len(dirnames)
-
-    # 缓存文件数量和大小
-    cache_count = 0
-    cache_size = 0
-    if CACHE_DIR.exists():
-        for f in CACHE_DIR.iterdir():
-            if f.suffix == ".webp":
-                cache_count += 1
-                cache_size += f.stat().st_size
+    # 文件夹数量和缓存统计（在线程中执行，避免阻塞）
+    folder_count, cache_count, cache_size = await asyncio.to_thread(
+        _stats_folder_and_cache, PHOTOS_DIR, CACHE_DIR
+    )
 
     return {
         "total_images": total_images,
@@ -1198,17 +1205,18 @@ async def search_dirs(
             prefix = "/".join(parts[:i])
             full_dir_counts[prefix] = full_dir_counts.get(prefix, 0) + count
 
-    # 同时从文件系统扫描空文件夹
-    def _scan_all_dirs(base: Path, prefix: str = ""):
+    # 同时从文件系统扫描空文件夹（iterdir 在线程中执行，避免阻塞）
+    def _scan_all_dirs(base: Path, prefix: str, dir_counts: dict[str, int]) -> None:
         if not base.is_dir():
             return
         for child in sorted(base.iterdir()):
             if child.is_dir() and not child.name.startswith("."):
                 child_path = f"{prefix}/{child.name}" if prefix else child.name
-                if child_path not in full_dir_counts:
-                    full_dir_counts[child_path] = 0
-                _scan_all_dirs(child, child_path)
-    _scan_all_dirs(PHOTOS_DIR)
+                if child_path not in dir_counts:
+                    dir_counts[child_path] = 0
+                _scan_all_dirs(child, child_path, dir_counts)
+
+    await asyncio.to_thread(_scan_all_dirs, PHOTOS_DIR, "", full_dir_counts)
 
     # 模糊匹配 + 简繁匹配 + 拼音匹配
     matched = []
@@ -1685,6 +1693,39 @@ async def create_folder(body: CreateFolderRequest):
     return {"ok": True, "path": rel}
 
 
+def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
+    """同步计算目标目录中已有图片的 MD5 哈希，用于内容去重"""
+    import hashlib
+    existing_hashes: dict[str, str] = {}
+    if not target_dir.is_dir():
+        return existing_hashes
+    for existing in target_dir.iterdir():
+        if existing.is_file() and existing.suffix.lower() in image_extensions:
+            try:
+                h = hashlib.md5(existing.read_bytes()).hexdigest()
+                existing_hashes[h] = existing.name
+            except OSError:
+                pass
+    return existing_hashes
+
+
+def _get_image_metadata_and_thumbnail_sync(
+    dest: Path, cache_path: Path,
+) -> tuple[int, int, float, int]:
+    """同步获取图片尺寸、修改时间、大小并生成缩略图"""
+    from PIL import Image as PILImage
+    from scanner import _generate_thumbnail
+    try:
+        with PILImage.open(dest) as img:
+            width, height = img.size
+    except Exception:
+        width, height = 0, 0
+    modified_at = os.path.getmtime(dest)
+    file_size = os.path.getsize(dest)
+    _generate_thumbnail(dest, cache_path)
+    return width, height, modified_at, file_size
+
+
 @app.post("/api/upload")
 async def upload_images(
     path: str = Form(""),
@@ -1698,23 +1739,16 @@ async def upload_images(
     写入文件后立即生成缩略图并入库，无需等待 watchdog。
     """
     import hashlib
-    from PIL import Image as PILImage
-    from scanner import IMAGE_EXTENSIONS, _generate_thumbnail
+    from scanner import IMAGE_EXTENSIONS
 
     target_path = (path or "").strip().strip("/")
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # 预计算目标目录中已有文件的哈希（用于内容去重）
-    existing_hashes: dict[str, str] = {}  # md5 -> filename
-    if target_dir.is_dir():
-        for existing in target_dir.iterdir():
-            if existing.is_file() and existing.suffix.lower() in IMAGE_EXTENSIONS:
-                try:
-                    h = hashlib.md5(existing.read_bytes()).hexdigest()
-                    existing_hashes[h] = existing.name
-                except OSError:
-                    pass
+    # 预计算目标目录中已有文件的哈希（在线程中执行，避免阻塞）
+    existing_hashes = await asyncio.to_thread(
+        _compute_existing_hashes, target_dir, IMAGE_EXTENSIONS
+    )
 
     uploaded = 0
     skipped = 0
@@ -1771,19 +1805,12 @@ async def upload_images(
                 select(Image).where(Image.relative_path == rel_path)
             )).scalar_one_or_none()
 
-            try:
-                with PILImage.open(dest) as img:
-                    width, height = img.size
-            except Exception:
-                width, height = 0, 0
-
-            modified_at = os.path.getmtime(dest)
-            file_size = os.path.getsize(dest)
-
-            # 生成缩略图
+            # 在线程中获取图片元数据并生成缩略图，避免阻塞事件循环
             cache_name = _cache_filename(rel_path)
             cache_path = CACHE_DIR / cache_name
-            _generate_thumbnail(dest, cache_path)
+            width, height, modified_at, file_size = await asyncio.to_thread(
+                _get_image_metadata_and_thumbnail_sync, dest, cache_path
+            )
 
             if existing_record:
                 # 更新已有记录

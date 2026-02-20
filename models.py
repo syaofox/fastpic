@@ -1,6 +1,7 @@
 import os
 import re
 
+from sqlalchemy import event
 from sqlmodel import Field, SQLModel, create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -9,6 +10,15 @@ _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.environ.
 os.makedirs(_DATA_DIR, exist_ok=True)
 DATABASE_URL = f"sqlite:///{_DATA_DIR}/fastpic.db"
 ASYNC_DATABASE_URL = f"sqlite+aiosqlite:///{_DATA_DIR}/fastpic.db"
+
+
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    """启用 WAL 模式与 busy_timeout，提升并发读写性能"""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
 
 # 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
 _NATURAL_PAD = 10
@@ -51,6 +61,8 @@ class ImageTag(SQLModel, table=True):
 # 同步引擎用于 create_all
 sync_engine = create_engine(DATABASE_URL, echo=False)
 async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
+event.listens_for(sync_engine, "connect")(_set_sqlite_pragma)
+event.listens_for(async_engine.sync_engine, "connect")(_set_sqlite_pragma)
 async_session_factory = async_sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
 )

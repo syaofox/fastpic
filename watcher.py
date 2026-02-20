@@ -73,6 +73,27 @@ class _PhotoEventHandler(FileSystemEventHandler):
                 self._queue.put(("moved", event.src_path, event.dest_path, time.monotonic()))
 
 
+def _get_media_metadata_and_thumbnail_sync(
+    full_path: Path, cache_path: Path, is_video: bool
+) -> tuple[int, int, float, int] | None:
+    """同步获取媒体元数据并生成缩略图，返回 (width, height, modified_at, file_size)，失败返回 None"""
+    try:
+        modified_at = os.path.getmtime(full_path)
+        file_size = os.path.getsize(full_path)
+        if is_video:
+            width, height = _get_video_dimensions(full_path)
+            _generate_video_thumbnail(full_path, cache_path)
+        else:
+            from PIL import Image as PILImage
+            with PILImage.open(full_path) as img:
+                width, height = img.size
+            _generate_thumbnail(full_path, cache_path)
+        return (width, height, modified_at, file_size)
+    except Exception as e:
+        print(f"[watcher] 处理新增失败 {full_path}: {e}", flush=True)
+        return None
+
+
 async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
     """处理新增图片或视频：生成缩略图 + 写入数据库"""
     if not full_path.exists() or not full_path.is_file():
@@ -89,22 +110,19 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
 
         try:
             is_vid = _is_video(str(full_path))
-            modified_at = os.path.getmtime(full_path)
-            file_size = os.path.getsize(full_path)
-
             cache_name = _cache_filename(rel_path)
             cache_path = cache_dir / cache_name
 
-            if is_vid:
-                width, height = _get_video_dimensions(full_path)
-                _generate_video_thumbnail(full_path, cache_path)
-                media_type = "video"
-            else:
-                from PIL import Image as PILImage
-                with PILImage.open(full_path) as img:
-                    width, height = img.size
-                _generate_thumbnail(full_path, cache_path)
-                media_type = "image"
+            # 在线程中执行 PIL/ffmpeg 等阻塞操作
+            data = await asyncio.to_thread(
+                _get_media_metadata_and_thumbnail_sync,
+                full_path, cache_path, is_vid,
+            )
+            if data is None:
+                return
+
+            width, height, modified_at, file_size = data
+            media_type = "video" if is_vid else "image"
 
             record = Image(
                 filename=full_path.name,
@@ -147,6 +165,23 @@ async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
         print(f"[watcher] 删除: {rel_path}", flush=True)
 
 
+def _regenerate_thumbnail_and_get_metadata_sync(
+    dst_path: Path, new_cache_path: Path, is_video: bool
+) -> tuple[float, int] | None:
+    """同步生成缩略图并返回 (modified_at, file_size)，失败返回 None"""
+    try:
+        modified_at = os.path.getmtime(dst_path)
+        file_size = os.path.getsize(dst_path)
+        if is_video:
+            _generate_video_thumbnail(dst_path, new_cache_path)
+        else:
+            _generate_thumbnail(dst_path, new_cache_path)
+        return (modified_at, file_size)
+    except Exception as e:
+        print(f"[watcher] 生成缩略图失败 {dst_path}: {e}", flush=True)
+        return None
+
+
 async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_path: Path):
     """处理移动/重命名：更新数据库记录路径 + 缓存"""
     src_rel = _relative_path(photos_dir, src_path)
@@ -170,14 +205,15 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
             img.filename_natural = natural_sort_key(dst_path.name)
             img.relative_path_natural = natural_sort_key(dst_rel)
             if dst_path.exists():
-                img.modified_at = os.path.getmtime(dst_path)
-                img.file_size = os.path.getsize(dst_path)
-                # 生成新缓存
                 new_cache = cache_dir / _cache_filename(dst_rel)
-                if getattr(img, "media_type", "image") == "video":
-                    _generate_video_thumbnail(dst_path, new_cache)
-                else:
-                    _generate_thumbnail(dst_path, new_cache)
+                is_video = getattr(img, "media_type", "image") == "video"
+                # 在线程中执行缩略图生成
+                data = await asyncio.to_thread(
+                    _regenerate_thumbnail_and_get_metadata_sync,
+                    dst_path, new_cache, is_video,
+                )
+                if data:
+                    img.modified_at, img.file_size = data
 
             session.add(img)
             await session.commit()
