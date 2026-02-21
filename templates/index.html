@@ -507,23 +507,6 @@ function showImageInfo() {
         });
 }
 
-function escapeHtml(s) {
-    if (s == null) return '';
-    var div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
-}
-
-function escapeAttr(s) {
-    if (s == null) return '';
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
-
 function _bindModalTagHandlers(container, imageId) {
     if (!container) return;
     container.addEventListener('click', function(e) {
@@ -2405,16 +2388,6 @@ document.addEventListener('keydown', function(e) {
         return escapeHtml(path.substring(0, idx)) +
             '<span class="text-blue-600 font-medium">' + escapeHtml(path.substring(idx, idx + query.length)) + '</span>' +
             escapeHtml(path.substring(idx + query.length));
-    }
-
-    function escapeHtml(s) {
-        var d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-    }
-
-    function escapeAttr(s) {
-        return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     function navigateToDir(dirPath) {

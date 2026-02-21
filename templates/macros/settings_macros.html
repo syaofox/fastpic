@@ -1,0 +1,14 @@
+{% macro settings_card(icon_bg_class, icon_svg, title, description) %}
+<div class="bg-white rounded-xl border border-slate-200 p-6">
+    <div class="flex items-start gap-4">
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 {{ icon_bg_class }}">
+            {{ icon_svg | safe }}
+        </div>
+        <div class="flex-1 min-w-0">
+            <h3 class="text-sm font-semibold text-slate-800 mb-1">{{ title }}</h3>
+            <p class="text-sm text-slate-500 mb-3">{{ description }}</p>
+            {{ caller() }}
+        </div>
+    </div>
+</div>
+{% endmacro %}

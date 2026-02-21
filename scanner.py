@@ -46,6 +46,27 @@ def _generate_thumbnail(full_path: Path, cache_path: Path) -> bool:
         return False
 
 
+def get_media_metadata_and_thumbnail(
+    full_path: Path, cache_path: Path, is_video: bool
+) -> tuple[int, int, float, int] | None:
+    """同步获取媒体元数据并生成缩略图，返回 (width, height, modified_at, file_size)，失败返回 None。
+    供 watcher、上传等场景复用。"""
+    try:
+        modified_at = os.path.getmtime(full_path)
+        file_size = os.path.getsize(full_path)
+        if is_video:
+            width, height = _get_video_dimensions(full_path)
+            _generate_video_thumbnail(full_path, cache_path)
+        else:
+            with PILImage.open(full_path) as img:
+                width, height = img.size
+            _generate_thumbnail(full_path, cache_path)
+        return (width, height, modified_at, file_size)
+    except Exception as e:
+        print(f"[scanner] 处理失败 {full_path}: {e}", flush=True)
+        return None
+
+
 def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
     """使用 ffprobe 获取视频宽高，失败时返回 (1920, 1080)"""
     try:

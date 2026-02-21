@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/settings_macros.html" import settings_card %}
 {% block title %}设置 - FastPic{% endblock %}
 {% block content %}
 <div class="min-h-screen bg-slate-50">
@@ -88,24 +89,15 @@
             <!-- 操作区 -->
             <div class="space-y-4">
                 <!-- 扫描新图片 -->
-                <div class="bg-white rounded-xl border border-slate-200 p-6">
-                    <div class="flex items-start gap-4">
-                        <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <h3 class="text-sm font-semibold text-slate-800 mb-1">扫描新图片</h3>
-                            <p class="text-sm text-slate-500 mb-3">扫描 photos 目录中尚未入库的图片，自动生成缩略图并写入数据库。适用于手动拷贝图片到目录后的场景。</p>
-                            <div class="flex items-center gap-3">
-                                <button type="button" id="scan-btn" onclick="triggerScan()"
-                                        class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                    开始扫描
-                                </button>
-                                <span id="scan-status" class="text-sm text-slate-500"></span>
-                            </div>
-                        </div>
-                    </div>
+                {% call settings_card('bg-blue-50', '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>', '扫描新图片', '扫描 photos 目录中尚未入库的图片，自动生成缩略图并写入数据库。适用于手动拷贝图片到目录后的场景。') %}
+                <div class="flex items-center gap-3">
+                    <button type="button" id="scan-btn" onclick="triggerScan()"
+                            class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        开始扫描
+                    </button>
+                    <span id="scan-status" class="text-sm text-slate-500"></span>
                 </div>
+                {% endcall %}
 
                 <!-- 清理同步 -->
                 <div class="bg-white rounded-xl border border-slate-200 p-6">
@@ -1336,12 +1328,12 @@ function showMergeFolderBrowser(inputId) {
     loadSubfolders();
 }
 
-// 合并文件夹：搜索下拉
-var mergeSearchTimer = null;
-function initMergeFolderDropdown(inputId, dropdownId) {
+// 通用目录搜索下拉（合并文件夹、重复文件等复用）
+function initDirSearchDropdown(inputId, dropdownId, itemClass, hoverClass) {
     var input = document.getElementById(inputId);
     var dropdown = document.getElementById(dropdownId);
     if (!input || !dropdown) return;
+    var searchTimer = null;
     function hide() { dropdown.classList.add('hidden'); }
     function search() {
         var q = (input.value || '').trim();
@@ -1354,7 +1346,7 @@ function initMergeFolderDropdown(inputId, dropdownId) {
                 var html = '<div class="py-1">';
                 dirs.forEach(function(d) {
                     var displayPath = d.path || '(根)';
-                    html += '<button type="button" class="merge-dir-item w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 transition-colors flex items-center gap-2" data-path="' + (d.path || '').replace(/"/g, '&quot;') + '">' +
+                    html += '<button type="button" class="' + itemClass + ' w-full text-left px-4 py-2 text-sm text-slate-700 ' + hoverClass + ' transition-colors flex items-center gap-2" data-path="' + escapeAttr(d.path || '') + '">' +
                         '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
                         '<span class="truncate">' + displayPath + '</span>' +
                         (d.image_count != null ? '<span class="text-slate-400 text-xs flex-shrink-0">' + d.image_count + ' 张</span>' : '') +
@@ -1363,7 +1355,7 @@ function initMergeFolderDropdown(inputId, dropdownId) {
                 html += '</div>';
                 dropdown.innerHTML = html;
                 dropdown.classList.remove('hidden');
-                dropdown.querySelectorAll('.merge-dir-item').forEach(function(btn) {
+                dropdown.querySelectorAll('.' + itemClass).forEach(function(btn) {
                     btn.onclick = function() {
                         input.value = btn.getAttribute('data-path');
                         dropdown.classList.add('hidden');
@@ -1373,53 +1365,8 @@ function initMergeFolderDropdown(inputId, dropdownId) {
             .catch(function() { dropdown.classList.add('hidden'); });
     }
     input.oninput = function() {
-        clearTimeout(mergeSearchTimer);
-        mergeSearchTimer = setTimeout(search, 300);
-    };
-    input.onfocus = function() { if (input.value.trim()) search(); };
-    document.addEventListener('click', function(e) {
-        if (!input.contains(e.target) && !dropdown.contains(e.target)) hide();
-    });
-}
-
-var dupFolderSearchTimer = null;
-function initDupFolderDropdown() {
-    var input = document.getElementById('dup-folder-input');
-    var dropdown = document.getElementById('dup-folder-dropdown');
-    if (!input || !dropdown) return;
-    function hide() { dropdown.classList.add('hidden'); }
-    function search() {
-        var q = (input.value || '').trim();
-        if (!q) { dropdown.classList.add('hidden'); return; }
-        fetch('/api/search-dirs?q=' + encodeURIComponent(q) + '&limit=15')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                var dirs = data.dirs || [];
-                if (dirs.length === 0) { dropdown.classList.add('hidden'); return; }
-                var html = '<div class="py-1">';
-                dirs.forEach(function(d) {
-                    var displayPath = d.path || '(根)';
-                    html += '<button type="button" class="dup-dir-item w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-violet-50 transition-colors flex items-center gap-2" data-path="' + (d.path || '').replace(/"/g, '&quot;') + '">' +
-                        '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
-                        '<span class="truncate">' + displayPath + '</span>' +
-                        (d.image_count != null ? '<span class="text-slate-400 text-xs flex-shrink-0">' + d.image_count + ' 张</span>' : '') +
-                        '</button>';
-                });
-                html += '</div>';
-                dropdown.innerHTML = html;
-                dropdown.classList.remove('hidden');
-                dropdown.querySelectorAll('.dup-dir-item').forEach(function(btn) {
-                    btn.onclick = function() {
-                        input.value = btn.getAttribute('data-path');
-                        dropdown.classList.add('hidden');
-                    };
-                });
-            })
-            .catch(function() { dropdown.classList.add('hidden'); });
-    }
-    input.oninput = function() {
-        clearTimeout(dupFolderSearchTimer);
-        dupFolderSearchTimer = setTimeout(search, 300);
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(search, 300);
     };
     input.onfocus = function() { if (input.value.trim()) search(); };
     document.addEventListener('click', function(e) {
@@ -1553,11 +1500,11 @@ loadStats();
 
 // 合并文件夹标签页：初始化搜索下拉
 if (document.getElementById('merge-folder-a')) {
-    initMergeFolderDropdown('merge-folder-a', 'merge-dropdown-a');
-    initMergeFolderDropdown('merge-folder-b', 'merge-dropdown-b');
+    initDirSearchDropdown('merge-folder-a', 'merge-dropdown-a', 'merge-dir-item', 'hover:bg-blue-50');
+    initDirSearchDropdown('merge-folder-b', 'merge-dropdown-b', 'merge-dir-item', 'hover:bg-blue-50');
 }
 // 重复文件标签页：初始化文件夹选择
-initDupFolderDropdown();
+initDirSearchDropdown('dup-folder-input', 'dup-folder-dropdown', 'dup-dir-item', 'hover:bg-violet-50');
 
 // 批量保留下拉选项（只绑定一次）
 (function initDupBatchOptions() {
