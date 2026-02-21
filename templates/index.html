@@ -2473,9 +2473,57 @@ document.addEventListener('keydown', function(e) {
     });
 })();
 
+// 构建 gallery 请求 URL（用于 popstate 恢复）
+function buildGalleryUrl(path) {
+    var mode = (document.getElementById('mode-input') && document.getElementById('mode-input').value) || 'folder';
+    var sortBy = (document.getElementById('sort-by-input') && document.getElementById('sort-by-input').value) || 'modified_at';
+    var sortOrder = (document.getElementById('sort-order-input') && document.getElementById('sort-order-input').value) || 'desc';
+    var cols = (document.getElementById('cols-input') && document.getElementById('cols-input').value) || '4';
+    var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
+    var url = '/gallery?path=' + encodeURIComponent(path || '') + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
+        '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
+        '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
+        '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
+        '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
+        '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
+        '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
+    return url;
+}
+
+// 从 location.search 解析 path 参数
+function getPathFromUrl() {
+    var params = new URLSearchParams(location.search);
+    return params.get('path') || '';
+}
+
+// popstate：浏览器后退/前进时加载对应 gallery
+window.addEventListener('popstate', function(ev) {
+    if (location.pathname !== '/' && location.pathname !== '') return;
+    var path = getPathFromUrl();
+    window._restoringFromPopstate = true;
+    var url = buildGalleryUrl(path);
+    htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+});
+
 // HTMX 交换后更新侧栏选中状态、mode 输入、并确保缩略图大小应用
 document.body.addEventListener('htmx:afterSwap', function(ev) {
     if (ev.detail.target.id === 'gallery-container') {
+        var marker = document.getElementById('current-path-marker');
+        const path = marker ? (marker.getAttribute('data-path') || '') : '';
+
+        // 若为 popstate 恢复，清除标志后不再推入 URL
+        if (window._restoringFromPopstate) {
+            window._restoringFromPopstate = false;
+        } else {
+            // 推入或替换 URL，实现浏览器后退逐级返回
+            var newUrl = path ? '/?path=' + encodeURIComponent(path) : '/';
+            var urlPath = getPathFromUrl();
+            if (urlPath === path) {
+                history.replaceState({path: path}, '', newUrl);
+            } else {
+                history.pushState({path: path}, '', newUrl);
+            }
+        }
         // 将面包屑+操作按钮移到顶栏第一行
         var topBar = ev.detail.target.querySelector('.gallery-top-bar');
         var slot = document.getElementById('gallery-top-slot');
@@ -2487,11 +2535,11 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
         const saved = localStorage.getItem('fastpic_gallery_cols');
         const sc = document.getElementById('scroll-container');
         if (sc && saved) sc.style.setProperty('--gallery-cols', saved);
-        const marker = document.getElementById('current-path-marker');
-        const path = marker ? (marker.getAttribute('data-path') || '') : '';
         const mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
         const sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
         const sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
+        const pathInput = document.querySelector('[name=path]');
+        if (pathInput) pathInput.value = path;
         const modeInput = document.getElementById('mode-input');
         if (modeInput) modeInput.value = mode;
         const sortByInput = document.getElementById('sort-by-input');
