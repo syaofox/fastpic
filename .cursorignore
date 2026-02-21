@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.Python
+
+# 用户数据与缓存（大量文件，无需索引）
+photos/
+cache/
+data/
+
+# Git
+.git/
+
+# 依赖锁文件（体积大，通常不需 AI 理解）
+uv.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
