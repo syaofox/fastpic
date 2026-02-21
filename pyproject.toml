@@ -1,6 +1,6 @@
 [project]
 name = "fastpic"
-version = "0.1.17"
+version = "0.2.0"
 description = "局域网图片查看器 - FastAPI + HTMX + SQLModel"
 requires-python = ">=3.10"
 dependencies = [
