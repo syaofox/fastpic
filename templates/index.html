@@ -444,7 +444,7 @@ function toggleImageInfo() {
 
 const MODAL_TOOLBAR_COLLAPSED_KEY = 'fastpic_modal_toolbar_collapsed';
 function isModalToolbarCollapsed() {
-    return localStorage.getItem(MODAL_TOOLBAR_COLLAPSED_KEY) === 'true';
+    return localStorage.getItem(MODAL_TOOLBAR_COLLAPSED_KEY) !== 'false';
 }
 function setModalToolbarCollapsed(collapsed) {
     localStorage.setItem(MODAL_TOOLBAR_COLLAPSED_KEY, String(collapsed));
@@ -631,9 +631,28 @@ function prevImage() {
 }
 
 function nextImage(fromSlideshow) {
-    if (modalImages.length === 0) return;
-    if (modalIndex === modalImages.length - 1) {
-        if (!fromSlideshow) {
+    if (modalImages.length === 0) return false;
+    var types = modalMediaTypes.length ? modalMediaTypes : modalImages.map(_inferMediaType);
+
+    if (fromSlideshow) {
+        // 幻灯片模式：跳过视频，只播图片
+        var nextIdx = (modalIndex + 1) % modalImages.length;
+        var visited = 0;
+        while (types[nextIdx] === 'video' && visited < modalImages.length) {
+            nextIdx = (nextIdx + 1) % modalImages.length;
+            visited++;
+        }
+        if (visited >= modalImages.length || types[nextIdx] === 'video') {
+            stopSlideshow();
+            return false;
+        }
+        if (nextIdx <= modalIndex && slideshowMode === 'stop') {
+            stopSlideshow();
+            return false;
+        }
+        modalIndex = nextIdx;
+    } else {
+        if (modalIndex === modalImages.length - 1) {
             showCustomConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
                 modalIndex = 0;
                 _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
@@ -641,20 +660,15 @@ function nextImage(fromSlideshow) {
                 refreshImageInfoIfVisible();
                 preloadModalImages(modalIndex);
             });
-            return;
+            return false;
         }
-        if (slideshowMode === 'stop') {
-            stopSlideshow();
-            return;
-        }
-        modalIndex = 0;
-    } else {
         modalIndex = modalIndex + 1;
     }
     _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
     _updateModalImageCounter();
     refreshImageInfoIfVisible();
     preloadModalImages(modalIndex);
+    return true;
 }
 
 function showCustomConfirm(message, confirmText, onConfirm, onCancel) {
@@ -711,6 +725,10 @@ function toggleSlideshow() {
 function startSlideshow() {
     if (modalImages.length <= 1) return;
     if (slideshowTimer) return;
+    var types = modalMediaTypes.length ? modalMediaTypes : modalImages.map(_inferMediaType);
+    if (types[modalIndex] === 'video') {
+        if (!nextImage(true)) return;
+    }
     slideshowTimer = setInterval(function() {
         nextImage(true);
     }, slideshowInterval * 1000);
