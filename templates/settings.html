@@ -29,6 +29,14 @@
                     重复文件
                 </span>
             </button>
+            <button type="button" data-tab="merge"
+                    class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
+                    onclick="switchTab('merge')">
+                <span class="flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                    合并文件夹
+                </span>
+            </button>
             <button type="button" data-tab="tags"
                     class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
                     onclick="switchTab('tags')">
@@ -193,6 +201,66 @@
                                 </div>
                             </div>
                             <div id="dup-groups-list" class="space-y-4 max-h-[70vh] overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======== 合并文件夹 ======== -->
+        <div id="tab-merge" class="tab-content hidden">
+            <div class="bg-white rounded-xl border border-slate-200 p-6">
+                <div class="flex items-start gap-4">
+                    <div class="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-sm font-semibold text-slate-800 mb-1">合并文件夹</h3>
+                        <p class="text-sm text-slate-500 mb-4">选择两个文件夹执行合并，通过 MD5 去重。去重时优先保留原本文件数较多的文件夹中的文件。</p>
+                        <div class="space-y-4 max-w-xl">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">文件夹 A</label>
+                                <div class="relative">
+                                    <input type="text" id="merge-folder-a" placeholder="输入或搜索文件夹路径，如：2024/旅行"
+                                           class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                           autocomplete="off">
+                                    <div id="merge-dropdown-a" class="hidden absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 max-h-48 overflow-y-auto"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">文件夹 B</label>
+                                <div class="relative">
+                                    <input type="text" id="merge-folder-b" placeholder="输入或搜索文件夹路径"
+                                           class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                           autocomplete="off">
+                                    <div id="merge-dropdown-b" class="hidden absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 max-h-48 overflow-y-auto"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">合并目标</label>
+                                <div class="flex flex-wrap gap-4">
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="merge-target" value="auto" checked class="rounded-full border-slate-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-slate-700">自动（选文件数多的）</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="merge-target" value="folder_a" class="rounded-full border-slate-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-slate-700">合并到 A</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="merge-target" value="folder_b" class="rounded-full border-slate-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-slate-700">合并到 B</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <button type="button" id="merge-folders-btn" onclick="triggerMergeFolders()"
+                                        class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    开始合并
+                                </button>
+                                <span id="merge-status" class="text-sm text-slate-500"></span>
+                            </div>
+                            <div id="merge-result" class="hidden mt-3 p-3 bg-slate-50 rounded-lg text-sm text-slate-600 space-y-1"></div>
                         </div>
                     </div>
                 </div>
@@ -1135,8 +1203,114 @@ function deleteTag(name) {
     });
 }
 
+// 合并文件夹：搜索下拉
+var mergeSearchTimer = null;
+function initMergeFolderDropdown(inputId, dropdownId) {
+    var input = document.getElementById(inputId);
+    var dropdown = document.getElementById(dropdownId);
+    if (!input || !dropdown) return;
+    function hide() { dropdown.classList.add('hidden'); }
+    function search() {
+        var q = (input.value || '').trim();
+        if (!q) { dropdown.classList.add('hidden'); return; }
+        fetch('/api/search-dirs?q=' + encodeURIComponent(q) + '&limit=15')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var dirs = data.dirs || [];
+                if (dirs.length === 0) { dropdown.classList.add('hidden'); return; }
+                var html = '<div class="py-1">';
+                dirs.forEach(function(d) {
+                    var displayPath = d.path || '(根)';
+                    html += '<button type="button" class="merge-dir-item w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 transition-colors flex items-center gap-2" data-path="' + (d.path || '').replace(/"/g, '&quot;') + '">' +
+                        '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                        '<span class="truncate">' + displayPath + '</span>' +
+                        (d.image_count != null ? '<span class="text-slate-400 text-xs flex-shrink-0">' + d.image_count + ' 张</span>' : '') +
+                        '</button>';
+                });
+                html += '</div>';
+                dropdown.innerHTML = html;
+                dropdown.classList.remove('hidden');
+                dropdown.querySelectorAll('.merge-dir-item').forEach(function(btn) {
+                    btn.onclick = function() {
+                        input.value = btn.getAttribute('data-path');
+                        dropdown.classList.add('hidden');
+                    };
+                });
+            })
+            .catch(function() { dropdown.classList.add('hidden'); });
+    }
+    input.oninput = function() {
+        clearTimeout(mergeSearchTimer);
+        mergeSearchTimer = setTimeout(search, 300);
+    };
+    input.onfocus = function() { if (input.value.trim()) search(); };
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) hide();
+    });
+}
+
+function triggerMergeFolders() {
+    var folderA = (document.getElementById('merge-folder-a').value || '').trim();
+    var folderB = (document.getElementById('merge-folder-b').value || '').trim();
+    var targetRadios = document.querySelectorAll('input[name="merge-target"]:checked');
+    var target = (targetRadios.length && targetRadios[0].value) || 'auto';
+
+    if (!folderA || !folderB) {
+        showSettingsAlert('请填写两个文件夹路径');
+        return;
+    }
+    if (folderA === folderB) {
+        showSettingsAlert('不能选择相同的文件夹');
+        return;
+    }
+
+    var btn = document.getElementById('merge-folders-btn');
+    var status = document.getElementById('merge-status');
+    var resultEl = document.getElementById('merge-result');
+    btn.disabled = true;
+    status.textContent = '合并中...';
+    status.className = 'text-sm text-slate-500';
+    resultEl.classList.add('hidden');
+
+    fetch('/api/merge-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_a: folderA, folder_b: folderB, target: target })
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            if (data.ok) {
+                status.textContent = '合并完成';
+                status.className = 'text-sm text-green-600';
+                resultEl.classList.remove('hidden');
+                resultEl.innerHTML =
+                    '<div>移动文件：<span class="font-medium text-slate-800">' + (data.moved || 0) + '</span> 个</div>' +
+                    '<div>删除重复：<span class="font-medium text-slate-800">' + (data.deleted || 0) + '</span> 个</div>' +
+                    '<div>合并目标：<span class="font-medium text-slate-800">' + (data.target || '') + '</span></div>';
+                loadStats();
+            } else {
+                status.textContent = '合并失败';
+                status.className = 'text-sm text-red-500';
+                showSettingsAlert(data.error || '合并失败');
+            }
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            status.textContent = '合并失败';
+            status.className = 'text-sm text-red-500';
+            showSettingsAlert('合并失败: ' + err.message);
+        });
+}
+
 // 页面加载时获取统计
 loadStats();
+
+// 合并文件夹标签页：初始化搜索下拉
+if (document.getElementById('merge-folder-a')) {
+    initMergeFolderDropdown('merge-folder-a', 'merge-dropdown-a');
+    initMergeFolderDropdown('merge-folder-b', 'merge-dropdown-b');
+}
 
 // 批量保留下拉选项（只绑定一次）
 (function initDupBatchOptions() {

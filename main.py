@@ -1305,6 +1305,12 @@ class DeleteFoldersRequest(BaseModel):
     paths: list[str]
 
 
+class MergeFoldersRequest(BaseModel):
+    folder_a: str
+    folder_b: str
+    target: str = "auto"  # "folder_a" | "folder_b" | "auto"
+
+
 def _delete_image_files(relative_path: str) -> None:
     """删除图片的原始文件和缓存文件"""
     # 删除原图
@@ -1722,6 +1728,222 @@ async def delete_folders(
     if total_folders > 0:
         _invalidate_folder_tree_cache()
     return {"deleted_images": total_images, "deleted_folders": total_folders}
+
+
+def _unique_file_path(target_dir: Path, filename: str) -> Path:
+    """在目标目录下生成不冲突的文件路径，若存在则追加 (1)、(2) 等"""
+    dest = target_dir / filename
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    counter = 1
+    while dest.exists():
+        dest = target_dir / f"{stem} ({counter}){suffix}"
+        counter += 1
+    return dest
+
+
+@app.post("/api/merge-folders")
+async def merge_folders(
+    body: MergeFoldersRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """合并两个文件夹：通过 MD5 去重，优先保留文件数较多的文件夹中的文件"""
+    from collections import defaultdict
+    from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, _generate_thumbnail, _generate_video_thumbnail
+
+    folder_a = (body.folder_a or "").strip().strip("/")
+    folder_b = (body.folder_b or "").strip().strip("/")
+
+    # 路径校验
+    if not folder_a or not folder_b:
+        return {"ok": False, "error": "请指定两个文件夹路径"}
+    if ".." in folder_a or folder_a.startswith("/") or ".." in folder_b or folder_b.startswith("/"):
+        return {"ok": False, "error": "路径不合法"}
+    if folder_a == folder_b:
+        return {"ok": False, "error": "不能选择相同的文件夹"}
+    if folder_a.startswith(folder_b + "/") or folder_b.startswith(folder_a + "/"):
+        return {"ok": False, "error": "不能合并互为父子关系的文件夹"}
+
+    path_a = PHOTOS_DIR / folder_a
+    path_b = PHOTOS_DIR / folder_b
+    if not path_a.exists() or not path_a.is_dir():
+        return {"ok": False, "error": f"文件夹不存在: {folder_a}"}
+    if not path_b.exists() or not path_b.is_dir():
+        return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
+
+    photos_dir = PHOTOS_DIR.resolve()
+    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+
+    async def _get_images_under(prefix: str) -> list[Image]:
+        escaped = _escape_like(prefix)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == prefix)
+        )
+        stmt = select(Image).where(path_filter)
+        return list((await session.execute(stmt)).scalars().all())
+
+    images_a = await _get_images_under(folder_a)
+    images_b = await _get_images_under(folder_b)
+    count_a, count_b = len(images_a), len(images_b)
+
+    # 确定目标文件夹：target 指定或选文件数多的
+    if body.target == "folder_b":
+        target_prefix = folder_b
+        source_prefix = folder_a
+        source_images = images_a
+        target_images = images_b
+        source_path = path_a
+        target_path = path_b
+    else:
+        target_prefix = folder_a
+        source_prefix = folder_b
+        source_images = images_b
+        target_images = images_a
+        source_path = path_b
+        target_path = path_a
+
+    if body.target == "auto" and count_b > count_a:
+        target_prefix = folder_b
+        source_prefix = folder_a
+        source_images = images_a
+        target_images = images_b
+        source_path = path_a
+        target_path = path_b
+
+    # 为每个图片计算 MD5 并标记来源
+    def _belongs_to(rel: str, prefix: str) -> bool:
+        return rel == prefix or rel.startswith(prefix + "/")
+
+    all_images = [
+        *[(img, "a") for img in images_a],
+        *[(img, "b") for img in images_b],
+    ]
+    preferred = "a" if count_a >= count_b else "b"
+
+    by_hash: dict[str, list[tuple[Image, str]]] = defaultdict(list)
+    for img, src in all_images:
+        full = photos_dir / img.relative_path
+        if not full.is_file() or full.suffix.lower() not in media_extensions:
+            continue
+        h = await asyncio.to_thread(_compute_file_md5, photos_dir, img.relative_path)
+        if h is None:
+            continue
+        by_hash[h].append((img, src))
+
+    # 对每个 hash 组应用去重：保留来自 preferred 的一个，其余标记删除
+    to_keep: dict[str, Image] = {}  # hash -> image to keep
+    to_delete: set[int] = set()  # image ids to delete (file + db)
+
+    for h, items in by_hash.items():
+        from_preferred = [(img, src) for img, src in items if src == preferred]
+        from_other = [(img, src) for img, src in items if src != preferred]
+        if len(from_preferred) > 0:
+            # 保留 preferred 中路径最短的一个
+            keeper = min(from_preferred, key=lambda x: x[0].relative_path)[0]
+            to_keep[h] = keeper
+            for img, _ in from_preferred:
+                if img.id != keeper.id:
+                    to_delete.add(img.id)
+            for img, _ in from_other:
+                to_delete.add(img.id)
+        else:
+            # 全部来自 non-preferred，保留一个
+            keeper = min(from_other, key=lambda x: x[0].relative_path)[0]
+            to_keep[h] = keeper
+            for img, _ in from_other:
+                if img.id != keeper.id:
+                    to_delete.add(img.id)
+
+    # 目标文件夹中已有文件的 hash 集合（用于判断移动时是否重复）
+    target_hashes: set[str] = set()
+    for img, src in all_images:
+        if img.id in to_delete:
+            continue
+        if _belongs_to(img.relative_path, target_prefix):
+            h = await asyncio.to_thread(_compute_file_md5, photos_dir, img.relative_path)
+            if h:
+                target_hashes.add(h)
+
+    # 1) 删除需要去重的文件（文件系统 + 数据库）
+    for img_id in to_delete:
+        result = await session.execute(select(Image).where(Image.id == img_id))
+        img = result.scalar_one_or_none()
+        if img:
+            _delete_image_files(img.relative_path)
+            await session.delete(img)
+
+    # 2) 将源文件夹中要保留的文件移动到目标
+    moved = 0
+    for img, src in all_images:
+        if img.id in to_delete:
+            continue
+        if not _belongs_to(img.relative_path, source_prefix):
+            continue
+        h = await asyncio.to_thread(_compute_file_md5, photos_dir, img.relative_path)
+        if not h:
+            continue
+        if h in target_hashes:
+            # 目标已有相同内容，删除源文件及数据库记录
+            _delete_image_files(img.relative_path)
+            await session.delete(img)
+            continue
+        # 计算目标相对路径：保留子目录结构
+        suffix = img.relative_path[len(source_prefix) :].lstrip("/")
+        new_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
+        new_full = target_path / suffix if suffix else target_path
+        new_full.parent.mkdir(parents=True, exist_ok=True)
+        if new_full.exists():
+            new_full = _unique_file_path(new_full.parent, new_full.name)
+            new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
+        try:
+            shutil.move(str(photos_dir / img.relative_path), str(new_full))
+        except OSError as e:
+            await session.rollback()
+            return {"ok": False, "error": f"移动文件失败 {img.relative_path}: {e}"}
+        old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+        if old_cache.exists():
+            old_cache.unlink(missing_ok=True)
+        img.relative_path = new_rel
+        img.filename = Path(new_rel).name
+        img.filename_natural = natural_sort_key(img.filename)
+        img.relative_path_natural = natural_sort_key(new_rel)
+        img.modified_at = os.path.getmtime(new_full)
+        img.file_size = os.path.getsize(new_full)
+        new_cache = CACHE_DIR / _cache_filename(new_rel)
+        if new_full.suffix.lower() in VIDEO_EXTENSIONS:
+            _generate_video_thumbnail(new_full, new_cache)
+        else:
+            _generate_thumbnail(new_full, new_cache)
+        session.add(img)
+        target_hashes.add(h)
+        moved += 1
+
+    # 3) 删除源文件夹中的空目录（若源文件夹变空则删除）
+    if source_path.exists():
+        for d in sorted(source_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if d.is_dir() and not any(d.iterdir()):
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
+        if not any(source_path.iterdir()):
+            try:
+                source_path.rmdir()
+            except OSError:
+                pass
+
+    await session.commit()
+    _invalidate_folder_tree_cache()
+    print(f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件", flush=True)
+    return {
+        "ok": True,
+        "moved": moved,
+        "deleted": len(to_delete),
+        "target": target_prefix,
+    }
 
 
 # ---------- 创建文件夹 & 上传 API ----------
