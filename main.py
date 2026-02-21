@@ -1170,6 +1170,7 @@ async def scan_duplicates(session: AsyncSession = Depends(get_async_session)):
                 "relative_path": img.relative_path,
                 "filename": img.filename,
                 "file_size": img.file_size,
+                "modified_at": img.modified_at,
                 "cache_key": _cache_filename(img.relative_path),
             })
 

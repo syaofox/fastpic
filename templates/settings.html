@@ -21,6 +21,14 @@
                     数据维护
                 </span>
             </button>
+            <button type="button" data-tab="duplicates"
+                    class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
+                    onclick="switchTab('duplicates')">
+                <span class="flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                    重复文件
+                </span>
+            </button>
             <button type="button" data-tab="tags"
                     class="tab-btn px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px border-transparent text-slate-500 hover:text-slate-700"
                     onclick="switchTab('tags')">
@@ -138,33 +146,53 @@
                     </div>
                 </div>
 
-                <!-- 扫描重复文件 -->
-                <div class="bg-white rounded-xl border border-slate-200 p-6">
-                    <div class="flex items-start gap-4">
-                        <div class="w-10 h-10 rounded-lg bg-violet-50 flex items-center justify-center flex-shrink-0">
-                            <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+            </div>
+        </div>
+
+        <!-- ======== 重复文件 ======== -->
+        <div id="tab-duplicates" class="tab-content hidden">
+            <div class="bg-white rounded-xl border border-slate-200 p-6">
+                <div class="flex items-start gap-4">
+                    <div class="w-10 h-10 rounded-lg bg-violet-50 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-sm font-semibold text-slate-800 mb-1">扫描重复文件</h3>
+                        <p class="text-sm text-slate-500 mb-3">扫描 photos 目录中内容相同的重复文件（基于 MD5），便于选择删除多余副本。</p>
+                        <div class="flex items-center gap-3">
+                            <button type="button" id="dup-scan-btn" onclick="triggerScanDuplicates()"
+                                    class="px-4 py-2 bg-violet-500 hover:bg-violet-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                开始扫描
+                            </button>
+                            <span id="dup-scan-status" class="text-sm text-slate-500"></span>
                         </div>
-                        <div class="flex-1 min-w-0">
-                            <h3 class="text-sm font-semibold text-slate-800 mb-1">扫描重复文件</h3>
-                            <p class="text-sm text-slate-500 mb-3">扫描 photos 目录中内容相同的重复文件（基于 MD5），便于选择删除多余副本。</p>
-                            <div class="flex items-center gap-3">
-                                <button type="button" id="dup-scan-btn" onclick="triggerScanDuplicates()"
-                                        class="px-4 py-2 bg-violet-500 hover:bg-violet-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                    开始扫描
-                                </button>
-                                <span id="dup-scan-status" class="text-sm text-slate-500"></span>
-                            </div>
-                            <div id="dup-result-empty" class="hidden mt-3 p-4 bg-slate-50 rounded-lg text-sm text-slate-600 text-center">未发现重复文件</div>
-                            <div id="dup-result-container" class="hidden mt-3">
-                                <div class="flex items-center justify-between mb-3">
-                                    <span id="dup-result-summary" class="text-sm text-slate-600"></span>
+                        <div id="dup-result-empty" class="hidden mt-3 p-4 bg-slate-50 rounded-lg text-sm text-slate-600 text-center">未发现重复文件</div>
+                        <div id="dup-result-container" class="hidden mt-3">
+                            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                                <span id="dup-result-summary" class="text-sm text-slate-600"></span>
+                                <div class="flex items-center gap-2">
+                                    <div class="relative" id="dup-batch-dropdown-wrap">
+                                        <button type="button" id="dup-batch-btn" onclick="toggleDupBatchDropdown()"
+                                                class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+                                            批量保留
+                                        </button>
+                                        <div id="dup-batch-dropdown" class="hidden absolute right-0 top-full mt-1 py-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 min-w-40">
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="newest">保留最新</button>
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="oldest">保留最久</button>
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="largest">保留最大</button>
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="smallest">保留最小</button>
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="path_longest">保留路径最长</button>
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="path_shortest">保留路径最短</button>
+                                            <button type="button" class="dup-batch-option w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" data-strategy="path_contains">保留路径包含...</button>
+                                        </div>
+                                    </div>
                                     <button type="button" id="dup-delete-btn" onclick="deleteSelectedDuplicates()"
                                             class="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                         删除选中项
                                     </button>
                                 </div>
-                                <div id="dup-groups-list" class="space-y-4 max-h-96 overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50"></div>
                             </div>
+                            <div id="dup-groups-list" class="space-y-4 max-h-[70vh] overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50"></div>
                         </div>
                     </div>
                 </div>
@@ -321,6 +349,28 @@
         </div>
     </div>
 </div>
+<!-- 大图预览：独立于设置弹窗，仅点击缩略图时打开 -->
+<div id="dup-preview-modal" class="hidden fixed inset-0 z-[60] flex flex-col items-center justify-center p-4 bg-black/70">
+    <div class="absolute inset-0" onclick="closeDupPreview(event)"></div>
+    <div class="relative flex-1 flex items-center justify-center w-full max-h-[85vh] z-10" onclick="event.stopPropagation()">
+        <button type="button" id="dup-preview-prev" class="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/20 hover:bg-white/40 text-white flex items-center justify-center text-xl disabled:opacity-30 disabled:cursor-not-allowed" title="上一张">‹</button>
+        <img id="dup-preview-img" src="" alt="" class="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl">
+        <button type="button" id="dup-preview-next" class="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/20 hover:bg-white/40 text-white flex items-center justify-center text-xl disabled:opacity-30 disabled:cursor-not-allowed" title="下一张">›</button>
+    </div>
+    <div id="dup-preview-toolbar" class="relative z-10 mt-3 w-full max-w-2xl flex items-center justify-between gap-4 px-4 py-3 bg-white/95 rounded-lg shadow-lg" onclick="event.stopPropagation()">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+            <label class="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                <input type="checkbox" id="dup-preview-delete-cb" class="rounded border-slate-300 text-red-600 focus:ring-red-500">
+                <span class="text-sm text-slate-700">标记删除</span>
+            </label>
+            <span id="dup-preview-path" class="text-xs text-slate-500 truncate"></span>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+            <span id="dup-preview-counter" class="text-sm text-slate-600"></span>
+            <button type="button" id="dup-preview-close" class="px-3 py-1.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">关闭</button>
+        </div>
+    </div>
+</div>
 
 <script>
 // 自定义弹窗（统一风格）
@@ -333,6 +383,112 @@ function settingsModalCloseIfOverlay(e) {
         document.getElementById('settings-modal-merge').classList.add('hidden');
     }
 }
+
+var dupPreviewState = { groupIndex: -1, itemIndex: -1 };
+
+function openDupPreview(photoUrl, groupIndex, itemIndex) {
+    dupPreviewState = { groupIndex: groupIndex, itemIndex: itemIndex };
+    var modal = document.getElementById('dup-preview-modal');
+    var img = document.getElementById('dup-preview-img');
+    img.src = photoUrl;
+    modal.classList.remove('hidden');
+    dupPreviewUpdateContent();
+    dupPreviewSyncCheckboxFromList();
+}
+
+function dupPreviewUpdateContent() {
+    var gi = dupPreviewState.groupIndex;
+    var ii = dupPreviewState.itemIndex;
+    if (gi < 0 || !dupGroupsCache || gi >= dupGroupsCache.length) return;
+    var grp = dupGroupsCache[gi];
+    var items = grp.items;
+    if (ii < 0 || ii >= items.length) return;
+    var item = items[ii];
+    var photoUrl = '/photos/' + (item.relative_path || '').split('/').map(encodeURIComponent).join('/');
+    document.getElementById('dup-preview-img').src = photoUrl;
+    document.getElementById('dup-preview-path').textContent = item.relative_path || '';
+    document.getElementById('dup-preview-counter').textContent = (ii + 1) + ' / ' + items.length;
+    document.getElementById('dup-preview-prev').disabled = ii <= 0;
+    document.getElementById('dup-preview-next').disabled = ii >= items.length - 1;
+}
+
+function dupPreviewSyncCheckboxFromList() {
+    var cb = document.getElementById('dup-preview-delete-cb');
+    var grp = dupGroupsCache && dupGroupsCache[dupPreviewState.groupIndex];
+    if (!cb || !grp || dupPreviewState.itemIndex < 0 || dupPreviewState.itemIndex >= grp.items.length) return;
+    var itemId = grp.items[dupPreviewState.itemIndex].id;
+    var listCb = document.querySelector('.dup-group[data-group-index="' + dupPreviewState.groupIndex + '"] .dup-item-checkbox[data-id="' + itemId + '"]');
+    if (listCb) cb.checked = listCb.checked;
+}
+
+function dupPreviewSyncListFromCheckbox() {
+    var cb = document.getElementById('dup-preview-delete-cb');
+    var grp = dupGroupsCache && dupGroupsCache[dupPreviewState.groupIndex];
+    if (!grp || dupPreviewState.itemIndex < 0 || dupPreviewState.itemIndex >= grp.items.length) return;
+    var itemId = grp.items[dupPreviewState.itemIndex].id;
+    var listCb = document.querySelector('.dup-item-checkbox[data-id="' + itemId + '"]');
+    if (listCb) {
+        listCb.checked = cb.checked;
+        updateDupDeleteBtn();
+    }
+}
+
+function dupPreviewPrev() {
+    if (dupPreviewState.itemIndex > 0) {
+        dupPreviewState.itemIndex--;
+        dupPreviewUpdateContent();
+        dupPreviewSyncCheckboxFromList();
+    }
+}
+
+function dupPreviewNext() {
+    var grp = dupGroupsCache[dupPreviewState.groupIndex];
+    if (dupPreviewState.itemIndex < grp.items.length - 1) {
+        dupPreviewState.itemIndex++;
+        dupPreviewUpdateContent();
+        dupPreviewSyncCheckboxFromList();
+    }
+}
+
+function closeDupPreview(e) {
+    if (!e || e.target.id === 'dup-preview-modal') {
+        document.getElementById('dup-preview-modal').classList.add('hidden');
+        document.getElementById('dup-preview-img').src = '';
+        dupPreviewState = { groupIndex: -1, itemIndex: -1 };
+    }
+}
+
+document.addEventListener('keydown', function(e) {
+    var modal = document.getElementById('dup-preview-modal');
+    if (modal && !modal.classList.contains('hidden')) {
+        if (e.key === 'Escape') closeDupPreview();
+        else if (e.key === 'ArrowLeft') { dupPreviewPrev(); e.preventDefault(); }
+        else if (e.key === 'ArrowRight') { dupPreviewNext(); e.preventDefault(); }
+    }
+});
+
+(function() {
+    var prev = document.getElementById('dup-preview-prev');
+    var next = document.getElementById('dup-preview-next');
+    var closeBtn = document.getElementById('dup-preview-close');
+    var deleteCb = document.getElementById('dup-preview-delete-cb');
+    if (prev) prev.onclick = dupPreviewPrev;
+    if (next) next.onclick = dupPreviewNext;
+    if (closeBtn) closeBtn.onclick = function() { closeDupPreview(); };
+    if (deleteCb) deleteCb.onchange = dupPreviewSyncListFromCheckbox;
+})();
+
+function toggleDupBatchDropdown() {
+    var dd = document.getElementById('dup-batch-dropdown');
+    dd.classList.toggle('hidden');
+}
+
+document.addEventListener('click', function(e) {
+    var wrap = document.getElementById('dup-batch-dropdown-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+        document.getElementById('dup-batch-dropdown').classList.add('hidden');
+    }
+});
 
 function showSettingsPrompt(title, defaultValue, onConfirm) {
     var overlay = document.getElementById('settings-modal-overlay');
@@ -455,6 +611,7 @@ function switchTab(tabName) {
     var target = document.getElementById('tab-' + tabName);
     if (target) target.classList.remove('hidden');
     if (tabName === 'tags') loadTags();
+    if (tabName === 'duplicates' && dupGroupsCache.length > 0) renderDuplicateGroups(dupGroupsCache);
 }
 
 // 格式化文件大小
@@ -640,18 +797,21 @@ function renderDuplicateGroups(groups) {
         var itemsHtml = grp.items.map(function(item, ii) {
             var pathEsc = (item.relative_path || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
             var nameEsc = (item.filename || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-            return '<div class="flex items-center gap-3 p-2 bg-white rounded border border-slate-100 hover:border-slate-200">' +
-                '<input type="checkbox" class="dup-item-checkbox rounded border-slate-300 text-red-600 focus:ring-red-500" data-id="' + item.id + '" title="勾选以删除">' +
-                '<img src="/cache/' + (item.cache_key || '') + '" alt="" class="w-12 h-12 object-cover rounded flex-shrink-0" onerror="this.style.display=\'none\'">' +
-                '<div class="flex-1 min-w-0">' +
-                '<div class="text-sm font-medium text-slate-800 truncate">' + nameEsc + '</div>' +
-                '<div class="text-xs text-slate-500 truncate">' + pathEsc + '</div>' +
+            var thumbSrc = '/cache/' + (item.cache_key || '');
+            return '<div class="flex flex-col items-center gap-2 p-3 bg-white rounded-lg border border-slate-100 hover:border-slate-200">' +
+                '<input type="checkbox" class="dup-item-checkbox rounded border-slate-300 text-red-600 focus:ring-red-500" data-id="' + item.id + '" data-group="' + gi + '" title="勾选以删除">' +
+                '<a href="javascript:void(0)" class="dup-preview-thumb block" data-rel-path="' + pathEsc + '" data-group="' + gi + '" data-item="' + ii + '" onclick="var p=this.getAttribute(\'data-rel-path\'); var gi=parseInt(this.getAttribute(\'data-group\'),10); var ii=parseInt(this.getAttribute(\'data-item\'),10); openDupPreview(\'/photos/\'+p.split(\'/\').map(encodeURIComponent).join(\'/\'), gi, ii); return false;">' +
+                '<img src="' + thumbSrc + '" alt="" class="w-24 h-24 sm:w-32 sm:h-32 object-cover rounded cursor-pointer hover:ring-2 hover:ring-violet-400 transition-all" onerror="this.style.display=\'none\'">' +
+                '</a>' +
+                '<div class="w-full min-w-0 text-center">' +
+                '<div class="text-sm font-medium text-slate-800 truncate" title="' + pathEsc + '">' + nameEsc + '</div>' +
+                '<div class="text-xs text-slate-500 truncate" title="' + pathEsc + '">' + pathEsc + '</div>' +
                 '<div class="text-xs text-slate-400">' + formatSize(item.file_size || 0) + '</div>' +
                 '</div></div>';
         }).join('');
-        return '<div class="border border-slate-200 rounded-lg p-3 bg-white">' +
-            '<div class="text-xs text-slate-500 mb-2">第 ' + (gi + 1) + ' 组（' + grp.items.length + ' 个相同文件）</div>' +
-            '<div class="space-y-1">' + itemsHtml + '</div></div>';
+        return '<div class="border border-slate-200 rounded-lg p-4 bg-white dup-group" data-group-index="' + gi + '">' +
+            '<div class="text-xs text-slate-500 mb-3">第 ' + (gi + 1) + ' 组（' + grp.items.length + ' 个相同文件）</div>' +
+            '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">' + itemsHtml + '</div></div>';
     }).join('');
     listEl.querySelectorAll('.dup-item-checkbox').forEach(function(cb) {
         cb.onchange = updateDupDeleteBtn;
@@ -667,6 +827,66 @@ function getSelectedDupIds() {
     return ids;
 }
 
+function applyBatchKeep(pathFilter, strategy) {
+    if (!dupGroupsCache || dupGroupsCache.length === 0) return;
+    dupGroupsCache.forEach(function(grp, gi) {
+        var items = grp.items;
+        if (items.length < 2) return;
+        var keepIndex = -1;
+        if (strategy === 'newest') {
+            var maxMt = -1;
+            items.forEach(function(it, i) {
+                var mt = it.modified_at || 0;
+                if (mt > maxMt) { maxMt = mt; keepIndex = i; }
+            });
+        } else if (strategy === 'oldest') {
+            var minMt = 1e15;
+            items.forEach(function(it, i) {
+                var mt = it.modified_at || 0;
+                if (mt < minMt) { minMt = mt; keepIndex = i; }
+            });
+        } else if (strategy === 'largest') {
+            var maxSz = -1;
+            items.forEach(function(it, i) {
+                var sz = it.file_size || 0;
+                if (sz > maxSz) { maxSz = sz; keepIndex = i; }
+            });
+        } else if (strategy === 'smallest') {
+            var minSz = 1e15;
+            items.forEach(function(it, i) {
+                var sz = it.file_size || 0;
+                if (sz < minSz) { minSz = sz; keepIndex = i; }
+            });
+        } else if (strategy === 'path_longest') {
+            var maxLen = -1;
+            items.forEach(function(it, i) {
+                var len = (it.relative_path || '').length;
+                if (len > maxLen) { maxLen = len; keepIndex = i; }
+            });
+        } else if (strategy === 'path_shortest') {
+            var minLen = 1e15;
+            items.forEach(function(it, i) {
+                var len = (it.relative_path || '').length;
+                if (len < minLen) { minLen = len; keepIndex = i; }
+            });
+        } else if (strategy === 'path_contains' && pathFilter) {
+            items.forEach(function(it, i) {
+                if (keepIndex < 0 && (it.relative_path || '').indexOf(pathFilter) !== -1) keepIndex = i;
+            });
+        }
+        if (keepIndex >= 0) {
+            var groupEl = document.querySelector('.dup-group[data-group-index="' + gi + '"]');
+            if (groupEl) {
+                var cbs = groupEl.querySelectorAll('.dup-item-checkbox');
+                cbs.forEach(function(cb, i) {
+                    cb.checked = (i !== keepIndex);
+                });
+            }
+        }
+    });
+    updateDupDeleteBtn();
+}
+
 function updateDupDeleteBtn() {
     var btn = document.getElementById('dup-delete-btn');
     var count = getSelectedDupIds().length;
@@ -680,6 +900,7 @@ function deleteSelectedDuplicates() {
         showSettingsAlert('请先勾选要删除的重复项');
         return;
     }
+    closeDupPreview();
     showSettingsConfirm('确认删除', '确定要删除选中的 ' + ids.length + ' 个重复文件吗？将同时删除原图和数据库记录，此操作不可恢复。', function() {
         fetch('/api/delete-images', {
             method: 'POST',
@@ -689,6 +910,7 @@ function deleteSelectedDuplicates() {
             if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });
             return r.json();
         }).then(function(data) {
+            closeDupPreview();
             showSettingsAlert('已删除 ' + (data.deleted || 0) + ' 个文件');
             loadStats();
             triggerScanDuplicates();
@@ -915,5 +1137,22 @@ function deleteTag(name) {
 
 // 页面加载时获取统计
 loadStats();
+
+// 批量保留下拉选项（只绑定一次）
+(function initDupBatchOptions() {
+    document.querySelectorAll('.dup-batch-option').forEach(function(btn) {
+        btn.onclick = function() {
+            var strategy = btn.getAttribute('data-strategy');
+            document.getElementById('dup-batch-dropdown').classList.add('hidden');
+            if (strategy === 'path_contains') {
+                showSettingsPrompt('路径包含的字符串', '', function(val) {
+                    if (val) applyBatchKeep(val.trim(), 'path_contains');
+                });
+            } else {
+                applyBatchKeep(null, strategy);
+            }
+        };
+    });
+})();
 </script>
 {% endblock %}
