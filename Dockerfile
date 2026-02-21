@@ -40,6 +40,8 @@ WORKDIR /app
 # 从构建阶段拷贝虚拟环境和源码
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/*.py /app/
+COPY --from=builder /app/utils /app/utils
+COPY --from=builder /app/routers /app/routers
 COPY --from=builder /app/pyproject.toml /app/
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
