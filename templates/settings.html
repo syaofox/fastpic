@@ -167,7 +167,20 @@
                     <div class="flex-1 min-w-0">
                         <h3 class="text-sm font-semibold text-slate-800 mb-1">扫描重复文件</h3>
                         <p class="text-sm text-slate-500 mb-3">扫描 photos 目录中内容相同的重复文件（基于 MD5），便于选择删除多余副本。</p>
-                        <div class="flex items-center gap-3">
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-slate-500">指定文件夹（留空扫描全部）</label>
+                                <div class="flex gap-1">
+                                    <div class="relative flex-1">
+                                        <input type="text" id="dup-folder-input" placeholder="输入路径或点击浏览"
+                                               class="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 w-64">
+                                        <div id="dup-folder-dropdown" class="hidden absolute left-0 top-full mt-1 w-full max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg z-20"></div>
+                                    </div>
+                                    <button type="button" id="dup-folder-browse-btn" onclick="openDupFolderBrowse()"
+                                            class="px-3 py-2 text-sm font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg border border-violet-200 transition-colors"
+                                            title="浏览文件夹">浏览</button>
+                                </div>
+                            </div>
                             <button type="button" id="dup-scan-btn" onclick="triggerScanDuplicates()"
                                     class="px-4 py-2 bg-violet-500 hover:bg-violet-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 开始扫描
@@ -443,6 +456,22 @@
             <span id="dup-preview-counter" class="text-sm text-slate-600"></span>
             <button type="button" id="dup-preview-close" class="px-3 py-1.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">关闭</button>
         </div>
+    </div>
+</div>
+<!-- 文件夹浏览弹窗 -->
+<div id="dup-folder-browse-modal" class="hidden fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/50" onclick="if(event.target===this)closeDupFolderBrowse()">
+    <div class="w-full max-w-md bg-white rounded-xl shadow-xl border border-slate-200 flex flex-col max-h-[70vh]" onclick="event.stopPropagation()">
+        <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+            <div id="dup-browse-breadcrumb" class="text-sm text-slate-600 truncate flex-1 min-w-0"></div>
+            <button type="button" onclick="closeDupFolderBrowse()" class="text-slate-400 hover:text-slate-600 ml-2">×</button>
+        </div>
+        <div class="p-3 border-b border-slate-100 flex gap-2">
+            <button type="button" id="dup-browse-select-btn" onclick="dupBrowseSelectCurrent()"
+                    class="px-3 py-1.5 text-sm font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg">
+                选择此文件夹
+            </button>
+        </div>
+        <div id="dup-browse-list" class="flex-1 overflow-y-auto p-2 min-h-0"></div>
     </div>
 </div>
 
@@ -830,6 +859,8 @@ function triggerScanDuplicates() {
     var status = document.getElementById('dup-scan-status');
     var emptyEl = document.getElementById('dup-result-empty');
     var containerEl = document.getElementById('dup-result-container');
+    var folderInput = document.getElementById('dup-folder-input');
+    var folderPath = folderInput ? (folderInput.value || '').trim() : '';
     btn.disabled = true;
     btn.textContent = '扫描中...';
     status.textContent = '';
@@ -837,7 +868,12 @@ function triggerScanDuplicates() {
     emptyEl.classList.add('hidden');
     containerEl.classList.add('hidden');
 
-    fetch('/api/scan-duplicates', { method: 'POST' })
+    var body = folderPath ? { folder_path: folderPath } : {};
+    fetch('/api/scan-duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.disabled = false;
@@ -1346,6 +1382,118 @@ function initMergeFolderDropdown(inputId, dropdownId) {
     });
 }
 
+var dupFolderSearchTimer = null;
+function initDupFolderDropdown() {
+    var input = document.getElementById('dup-folder-input');
+    var dropdown = document.getElementById('dup-folder-dropdown');
+    if (!input || !dropdown) return;
+    function hide() { dropdown.classList.add('hidden'); }
+    function search() {
+        var q = (input.value || '').trim();
+        if (!q) { dropdown.classList.add('hidden'); return; }
+        fetch('/api/search-dirs?q=' + encodeURIComponent(q) + '&limit=15')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var dirs = data.dirs || [];
+                if (dirs.length === 0) { dropdown.classList.add('hidden'); return; }
+                var html = '<div class="py-1">';
+                dirs.forEach(function(d) {
+                    var displayPath = d.path || '(根)';
+                    html += '<button type="button" class="dup-dir-item w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-violet-50 transition-colors flex items-center gap-2" data-path="' + (d.path || '').replace(/"/g, '&quot;') + '">' +
+                        '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                        '<span class="truncate">' + displayPath + '</span>' +
+                        (d.image_count != null ? '<span class="text-slate-400 text-xs flex-shrink-0">' + d.image_count + ' 张</span>' : '') +
+                        '</button>';
+                });
+                html += '</div>';
+                dropdown.innerHTML = html;
+                dropdown.classList.remove('hidden');
+                dropdown.querySelectorAll('.dup-dir-item').forEach(function(btn) {
+                    btn.onclick = function() {
+                        input.value = btn.getAttribute('data-path');
+                        dropdown.classList.add('hidden');
+                    };
+                });
+            })
+            .catch(function() { dropdown.classList.add('hidden'); });
+    }
+    input.oninput = function() {
+        clearTimeout(dupFolderSearchTimer);
+        dupFolderSearchTimer = setTimeout(search, 300);
+    };
+    input.onfocus = function() { if (input.value.trim()) search(); };
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) hide();
+    });
+}
+
+var dupBrowseCurrentPath = '';
+function openDupFolderBrowse() {
+    dupBrowseCurrentPath = (document.getElementById('dup-folder-input').value || '').trim();
+    document.getElementById('dup-folder-browse-modal').classList.remove('hidden');
+    dupBrowseLoadSubdirs();
+}
+
+function closeDupFolderBrowse() {
+    document.getElementById('dup-folder-browse-modal').classList.add('hidden');
+}
+
+function dupBrowseLoadSubdirs() {
+    var listEl = document.getElementById('dup-browse-list');
+    var breadcrumbEl = document.getElementById('dup-browse-breadcrumb');
+    listEl.innerHTML = '<div class="p-4 text-center text-slate-500 text-sm">加载中...</div>';
+    var path = dupBrowseCurrentPath;
+    var parts = path ? path.split('/') : [];
+    var bcHtml = '<span class="dup-bc-item cursor-pointer hover:text-violet-600" data-path="">根</span>';
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts.slice(0, i + 1).join('/');
+        var esc = (parts[i] || '').replace(/</g, '&lt;').replace(/&/g, '&amp;');
+        bcHtml += ' <span class="text-slate-400">/</span> <span class="dup-bc-item cursor-pointer hover:text-violet-600 truncate" data-path="' + p.replace(/"/g, '&quot;') + '">' + esc + '</span>';
+    }
+    breadcrumbEl.innerHTML = bcHtml;
+    breadcrumbEl.querySelectorAll('.dup-bc-item').forEach(function(el) {
+        el.onclick = function() {
+            dupBrowseCurrentPath = el.getAttribute('data-path') || '';
+            dupBrowseLoadSubdirs();
+        };
+    });
+    fetch('/api/list-subdirs?path=' + encodeURIComponent(path))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var dirs = data.dirs || [];
+            if (dirs.length === 0) {
+                listEl.innerHTML = '<div class="p-4 text-center text-slate-500 text-sm">此目录下无子文件夹</div>';
+                return;
+            }
+            var html = '';
+            dirs.forEach(function(d) {
+                var pathEsc = (d.path || '').replace(/"/g, '&quot;');
+                var nameEsc = (d.name || d.path || '').replace(/</g, '&lt;').replace(/&/g, '&amp;');
+                html += '<button type="button" class="dup-browse-dir-item w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-violet-50 rounded-lg flex items-center gap-2" data-path="' + pathEsc + '">' +
+                    '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                    '<span class="flex-1 truncate">' + nameEsc + '</span>' +
+                    (d.image_count != null ? '<span class="text-slate-400 text-xs flex-shrink-0">' + d.image_count + ' 张</span>' : '') +
+                    '<svg class="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>' +
+                    '</button>';
+            });
+            listEl.innerHTML = html;
+            listEl.querySelectorAll('.dup-browse-dir-item').forEach(function(btn) {
+                btn.onclick = function() {
+                    dupBrowseCurrentPath = btn.getAttribute('data-path');
+                    dupBrowseLoadSubdirs();
+                };
+            });
+        })
+        .catch(function() {
+            listEl.innerHTML = '<div class="p-4 text-center text-red-500 text-sm">加载失败</div>';
+        });
+}
+
+function dupBrowseSelectCurrent() {
+    document.getElementById('dup-folder-input').value = dupBrowseCurrentPath;
+    closeDupFolderBrowse();
+}
+
 function triggerMergeFolders() {
     var folderA = (document.getElementById('merge-folder-a').value || '').trim();
     var folderB = (document.getElementById('merge-folder-b').value || '').trim();
@@ -1408,6 +1556,8 @@ if (document.getElementById('merge-folder-a')) {
     initMergeFolderDropdown('merge-folder-a', 'merge-dropdown-a');
     initMergeFolderDropdown('merge-folder-b', 'merge-dropdown-b');
 }
+// 重复文件标签页：初始化文件夹选择
+initDupFolderDropdown();
 
 // 批量保留下拉选项（只绑定一次）
 (function initDupBatchOptions() {

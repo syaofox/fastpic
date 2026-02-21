@@ -1139,13 +1139,33 @@ def _compute_file_md5(photos_dir: Path, relative_path: str) -> str | None:
         return None
 
 
+class ScanDuplicatesRequest(BaseModel):
+    folder_path: str | None = None
+
+
 @app.post("/api/scan-duplicates")
-async def scan_duplicates(session: AsyncSession = Depends(get_async_session)):
-    """扫描重复文件：按 file_size 分组后对同大小文件计算 MD5，返回重复组"""
+async def scan_duplicates(
+    body: ScanDuplicatesRequest | None = None,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """扫描重复文件：按 file_size 分组后对同大小文件计算 MD5，返回重复组。
+    可选 folder_path：仅扫描该文件夹及其子文件夹内的图片，空则扫描全部。"""
     from collections import defaultdict
 
-    result = await session.execute(select(Image))
+    folder_path = (body.folder_path if body else None) or ""
+    folder_path = folder_path.strip().strip("/")
+
+    if folder_path:
+        escaped = _escape_like(folder_path)
+        path_filter = (
+            Image.relative_path.like(f"{escaped}/%", escape="\\")
+            | (Image.relative_path == folder_path)
+        )
+        result = await session.execute(select(Image).where(path_filter))
+    else:
+        result = await session.execute(select(Image))
     all_images = list(result.scalars().all())
+
     photos_dir = PHOTOS_DIR.resolve()
 
     # 阶段一：按 file_size 分组
@@ -1287,6 +1307,37 @@ async def search_dirs(
                 break
 
     return {"dirs": matched}
+
+
+@app.get("/api/list-subdirs")
+async def list_subdirs(
+    path: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """列出指定路径下的直接子文件夹，用于浏览。path 为空时返回根目录下的文件夹。"""
+    path = (path or "").strip().strip("/")
+    path_parts = path.split("/") if path else []
+
+    result = await session.execute(select(Image.relative_path))
+    rel_paths = [r[0] for r in result.fetchall()]
+    folder_tree, _, folder_counts = await _get_folder_tree_cached(rel_paths)
+
+    depth = len(path_parts) + 1
+    subdirs: list[dict] = []
+    seen: set[str] = set()
+    for parts in folder_tree:
+        if len(parts) != depth:
+            continue
+        if path_parts and parts[: len(path_parts)] != path_parts:
+            continue
+        sub_path = "/".join(parts)
+        if sub_path in seen:
+            continue
+        seen.add(sub_path)
+        count = folder_counts.get(sub_path, 0)
+        subdirs.append({"path": sub_path, "name": parts[-1], "image_count": count})
+    subdirs.sort(key=lambda x: x["name"])
+    return {"dirs": subdirs, "parent": path}
 
 
 @app.get("/settings")
