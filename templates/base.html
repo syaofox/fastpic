@@ -30,6 +30,13 @@
             scrollbar-width: thin;
             scrollbar-color: rgb(203 213 225) transparent;
         }
+        /* 移动端：侧边栏打开时占 85vw，便于点击遮罩关闭 */
+        @media (max-width: 767px) {
+            #sidebar:not(.hidden) {
+                width: 85vw !important;
+                max-width: 85vw !important;
+            }
+        }
         #sidebar::-webkit-scrollbar {
             width: 6px;
         }
@@ -102,6 +109,45 @@
         /* 滚动哨兵负边距消除与上一行之间的可见间隙 */
         #gallery-grid.gallery-flex > .scroll-sentinel {
             margin-top: -0.25rem;
+        }
+
+        /* 响应式：按断点限制最大列数 */
+        /* 手机 < 640px：最多 2 列 */
+        @media (max-width: 639px) {
+            #gallery-grid.gallery-flex[data-cols="3"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="4"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+                width: calc(50% - 0.5rem);
+            }
+        }
+        /* sm 640px–767px：最多 3 列 */
+        @media (min-width: 640px) and (max-width: 767px) {
+            #gallery-grid.gallery-flex[data-cols="4"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+                width: calc(33.333% - 0.667rem);
+            }
+        }
+        /* md 768px–1023px：最多 4 列 */
+        @media (min-width: 768px) and (max-width: 1023px) {
+            #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+                width: calc(25% - 0.75rem);
+            }
+        }
+        /* lg 1024px–1279px：最多 6 列 */
+        @media (min-width: 1024px) and (max-width: 1279px) {
+            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+                width: calc(16.666% - 0.833rem);
+            }
         }
     </style>
 </head>

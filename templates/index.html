@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
+<!-- 移动端侧边栏遮罩（点击关闭，sm 及以上不显示） -->
+<div id="sidebar-overlay" class="hidden fixed inset-0 z-40 bg-black/40 md:hidden" onclick="toggleSidebar()" aria-hidden="true"></div>
 <div class="flex h-screen" id="layout">
-    <!-- 左侧文件夹树（可调节宽度，默认隐藏） -->
-    <aside id="sidebar" class="bg-white border-r border-slate-200 flex-shrink-0 flex flex-col hidden" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 800px;">
+    <!-- 左侧文件夹树（可调节宽度，默认隐藏；移动端全屏遮罩+85vw） -->
+    <aside id="sidebar" class="bg-white border-r border-slate-200 flex-shrink-0 flex flex-col hidden relative z-50" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 800px;">
         <div class="p-4 flex-1 overflow-y-auto">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="font-semibold text-slate-800">全部文件夹</h2>
@@ -34,7 +36,7 @@
         <!-- 顶部栏：两行布局 -->
         <header class="bg-white border-b border-slate-200 flex-shrink-0 flex flex-col">
             <!-- 第一行：搜索框 | AI 搜索 | 设置 -->
-            <div class="flex items-center gap-3 p-4 pb-0">
+            <div class="flex items-center gap-2 sm:gap-3 p-3 sm:p-4 pb-0">
                 <div class="flex-1 relative min-w-0" id="dir-search-wrapper">
                     <div class="flex items-center gap-2 pl-3 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
                         <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -56,7 +58,7 @@
                 <a href="/settings" class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors flex-shrink-0" title="设置"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></a>
             </div>
             <!-- 第二行：侧边栏按钮 | 面包屑 + 操作按钮 -->
-            <div class="flex items-center gap-3 px-4 py-3">
+            <div class="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3">
                 <button type="button" id="sidebar-toggle-btn"
                         class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors flex-shrink-0"
                         title="显示/隐藏文件夹树"
@@ -68,7 +70,7 @@
         </header>
 
         <!-- 图片网格 -->
-        <div class="flex-1 overflow-y-auto p-4 transition-[padding] duration-200" id="scroll-container">
+        <div class="flex-1 overflow-y-auto p-3 sm:p-4 transition-[padding] duration-200" id="scroll-container">
             <div id="gallery-container"
                  hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1&cols=4"
                  hx-trigger="load"
@@ -83,21 +85,21 @@
 </div>
 
 <!-- 批量选择时底部固定操作栏（滚动后删除按钮始终可见） -->
-<div id="select-mode-fab" class="hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-4 py-3 flex items-center justify-between gap-4">
+<div id="select-mode-fab" class="hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-3 py-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-4">
     <span id="select-mode-fab-count" class="text-sm font-medium text-slate-700">已选 0 项</span>
-    <div class="flex items-center gap-2">
-        <button type="button" id="select-mode-fab-move" class="hidden px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.showMoveDialog && window.showMoveDialog()">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
-            移动
+    <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+        <button type="button" id="select-mode-fab-move" class="hidden px-3 py-2 sm:px-4 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.showMoveDialog && window.showMoveDialog()">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+            <span class="hidden sm:inline">移动</span>
         </button>
-        <button type="button" id="select-mode-fab-download" class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.downloadSelected && window.downloadSelected()">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-            下载
+        <button type="button" id="select-mode-fab-download" class="px-3 py-2 sm:px-4 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.downloadSelected && window.downloadSelected()">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            <span class="hidden sm:inline">下载</span>
         </button>
         <button type="button" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors" onclick="window.toggleSelectMode && window.toggleSelectMode()">取消选择</button>
-        <button type="button" id="select-mode-fab-delete" class="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.confirmDeleteSelected && window.confirmDeleteSelected()">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-            删除
+        <button type="button" id="select-mode-fab-delete" class="px-3 py-2 sm:px-4 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.confirmDeleteSelected && window.confirmDeleteSelected()">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            <span class="hidden sm:inline">删除</span>
         </button>
     </div>
 </div>
@@ -200,14 +202,14 @@
                 </div>
             </div>
         </div>
-        <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">‹</button>
+        <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-xl sm:text-2xl flex items-center justify-center">‹</button>
         <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
         <video id="modal-video" class="max-w-[90vw] max-h-[90vh] object-contain hidden" controls onclick="event.stopPropagation()"></video>
-        <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-2xl flex items-center justify-center">›</button>
+        <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-xl sm:text-2xl flex items-center justify-center">›</button>
         <div id="modal-image-counter" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/50 text-white/90 text-sm font-medium" onclick="event.stopPropagation()">1/1</div>
         </div>
-        <!-- 右侧：图片信息面板（由「图片信息」按钮开关） -->
-        <div id="modal-image-info-panel" class="hidden flex-shrink-0 w-72 h-full bg-black/60 backdrop-blur border-l border-white/10 flex flex-col overflow-hidden" onclick="event.stopPropagation()">
+        <!-- 右侧：图片信息面板（由「图片信息」按钮开关；移动端为底部抽屉） -->
+        <div id="modal-image-info-panel" class="hidden flex-shrink-0 w-72 h-full bg-black/60 backdrop-blur border-l border-white/10 flex flex-col overflow-hidden fixed inset-x-0 bottom-0 max-h-[50vh] w-full border-t border-white/10 md:static md:max-h-none md:border-t-0 md:w-72" onclick="event.stopPropagation()">
             <div id="image-info-content" class="flex-1 p-4 text-sm text-white/90 space-y-3 font-mono overflow-y-auto">
                 <div class="text-white/50">加载中...</div>
             </div>
@@ -228,14 +230,17 @@
         const sidebar = document.getElementById('sidebar');
         const handle = document.getElementById('resize-handle');
         const btn = document.getElementById('sidebar-toggle-btn');
+        const overlay = document.getElementById('sidebar-overlay');
         if (visible) {
             sidebar.classList.remove('hidden');
             handle.classList.remove('hidden');
+            if (overlay) overlay.classList.remove('hidden');
             btn.classList.add('bg-blue-50', 'text-blue-600');
             btn.classList.remove('text-slate-500');
         } else {
             sidebar.classList.add('hidden');
             handle.classList.add('hidden');
+            if (overlay) overlay.classList.add('hidden');
             btn.classList.remove('bg-blue-50', 'text-blue-600');
             btn.classList.add('text-slate-500');
         }
@@ -945,9 +950,20 @@ document.addEventListener('keydown', function(e) {
         return document.getElementById('scroll-container');
     }
 
+    /** 按视口宽度限制最大列数（初始化与 resize 时使用） */
+    function getMaxColsForViewport() {
+        var w = window.innerWidth;
+        if (w < 640) return 2;
+        if (w < 768) return 3;
+        if (w < 1024) return 4;
+        if (w < 1280) return 6;
+        return MAX_COLS;
+    }
+
     function initThumbnailSize() {
         const saved = localStorage.getItem(STORAGE_KEY);
-        const cols = saved ? Math.max(MIN_COLS, Math.min(MAX_COLS, parseInt(saved, 10))) : DEFAULT_COLS;
+        const userCols = saved ? Math.max(MIN_COLS, Math.min(MAX_COLS, parseInt(saved, 10))) : DEFAULT_COLS;
+        const cols = Math.min(userCols, getMaxColsForViewport());
         const sc = getScrollContainer();
         if (sc) sc.style.setProperty('--gallery-cols', String(cols));
         var colsInput = document.getElementById('cols-input');
@@ -985,6 +1001,23 @@ document.addEventListener('keydown', function(e) {
     window.syncGalleryGridCols = syncGalleryGridCols;
 
     initThumbnailSize();
+
+    // 窗口 resize 时按视口重新限制列数（不覆盖用户设置）
+    var colsResizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(colsResizeTimer);
+        colsResizeTimer = setTimeout(function() {
+            var saved = localStorage.getItem(STORAGE_KEY);
+            var userCols = saved ? Math.max(MIN_COLS, Math.min(MAX_COLS, parseInt(saved, 10))) : DEFAULT_COLS;
+            var cols = Math.min(userCols, getMaxColsForViewport());
+            var sc = getScrollContainer();
+            if (sc) sc.style.setProperty('--gallery-cols', String(cols));
+            var colsInput = document.getElementById('cols-input');
+            if (colsInput) colsInput.value = String(cols);
+            syncGalleryGridCols();
+            if (typeof window.rebuildWaterfall === 'function') window.rebuildWaterfall();
+        }, 150);
+    });
 
     // 排序设定持久化
     (function initSortSettings() {
@@ -1110,6 +1143,16 @@ document.addEventListener('keydown', function(e) {
         return saved ? Math.max(2, Math.min(8, parseInt(saved, 10))) : 4;
     }
 
+    /** 按视口宽度限制瀑布流最大列数，避免小屏单列过宽 */
+    function getMaxWaterfallCols() {
+        var w = window.innerWidth;
+        if (w < 640) return 2;
+        if (w < 768) return 3;
+        if (w < 1024) return 4;
+        if (w < 1280) return 6;
+        return 8;
+    }
+
     function isWaterfallMode() {
         var marker = document.getElementById('current-path-marker');
         return marker && marker.getAttribute('data-mode') === 'waterfall';
@@ -1140,7 +1183,7 @@ document.addEventListener('keydown', function(e) {
         var grid = document.getElementById('gallery-grid');
         if (!grid) return;
 
-        var colCount = getColCount();
+        var colCount = Math.min(getColCount(), getMaxWaterfallCols());
 
         // 收集所有直接子元素（图片卡片 + 滚动哨兵）
         var items = [];
@@ -1258,6 +1301,13 @@ document.addEventListener('keydown', function(e) {
 
     // 暴露给外部（缩略图大小改变时调用）
     window.rebuildWaterfall = rebuildWaterfall;
+
+    // 窗口 resize 时重建瀑布流（如横竖屏切换）
+    var wfResizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(wfResizeTimer);
+        wfResizeTimer = setTimeout(rebuildWaterfall, 150);
+    });
 
     // 监听 HTMX 交换事件
     document.body.addEventListener('htmx:afterSettle', function(ev) {
