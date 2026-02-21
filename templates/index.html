@@ -156,6 +156,12 @@
                         </div>
                     </div>
                 </div>
+                <!-- 视频自动播放下一个 -->
+                <button type="button" id="video-autoplay-next-btn" onclick="toggleVideoAutoPlayNext(); event.stopPropagation();"
+                        class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
+                        title="视频播完后自动切换下一个">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                </button>
             </div>
             <!-- 右侧：工具栏（可展开收起） -->
             <div class="flex items-center gap-2">
@@ -282,6 +288,7 @@ let modalIndex = 0;
 let slideshowTimer = null;
 let slideshowInterval = parseFloat(localStorage.getItem('fastpic_slideshow_interval') || '2');
 let slideshowMode = localStorage.getItem('fastpic_slideshow_mode') || 'loop';
+let videoAutoPlayNext = localStorage.getItem('fastpic_video_autoplay_next') === 'true';
 
 /** 根据 URL 推断媒体类型（无 mediaTypes 时回退） */
 function _inferMediaType(url) {
@@ -344,6 +351,8 @@ function openModal(photoUrl, index, allUrls, allIds, mediaTypes) {
     applyModalToolbarState(isModalToolbarCollapsed());
     _updateIntervalUI(slideshowInterval);
     _updateSlideshowModeUI(slideshowMode);
+    _updateVideoAutoPlayNextUI();
+    _bindVideoEndedHandler();
     _updateModalImageCounter();
     preloadModalImages(modalIndex);
 }
@@ -770,6 +779,39 @@ function setSlideshowMode(mode) {
     slideshowMode = mode;
     localStorage.setItem('fastpic_slideshow_mode', mode);
     _updateSlideshowModeUI(mode);
+}
+
+// ── 视频自动播放下一个 ──
+var _videoEndedHandlerBound = false;
+function _bindVideoEndedHandler() {
+    if (_videoEndedHandlerBound) return;
+    _videoEndedHandlerBound = true;
+    var vidEl = document.getElementById('modal-video');
+    if (vidEl) {
+        vidEl.addEventListener('ended', function() {
+            if (videoAutoPlayNext && modalMediaTypes[modalIndex] === 'video') {
+                nextImage();
+            }
+        });
+    }
+}
+
+function toggleVideoAutoPlayNext() {
+    videoAutoPlayNext = !videoAutoPlayNext;
+    localStorage.setItem('fastpic_video_autoplay_next', String(videoAutoPlayNext));
+    _updateVideoAutoPlayNextUI();
+}
+
+function _updateVideoAutoPlayNextUI() {
+    var btn = document.getElementById('video-autoplay-next-btn');
+    if (!btn) return;
+    if (videoAutoPlayNext) {
+        btn.classList.add('bg-blue-500/60', 'text-white');
+        btn.classList.remove('bg-white/15', 'text-white/80');
+    } else {
+        btn.classList.remove('bg-blue-500/60', 'text-white');
+        btn.classList.add('bg-white/15', 'text-white/80');
+    }
 }
 
 function _updateModalImageCounter() {
