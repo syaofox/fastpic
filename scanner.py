@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import os
 import subprocess
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from PIL import Image as PILImage
@@ -13,6 +14,9 @@ from models import Image, async_session_factory, natural_sort_key
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv"}
 THUMBNAIL_WIDTH = 300
+# 多进程缩略图：并行度与批大小
+_MAX_WORKERS = min(32, (os.cpu_count() or 4) + 4)
+_PROCESS_BATCH_SIZE = min(16, _MAX_WORKERS * 2)
 
 
 def _cache_filename(relative_path: str) -> str:
@@ -203,7 +207,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
     """
     异步扫描 photos 目录，生成缩略图并写入数据库。
     返回新扫描的图片数量。
-    阻塞操作在线程池执行，定期让出事件循环以优先处理 HTTP 请求。
+    使用 ProcessPoolExecutor 多进程并行生成缩略图，充分利用多核。
     """
     photos_dir = photos_dir.resolve()
     cache_dir = cache_dir.resolve()
@@ -211,8 +215,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
 
     print(f"[scan] 开始扫描: {photos_dir}", flush=True)
 
-    BATCH_SIZE = 50  # 每 50 张提交一次，边扫边可见
-    YIELD_EVERY = 8  # 每处理 N 张让出事件循环
+    DB_BATCH_SIZE = 50  # 每 50 张提交一次，边扫边可见
 
     async with async_session_factory() as session:
         # 在线程中收集所有图片文件，避免阻塞事件循环
@@ -220,8 +223,24 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
         total_files = len(image_files)
         print(f"[scan] 发现 {total_files} 个图片文件", flush=True)
 
+        pending: list[Path] = []
         batch_count = 0
-        processed_since_yield = 0
+        loop = asyncio.get_running_loop()
+
+        async def _process_batch(paths: list[Path]) -> list[tuple[str, str, float, int, int, int]]:
+            """多进程处理一批图片，返回成功的结果列表"""
+            if not paths:
+                return []
+            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                tasks = [
+                    loop.run_in_executor(
+                        executor, _process_single_image_sync, fp, photos_dir, cache_dir
+                    )
+                    for fp in paths
+                ]
+                raw_results = await asyncio.gather(*tasks)
+            return [r for r in raw_results if r is not None]
+
         for full_path in image_files:
             if not full_path.is_file():
                 continue
@@ -235,40 +254,55 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
             if result.scalar_one_or_none():
                 continue
 
-            # 在线程中处理图片（PIL 等 CPU 密集操作）
-            data = await asyncio.to_thread(
-                _process_single_image_sync, full_path, photos_dir, cache_dir
-            )
-            if data is None:
-                continue
+            pending.append(full_path)
 
-            filename, rel_path, modified_at, file_size, width, height = data
-            record = Image(
-                filename=filename,
-                relative_path=rel_path,
-                modified_at=modified_at,
-                file_size=file_size,
-                width=width,
-                height=height,
-                filename_natural=natural_sort_key(filename),
-                relative_path_natural=natural_sort_key(rel_path),
-                media_type="image",
-            )
-            session.add(record)
-            count += 1
-            batch_count += 1
-            processed_since_yield += 1
+            # 攒够一批则多进程处理
+            if len(pending) >= _PROCESS_BATCH_SIZE:
+                results = await _process_batch(pending)
+                pending = []
+                for data in results:
+                    filename, rel_path, modified_at, file_size, width, height = data
+                    record = Image(
+                        filename=filename,
+                        relative_path=rel_path,
+                        modified_at=modified_at,
+                        file_size=file_size,
+                        width=width,
+                        height=height,
+                        filename_natural=natural_sort_key(filename),
+                        relative_path_natural=natural_sort_key(rel_path),
+                        media_type="image",
+                    )
+                    session.add(record)
+                    count += 1
+                    batch_count += 1
 
-            # 定期让出事件循环，优先处理 HTTP 请求
-            if processed_since_yield >= YIELD_EVERY:
-                await asyncio.sleep(0)
-                processed_since_yield = 0
+                if batch_count >= DB_BATCH_SIZE:
+                    await session.commit()
+                    print(f"[scan] 进度: {count}/{total_files}", flush=True)
+                    batch_count = 0
 
-            # 分批提交
-            if batch_count >= BATCH_SIZE:
-                await session.commit()
-                print(f"[scan] 进度: {count}/{total_files}", flush=True)
-                batch_count = 0
+                await asyncio.sleep(0)  # 让出事件循环
+
+        # 处理剩余 pending
+        if pending:
+            results = await _process_batch(pending)
+            for data in results:
+                filename, rel_path, modified_at, file_size, width, height = data
+                record = Image(
+                    filename=filename,
+                    relative_path=rel_path,
+                    modified_at=modified_at,
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    filename_natural=natural_sort_key(filename),
+                    relative_path_natural=natural_sort_key(rel_path),
+                    media_type="image",
+                )
+                session.add(record)
+                count += 1
+                batch_count += 1
 
         # 提交剩余
         if batch_count > 0:
@@ -282,7 +316,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
     """
     异步扫描 photos 目录中的视频文件，生成缩略图并写入数据库。
     返回新扫描的视频数量。
-    阻塞操作在线程池执行，定期让出事件循环以优先处理 HTTP 请求。
+    使用 ProcessPoolExecutor 多进程并行处理视频（ffprobe/ffmpeg），充分利用多核。
     """
     photos_dir = photos_dir.resolve()
     cache_dir = cache_dir.resolve()
@@ -294,12 +328,29 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
         return 0
 
     print(f"[scan] 发现 {len(video_files)} 个视频文件", flush=True)
-    BATCH_SIZE = 20
-    YIELD_EVERY = 5
+    DB_BATCH_SIZE = 20
+    # 视频处理更耗时，批大小略小
+    _video_batch_size = min(8, _MAX_WORKERS)
 
     async with async_session_factory() as session:
+        pending: list[Path] = []
         batch_count = 0
-        processed_since_yield = 0
+        loop = asyncio.get_running_loop()
+
+        async def _process_video_batch(paths: list[Path]) -> list[tuple[str, str, float, int, int, int]]:
+            """多进程处理一批视频"""
+            if not paths:
+                return []
+            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                tasks = [
+                    loop.run_in_executor(
+                        executor, _process_single_video_sync, fp, photos_dir, cache_dir
+                    )
+                    for fp in paths
+                ]
+                raw_results = await asyncio.gather(*tasks)
+            return [r for r in raw_results if r is not None]
+
         for full_path in video_files:
             if not full_path.is_file():
                 continue
@@ -312,38 +363,53 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
             if result.scalar_one_or_none():
                 continue
 
-            # 在线程中处理视频（ffprobe/ffmpeg 等阻塞操作）
-            data = await asyncio.to_thread(
-                _process_single_video_sync, full_path, photos_dir, cache_dir
-            )
-            if data is None:
-                continue
+            pending.append(full_path)
 
-            filename, rel_path, modified_at, file_size, width, height = data
-            record = Image(
-                filename=filename,
-                relative_path=rel_path,
-                modified_at=modified_at,
-                file_size=file_size,
-                width=width,
-                height=height,
-                filename_natural=natural_sort_key(filename),
-                relative_path_natural=natural_sort_key(rel_path),
-                media_type="video",
-            )
-            session.add(record)
-            count += 1
-            batch_count += 1
-            processed_since_yield += 1
+            if len(pending) >= _video_batch_size:
+                results = await _process_video_batch(pending)
+                pending = []
+                for data in results:
+                    filename, rel_path, modified_at, file_size, width, height = data
+                    record = Image(
+                        filename=filename,
+                        relative_path=rel_path,
+                        modified_at=modified_at,
+                        file_size=file_size,
+                        width=width,
+                        height=height,
+                        filename_natural=natural_sort_key(filename),
+                        relative_path_natural=natural_sort_key(rel_path),
+                        media_type="video",
+                    )
+                    session.add(record)
+                    count += 1
+                    batch_count += 1
 
-            if processed_since_yield >= YIELD_EVERY:
+                if batch_count >= DB_BATCH_SIZE:
+                    await session.commit()
+                    print(f"[scan] 视频进度: {count}/{len(video_files)}", flush=True)
+                    batch_count = 0
+
                 await asyncio.sleep(0)
-                processed_since_yield = 0
 
-            if batch_count >= BATCH_SIZE:
-                await session.commit()
-                print(f"[scan] 视频进度: {count}/{len(video_files)}", flush=True)
-                batch_count = 0
+        if pending:
+            results = await _process_video_batch(pending)
+            for data in results:
+                filename, rel_path, modified_at, file_size, width, height = data
+                record = Image(
+                    filename=filename,
+                    relative_path=rel_path,
+                    modified_at=modified_at,
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    filename_natural=natural_sort_key(filename),
+                    relative_path_natural=natural_sort_key(rel_path),
+                    media_type="video",
+                )
+                session.add(record)
+                count += 1
+                batch_count += 1
 
         if batch_count > 0:
             await session.commit()
@@ -425,17 +491,18 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
         if orphan_cache_removed:
             print(f"[cleanup] 清除 {orphan_cache_removed} 个孤儿缓存文件", flush=True)
 
-    # ── 第 3 步：补全缺失的缩略图缓存（缩略图生成在线程中执行） ──
+    # ── 第 3 步：补全缺失的缩略图缓存（多进程并行生成） ──
     async with async_session_factory() as session:
         result = await session.execute(select(Image))
         all_images = list(result.scalars().all())
 
-        def _regenerate_one(photo_path: Path, cache_path: Path, is_video: bool) -> bool:
+        def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
+            photo_path, cache_path, is_video = args
             if is_video:
                 return _generate_video_thumbnail(photo_path, cache_path)
             return _generate_thumbnail(photo_path, cache_path)
 
-        regen_batch = 0
+        to_regen: list[tuple[Path, Path, bool]] = []
         for img in all_images:
             cache_name = _cache_filename(img.relative_path)
             cache_path = cache_dir / cache_name
@@ -443,18 +510,24 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
                 photo_path = photos_dir / img.relative_path
                 if photo_path.exists():
                     is_video = getattr(img, "media_type", "image") == "video"
-                    ok = await asyncio.to_thread(
-                        _regenerate_one, photo_path, cache_path, is_video
-                    )
-                    if ok:
-                        cache_regenerated += 1
-                    regen_batch += 1
-                    if regen_batch >= 20:
-                        await asyncio.sleep(0)
-                        regen_batch = 0
+                    to_regen.append((photo_path, cache_path, is_video))
 
-        if cache_regenerated:
-            print(f"[cleanup] 重新生成 {cache_regenerated} 个缺失缓存", flush=True)
+        if to_regen:
+            loop = asyncio.get_running_loop()
+            batch_size = min(_PROCESS_BATCH_SIZE, len(to_regen))
+            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                for i in range(0, len(to_regen), batch_size):
+                    batch = to_regen[i : i + batch_size]
+                    tasks = [
+                        loop.run_in_executor(executor, _regenerate_one, item)
+                        for item in batch
+                    ]
+                    results = await asyncio.gather(*tasks)
+                    cache_regenerated += sum(1 for ok in results if ok)
+                    await asyncio.sleep(0)
+
+            if cache_regenerated:
+                print(f"[cleanup] 重新生成 {cache_regenerated} 个缺失缓存", flush=True)
 
     summary = {
         "stale_removed": stale_removed,

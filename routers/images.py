@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
+from sqlalchemy.exc import IntegrityError
 from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -262,8 +263,13 @@ async def upload_images(
                     relative_path_natural=natural_sort_key(rel_path),
                 )
                 session.add(record)
-            uploaded += 1
+            try:
+                await session.commit()
+                uploaded += 1
+            except IntegrityError:
+                await session.rollback()
+                # 竞态：watcher 已先入库，视为成功
+                uploaded += 1
         except Exception as e:
             errors.append(f"{f.filename}: {str(e)}")
-    await session.commit()
     return {"uploaded": uploaded, "skipped": skipped, "errors": errors}

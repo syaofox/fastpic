@@ -2,6 +2,7 @@
 from sqlalchemy import delete
 from sqlmodel import select
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from models import Image, Tag, ImageTag, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +59,11 @@ async def rename_tag(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="新名称已存在")
     tag.name = new_name
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="新名称已存在（并发冲突）")
     return {"renamed": True}
 
 
@@ -124,7 +129,12 @@ async def merge_tag(
             )
         )
     await session.delete(source_tag)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        # 竞态：ImageTag 已存在，忽略
+        pass
     return {"merged": True, "images_updated": len(image_ids)}
 
 
@@ -188,14 +198,26 @@ async def add_image_tags(
         if not tag:
             tag = Tag(name=name)
             session.add(tag)
-            await session.flush()
+            try:
+                await session.flush()
+            except IntegrityError:
+                await session.rollback()
+                tag_result = await session.execute(select(Tag).where(Tag.name == name))
+                tag = tag_result.scalar_one_or_none()
+                if not tag:
+                    continue
         existing = await session.execute(
             select(ImageTag).where(ImageTag.image_id == image_id, ImageTag.tag_id == tag.id)
         )
         if existing.scalar_one_or_none() is None:
             session.add(ImageTag(image_id=image_id, tag_id=tag.id))
-            added += 1
-    await session.commit()
+            try:
+                await session.commit()
+                added += 1
+            except IntegrityError:
+                await session.rollback()
+                # 竞态：ImageTag 已存在，忽略
+                pass
     return {"added": added}
 
 

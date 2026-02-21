@@ -16,6 +16,7 @@ from pathlib import Path
 from queue import Queue, Empty
 from threading import Thread
 
+from sqlalchemy.exc import IntegrityError
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileDeletedEvent, FileMovedEvent
 
@@ -115,6 +116,9 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             session.add(record)
             await session.commit()
             print(f"[watcher] 新增: {rel_path}", flush=True)
+        except IntegrityError:
+            # 竞态：scanner 已先入库，静默忽略
+            pass
         except Exception as e:
             print(f"[watcher] 处理新增失败 {rel_path}: {e}", flush=True)
 
@@ -159,6 +163,14 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
             if old_cache.exists():
                 old_cache.unlink(missing_ok=True)
 
+            # 若 dst_rel 已有记录（文件被覆盖），先删除旧记录
+            dst_result = await session.execute(
+                select(Image).where(Image.relative_path == dst_rel)
+            )
+            dst_img = dst_result.scalar_one_or_none()
+            if dst_img is not None and dst_img.id != img.id:
+                await session.delete(dst_img)
+
             # 更新记录
             img.relative_path = dst_rel
             img.filename = dst_path.name
@@ -174,9 +186,13 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
                 if data:
                     _, _, img.modified_at, img.file_size = data
 
-            session.add(img)
-            await session.commit()
-            print(f"[watcher] 移动: {src_rel} → {dst_rel}", flush=True)
+            try:
+                session.add(img)
+                await session.commit()
+                print(f"[watcher] 移动: {src_rel} → {dst_rel}", flush=True)
+            except IntegrityError:
+                # 竞态：dst_rel 刚被其他操作占用，静默忽略
+                await session.rollback()
         else:
             # 源记录不存在，当作新增处理
             if dst_path.exists() and _is_media(str(dst_path)):
