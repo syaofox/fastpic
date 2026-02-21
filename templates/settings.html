@@ -220,20 +220,26 @@
                         <div class="space-y-4 max-w-xl">
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">文件夹 A</label>
-                                <div class="relative">
-                                    <input type="text" id="merge-folder-a" placeholder="输入或搜索文件夹路径，如：2024/旅行"
-                                           class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                           autocomplete="off">
-                                    <div id="merge-dropdown-a" class="hidden absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 max-h-48 overflow-y-auto"></div>
+                                <div class="flex gap-2">
+                                    <div class="relative flex-1 min-w-0">
+                                        <input type="text" id="merge-folder-a" placeholder="输入、搜索或浏览选择文件夹"
+                                               class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                               autocomplete="off">
+                                        <div id="merge-dropdown-a" class="hidden absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 max-h-48 overflow-y-auto"></div>
+                                    </div>
+                                    <button type="button" onclick="showMergeFolderBrowser('merge-folder-a')" class="px-3 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex-shrink-0" title="浏览文件夹">浏览</button>
                                 </div>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">文件夹 B</label>
-                                <div class="relative">
-                                    <input type="text" id="merge-folder-b" placeholder="输入或搜索文件夹路径"
-                                           class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                           autocomplete="off">
-                                    <div id="merge-dropdown-b" class="hidden absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 max-h-48 overflow-y-auto"></div>
+                                <div class="flex gap-2">
+                                    <div class="relative flex-1 min-w-0">
+                                        <input type="text" id="merge-folder-b" placeholder="输入、搜索或浏览选择文件夹"
+                                               class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                               autocomplete="off">
+                                        <div id="merge-dropdown-b" class="hidden absolute left-0 right-0 top-full mt-1 z-20 bg-white rounded-lg shadow-lg border border-slate-200 max-h-48 overflow-y-auto"></div>
+                                    </div>
+                                    <button type="button" onclick="showMergeFolderBrowser('merge-folder-b')" class="px-3 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex-shrink-0" title="浏览文件夹">浏览</button>
                                 </div>
                             </div>
                             <div>
@@ -1201,6 +1207,97 @@ function deleteTag(name) {
                 showSettingsAlert('删除失败: ' + err.message);
             });
     });
+}
+
+// 合并文件夹：浏览对话框
+function showMergeFolderBrowser(inputId) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+    var initialPath = (input.value || '').trim();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
+    overlay.innerHTML =
+        '<div class="bg-white rounded-xl shadow-xl flex flex-col max-w-md w-full max-h-[80vh]" onclick="event.stopPropagation()">' +
+            '<div class="p-4 border-b border-slate-200 flex-shrink-0">' +
+                '<h3 class="text-base font-semibold text-slate-800">浏览选择文件夹</h3>' +
+                '<nav id="merge-browse-breadcrumb" class="mt-2 flex items-center gap-1 text-sm text-slate-600 flex-wrap"></nav>' +
+            '</div>' +
+            '<div id="merge-browse-list" class="flex-1 overflow-y-auto p-4 min-h-0 min-h-[200px]"></div>' +
+            '<div class="p-4 border-t border-slate-200 flex-shrink-0 flex justify-end gap-2">' +
+                '<button type="button" class="merge-browse-cancel px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                '<button type="button" class="merge-browse-select px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-colors">选择此文件夹</button>' +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+
+    var currentPath = initialPath;
+    var breadcrumbEl = overlay.querySelector('#merge-browse-breadcrumb');
+    var listEl = overlay.querySelector('#merge-browse-list');
+
+    function renderBreadcrumb() {
+        var parts = currentPath ? currentPath.split('/') : [];
+        var html = '<a href="#" class="merge-browse-nav text-blue-600 hover:underline" data-path="">全部文件夹</a>';
+        for (var i = 0; i < parts.length; i++) {
+            var path = parts.slice(0, i + 1).join('/');
+            html += '<span class="text-slate-400"> › </span>';
+            html += '<a href="#" class="merge-browse-nav text-blue-600 hover:underline" data-path="' + path.replace(/"/g, '&quot;') + '">' + parts[i].replace(/</g, '&lt;') + '</a>';
+        }
+        breadcrumbEl.innerHTML = html;
+        breadcrumbEl.querySelectorAll('.merge-browse-nav').forEach(function(a) {
+            a.addEventListener('click', function(e) {
+                e.preventDefault();
+                currentPath = a.getAttribute('data-path') || '';
+                renderBreadcrumb();
+                loadSubfolders();
+            });
+        });
+    }
+
+    function loadSubfolders() {
+        listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">加载中...</div>';
+        fetch('/api/subfolders?path=' + encodeURIComponent(currentPath))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var subs = data.subfolders || [];
+                if (subs.length === 0) {
+                    listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
+                } else {
+                    listEl.innerHTML = subs.map(function(s) {
+                        return '<div class="merge-browse-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
+                            '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                            '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
+                            (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
+                            '</div>';
+                    }).join('');
+                    listEl.querySelectorAll('.merge-browse-item').forEach(function(el) {
+                        el.addEventListener('click', function() {
+                            currentPath = el.getAttribute('data-path') || '';
+                            renderBreadcrumb();
+                            loadSubfolders();
+                        });
+                    });
+                }
+            })
+            .catch(function() {
+                listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
+            });
+    }
+
+    overlay.querySelector('.merge-browse-cancel').addEventListener('click', function() {
+        overlay.remove();
+    });
+    overlay.querySelector('.merge-browse-select').addEventListener('click', function() {
+        input.value = currentPath;
+        overlay.remove();
+    });
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    renderBreadcrumb();
+    loadSubfolders();
 }
 
 // 合并文件夹：搜索下拉
