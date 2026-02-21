@@ -419,6 +419,14 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
     return count
 
 
+def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
+    """根据参数重新生成单个缩略图，供多进程调用（需为模块级函数以便 pickle）"""
+    photo_path, cache_path, is_video = args
+    if is_video:
+        return _generate_video_thumbnail(photo_path, cache_path)
+    return _generate_thumbnail(photo_path, cache_path)
+
+
 async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
     """
     数据库清理同步，处理三种不一致：
@@ -495,12 +503,6 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
     async with async_session_factory() as session:
         result = await session.execute(select(Image))
         all_images = list(result.scalars().all())
-
-        def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
-            photo_path, cache_path, is_video = args
-            if is_video:
-                return _generate_video_thumbnail(photo_path, cache_path)
-            return _generate_thumbnail(photo_path, cache_path)
 
         to_regen: list[tuple[Path, Path, bool]] = []
         for img in all_images:
