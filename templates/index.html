@@ -128,7 +128,7 @@
 <div id="modal" class="fixed inset-0 z-50 hidden" onclick="closeModal(event)">
     <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex flex-row">
         <!-- 左侧：主内容区（点击空白区域关闭） -->
-        <div class="flex-1 min-w-0 relative flex items-center justify-center" onclick="if(event.target===this) closeModalAndStopSlideshow();">
+        <div class="flex-1 min-w-0 relative flex items-center justify-center" onclick="handleModalContentClick(event)">
         <!-- 顶部工具栏 -->
         <div class="absolute top-0 left-0 right-0 flex items-center justify-between p-4 z-10" onclick="event.stopPropagation()">
             <!-- 左侧：幻灯片控件 -->
@@ -426,6 +426,26 @@ function closeModalAndStopSlideshow() {
     var panel = document.getElementById('modal-image-info-panel');
     if (panel) panel.classList.add('hidden');
     _updateImageInfoBtnState(false);
+}
+
+function handleModalContentClick(e) {
+    if (e.target !== e.currentTarget) return;
+    var isFullscreen = !!document.fullscreenElement;
+    var isVideo = modalMediaTypes.length && modalMediaTypes[modalIndex] === 'video';
+    if (isFullscreen && isVideo) {
+        var rect = e.currentTarget.getBoundingClientRect();
+        var w = rect.width;
+        var x = e.clientX - rect.left;
+        if (x < w * 0.25) {
+            prevImage();
+            return;
+        }
+        if (x > w * 0.75) {
+            nextImage();
+            return;
+        }
+    }
+    closeModalAndStopSlideshow();
 }
 
 function _updateImageInfoBtnState(active) {
@@ -976,8 +996,28 @@ document.addEventListener('keydown', function(e) {
             stopSlideshow(); modal.classList.add('hidden');
         }
     }
-    if (e.key === 'ArrowLeft' && !isEditable) { stopSlideshow(); prevImage(); }
-    if (e.key === 'ArrowRight' && !isEditable) { stopSlideshow(); nextImage(); }
+    if (e.key === 'ArrowLeft' && !isEditable) {
+        var isFullscreen = !!document.fullscreenElement;
+        var isVideo = modalMediaTypes.length && modalMediaTypes[modalIndex] === 'video';
+        if (isFullscreen && isVideo) {
+            var vid = document.getElementById('modal-video');
+            if (vid && isFinite(vid.duration)) {
+                e.preventDefault();
+                vid.currentTime = Math.max(0, vid.currentTime - 5);
+            }
+        } else { stopSlideshow(); prevImage(); }
+    }
+    if (e.key === 'ArrowRight' && !isEditable) {
+        var isFullscreen = !!document.fullscreenElement;
+        var isVideo = modalMediaTypes.length && modalMediaTypes[modalIndex] === 'video';
+        if (isFullscreen && isVideo) {
+            var vid = document.getElementById('modal-video');
+            if (vid && isFinite(vid.duration)) {
+                e.preventDefault();
+                vid.currentTime = Math.min(vid.duration, vid.currentTime + 5);
+            }
+        } else { stopSlideshow(); nextImage(); }
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditable) { deleteCurrentImage(); }
     if (e.key === ' ' && !isEditable) { e.preventDefault(); toggleSlideshow(); }
     if ((e.key === 'f' || e.key === 'F') && !isEditable) { toggleModalFullscreen(); }
@@ -1002,9 +1042,21 @@ document.addEventListener('keydown', function(e) {
         var dy = endY - startY;
         if (Math.abs(dx) < SWIPE_THRESHOLD) return;
         if (Math.abs(dx) < Math.abs(dy)) return;
-        stopSlideshow();
-        if (dx > 0) prevImage();
-        else nextImage();
+        var isFullscreen = !!document.fullscreenElement;
+        var isVideo = modalMediaTypes.length && modalMediaTypes[modalIndex] === 'video';
+        if (isFullscreen && isVideo) {
+            var vid = document.getElementById('modal-video');
+            if (vid && isFinite(vid.duration) && vid.duration > 0) {
+                var screenW = window.innerWidth;
+                var seekDelta = (dx / screenW) * vid.duration;
+                var newTime = Math.max(0, Math.min(vid.duration, vid.currentTime + seekDelta));
+                vid.currentTime = newTime;
+            }
+        } else {
+            stopSlideshow();
+            if (dx > 0) prevImage();
+            else nextImage();
+        }
     }, {passive: true});
 })();
 
