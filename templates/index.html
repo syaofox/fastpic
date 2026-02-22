@@ -2731,9 +2731,13 @@ function getPathFromUrl() {
     return params.get('path') || '';
 }
 
-// popstate：浏览器后退/前进时加载对应 gallery
+// popstate：浏览器后退/前进时加载对应 gallery；若大图模式已打开则先关闭
 window.addEventListener('popstate', function(ev) {
     if (location.pathname !== '/' && location.pathname !== '') return;
+    var modal = document.getElementById('modal');
+    if (modal && modal.classList.contains('modal-open')) {
+        closeModalAndStopSlideshow();
+    }
     var path = getPathFromUrl();
     window._restoringFromPopstate = true;
     var url = buildGalleryUrl(path);
