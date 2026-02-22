@@ -125,7 +125,7 @@
 </div>
 
 <!-- 大图预览模态框 -->
-<div id="modal" class="fixed inset-0 z-50 hidden" onclick="closeModal(event)">
+<div id="modal" class="fixed inset-0 z-50" onclick="closeModal(event)">
     <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex flex-row">
         <!-- 左侧：主内容区（点击空白区域关闭） -->
         <div class="flex-1 min-w-0 relative flex items-center justify-center" onclick="handleModalContentClick(event)">
@@ -331,6 +331,7 @@ function _showModalContent(url, mediaType) {
     if (mt === 'video') {
         imgEl.classList.add('hidden');
         imgEl.removeAttribute('src');
+        imgEl.classList.remove('modal-img-loading');
         vidEl.classList.remove('hidden');
         vidEl.src = url;
         vidEl.load();
@@ -346,7 +347,32 @@ function _showModalContent(url, mediaType) {
         vidEl.pause();
         vidEl.removeAttribute('src');
         imgEl.classList.remove('hidden');
+        imgEl.classList.add('modal-img-loading');
         imgEl.src = url;
+        if (imgEl.complete && imgEl.naturalWidth) {
+            imgEl.classList.remove('modal-img-loading');
+        } else {
+            imgEl.onload = function() {
+                imgEl.classList.remove('modal-img-loading');
+                imgEl.onload = null;
+            };
+        }
+    }
+}
+
+/** 预加载完成后显示，避免切换时白屏 */
+function _showModalContentWhenReady(url, mediaType, cb) {
+    var mt = mediaType || _inferMediaType(url);
+    if (mt === 'video') {
+        _showModalContent(url, mediaType);
+        if (cb) cb();
+    } else {
+        var img = new Image();
+        img.onload = img.onerror = function() {
+            _showModalContent(url, mediaType);
+            if (cb) cb();
+        };
+        img.src = url;
     }
 }
 
@@ -356,7 +382,12 @@ function openModal(photoUrl, index, allUrls, allIds, mediaTypes) {
     modalMediaTypes = mediaTypes || modalImages.map(_inferMediaType);
     modalIndex = index;
     _showModalContent(photoUrl, modalMediaTypes[index]);
-    document.getElementById('modal').classList.remove('hidden');
+    var modal = document.getElementById('modal');
+    requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+            modal.classList.add('modal-open');
+        });
+    });
     applyModalToolbarState(isModalToolbarCollapsed());
     _updateIntervalUI(slideshowInterval);
     _updateSlideshowModeUI(slideshowMode);
@@ -410,7 +441,8 @@ function closeModal(e) {
         var vid = document.getElementById('modal-video');
         if (vid) { vid.pause(); vid.removeAttribute('src'); }
         if (document.fullscreenElement) document.exitFullscreen();
-        document.getElementById('modal').classList.add('hidden');
+        var modal = document.getElementById('modal');
+        modal.classList.remove('modal-open');
         var panel = document.getElementById('modal-image-info-panel');
         if (panel) panel.classList.add('hidden');
         _updateImageInfoBtnState(false);
@@ -422,7 +454,8 @@ function closeModalAndStopSlideshow() {
     var vid = document.getElementById('modal-video');
     if (vid) { vid.pause(); vid.removeAttribute('src'); }
     if (document.fullscreenElement) document.exitFullscreen();
-    document.getElementById('modal').classList.add('hidden');
+    var modal = document.getElementById('modal');
+    modal.classList.remove('modal-open');
     var panel = document.getElementById('modal-image-info-panel');
     if (panel) panel.classList.add('hidden');
     _updateImageInfoBtnState(false);
@@ -653,10 +686,11 @@ function _bindModalTagHandlers(container, imageId) {
 function prevImage() {
     if (modalImages.length === 0) return;
     modalIndex = (modalIndex - 1 + modalImages.length) % modalImages.length;
-    _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
-    _updateModalImageCounter();
-    refreshImageInfoIfVisible();
-    preloadModalImages(modalIndex);
+    _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
+        _updateModalImageCounter();
+        refreshImageInfoIfVisible();
+        preloadModalImages(modalIndex);
+    });
 }
 
 function nextImage(fromSlideshow) {
@@ -684,19 +718,21 @@ function nextImage(fromSlideshow) {
         if (modalIndex === modalImages.length - 1) {
             showCustomConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
                 modalIndex = 0;
-                _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
-                _updateModalImageCounter();
-                refreshImageInfoIfVisible();
-                preloadModalImages(modalIndex);
+                _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
+                    _updateModalImageCounter();
+                    refreshImageInfoIfVisible();
+                    preloadModalImages(modalIndex);
+                });
             });
             return false;
         }
         modalIndex = modalIndex + 1;
     }
-    _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
-    _updateModalImageCounter();
-    refreshImageInfoIfVisible();
-    preloadModalImages(modalIndex);
+    _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
+        _updateModalImageCounter();
+        refreshImageInfoIfVisible();
+        preloadModalImages(modalIndex);
+    });
     return true;
 }
 
@@ -929,7 +965,8 @@ function deleteCurrentImage() {
 
             if (modalImages.length === 0) {
                 // 没有图片了，关闭模态框并刷新画廊
-                document.getElementById('modal').classList.add('hidden');
+                var m = document.getElementById('modal');
+                m.classList.remove('modal-open');
                 refreshGalleryFromModal();
             } else {
                 // 调整索引，显示下一张（或最后一张）
@@ -986,14 +1023,14 @@ function refreshGalleryFromModal() {
 
 document.addEventListener('keydown', function(e) {
     const modal = document.getElementById('modal');
-    if (modal.classList.contains('hidden')) return;
+    if (!modal.classList.contains('modal-open')) return;
     var active = document.activeElement;
     var isEditable = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
     if (e.key === 'Escape') {
         if (document.fullscreenElement) {
             document.exitFullscreen();
         } else {
-            stopSlideshow(); modal.classList.add('hidden');
+            closeModalAndStopSlideshow();
         }
     }
     if (e.key === 'ArrowLeft' && !isEditable) {
@@ -2310,7 +2347,8 @@ document.addEventListener('keydown', function(e) {
                 modalImageIds.splice(modalIndex, 1);
                 modalMediaTypes.splice(modalIndex, 1);
                 if (modalImages.length === 0) {
-                    document.getElementById('modal').classList.add('hidden');
+                    var m = document.getElementById('modal');
+                    m.classList.remove('modal-open');
                 } else {
                     if (modalIndex >= modalImages.length) modalIndex = modalImages.length - 1;
                     _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
@@ -2675,6 +2713,37 @@ window.addEventListener('popstate', function(ev) {
     var url = buildGalleryUrl(path);
     htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
 });
+
+// HTMX 交换体验优化：加载指示器延迟显示、容器淡入淡出
+(function() {
+    var loadingTimeout = null;
+    document.body.addEventListener('htmx:beforeRequest', function(ev) {
+        var target = ev.detail.target;
+        if (!target) return;
+        if (target.id === 'gallery-container') {
+            var indicator = document.getElementById('gallery-loading-indicator');
+            if (indicator) {
+                loadingTimeout = setTimeout(function() {
+                    indicator.classList.add('gallery-loading-visible');
+                }, 150);
+            }
+            target.classList.add('gallery-swapping');
+        }
+    });
+    document.body.addEventListener('htmx:afterRequest', function(ev) {
+        if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+        }
+        var indicator = document.getElementById('gallery-loading-indicator');
+        if (indicator) indicator.classList.remove('gallery-loading-visible');
+    });
+    document.body.addEventListener('htmx:afterSwap', function(ev) {
+        if (ev.detail.target.id === 'gallery-container') {
+            ev.detail.target.classList.remove('gallery-swapping');
+        }
+    });
+})();
 
 // HTMX 交换后更新侧栏选中状态、mode 输入、并确保缩略图大小应用
 document.body.addEventListener('htmx:afterSwap', function(ev) {

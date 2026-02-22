@@ -269,6 +269,7 @@
     {% endif %}
     {% for img in images %}
     {% set mt = img.media_type|default('image') %}
+    {% set is_first_screen = loop.index0 < 12 and not append %}
     <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white cursor-pointer"
          data-type="{{ mt }}" data-image-id="{{ img.id }}" data-relative-path="{{ img.relative_path }}" data-media-type="{{ mt }}"
          {% if mode == 'waterfall' %}data-w="{{ img.width }}" data-h="{{ img.height }}"{% endif %}
@@ -285,11 +286,12 @@
         <a href="/photos/{{ img.relative_path }}"
            class="{{ 'flex flex-row items-center gap-3 p-2' if mode == 'list' else 'block' }} image-nav-link"
            onclick="event.preventDefault(); if(!window._selectMode) { (window.openModalFromGallery || openModal)('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}'{{ i.media_type|default('image') }}'{% if not loop.last %},{% endif %}{% endfor %}]); }">
-            <div class="overflow-hidden bg-slate-100 {{ 'w-20 h-20 flex-shrink-0 rounded' if mode == 'list' else 'aspect-square' if mode == 'folder' else '' }} relative">
+            <div class="overflow-hidden bg-slate-100 {{ 'w-20 h-20 flex-shrink-0 rounded' if mode == 'list' else 'aspect-square' if mode == 'folder' else '' }} relative"
+                 {% if mode == 'waterfall' and img.width and img.height %}style="aspect-ratio: {{ img.width }}/{{ img.height }};"{% elif mode == 'waterfall' %}style="aspect-ratio: 1;"{% endif %}>
                 <img src="/cache/{{ img.relative_path|cache_key }}"
                      alt="{{ img.filename }}"
                      class="w-full {{ 'h-full object-cover' if mode in ('folder', 'list') else 'h-auto' }}"
-                     loading="lazy"
+                     {% if is_first_screen %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}
                      onerror="this.style.visibility='hidden'">
                 {% if mt == 'video' %}
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -349,12 +351,24 @@
     </div>
     {% endfor %}
 {% if has_next %}
+{% if not append %}
+<div id="infinite-scroll-loading" class="htmx-indicator flex justify-center py-4 w-full" style="min-height: 48px;">
+    <div class="flex items-center gap-2 text-slate-500 text-sm">
+        <svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>加载更多...</span>
+    </div>
+</div>
+{% endif %}
 <div class="scroll-sentinel"
      style="height: 4px;"
      hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page={{ page + 1 }}&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
      hx-trigger="intersect once root:#scroll-container threshold:0"
      hx-swap="beforeend"
-     hx-target="#gallery-grid">
+     hx-target="#gallery-grid"
+     hx-indicator="#infinite-scroll-loading">
 </div>
 {% endif %}
 {% if not append %}

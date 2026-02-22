@@ -78,6 +78,8 @@
         }
         #gallery-grid.gallery-list > .selectable-item {
             width: 100%;
+            content-visibility: auto;
+            contain-intrinsic-size: auto 100px;
         }
 
         /* 瀑布流：JS 列布局 */
@@ -103,6 +105,9 @@
             width: calc(25% - 0.75rem); /* 默认 4 列 */
             /* 仅对 border/shadow 做过渡，避免列数变化时 width 产生缩小动画 */
             transition: border-color 0.2s, box-shadow 0.2s;
+            /* 视口外元素跳过渲染，提升长列表滚动帧率 */
+            content-visibility: auto;
+            contain-intrinsic-size: auto 200px;
         }
         #gallery-grid.gallery-flex[data-cols="2"] > .selectable-item { width: calc(50% - 0.5rem); }
         #gallery-grid.gallery-flex[data-cols="3"] > .selectable-item { width: calc(33.333% - 0.667rem); }
@@ -120,6 +125,11 @@
         #gallery-grid.gallery-flex > .scroll-sentinel {
             margin-top: -0.25rem;
         }
+        /* 无限滚动加载指示器 */
+        #infinite-scroll-loading.htmx-indicator { opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+        #infinite-scroll-loading.htmx-indicator.htmx-request { opacity: 1; }
+        #gallery-grid.gallery-flex > #infinite-scroll-loading,
+        #gallery-grid.gallery-list > #infinite-scroll-loading { flex: 0 0 100%; width: 100%; }
 
         /* 响应式：按断点限制最大列数 */
         /* 手机 < 640px：最多 2 列 */
@@ -159,9 +169,19 @@
                 width: calc(16.666% - 0.833rem);
             }
         }
-        /* 切换文件夹时的加载指示器 */
+        /* 切换文件夹时的加载指示器：延迟 150ms 显示，避免快速响应时闪烁 */
         #gallery-loading-indicator.htmx-indicator { opacity: 0; transition: opacity 0.2s; }
-        #gallery-loading-indicator.htmx-indicator.htmx-request { opacity: 1; }
+        #gallery-loading-indicator.htmx-indicator.htmx-request.gallery-loading-visible { opacity: 1; }
+        /* 切换文件夹时 gallery 容器淡入淡出过渡 */
+        #gallery-container { transition: opacity 0.15s ease; }
+        #gallery-container.gallery-swapping { opacity: 0.6; }
+
+        /* 模态框淡入淡出过渡 */
+        #modal { transition: opacity 0.2s ease; opacity: 0; pointer-events: none; visibility: hidden; }
+        #modal.modal-open { opacity: 1; pointer-events: auto; visibility: visible; }
+        /* 大图切换时淡入，避免白屏 */
+        #modal-img { transition: opacity 0.15s ease; }
+        #modal-img.modal-img-loading { opacity: 0.4; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
