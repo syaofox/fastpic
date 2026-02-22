@@ -3,6 +3,7 @@ import asyncio
 import time
 from pathlib import Path
 
+from sqlalchemy import text
 from sqlmodel import select
 
 from models import Image, natural_sort_key
@@ -94,6 +95,20 @@ async def get_folder_tree_cached(
         return folder_tree, nested_tree, folder_counts
 
 
+def _extract_direct_child_sqlite(path_prefix: str) -> str:
+    """生成 SQLite 表达式：从 relative_path 提取直接子文件夹名。
+    path_prefix 如 '2024/01/'，relative_path 如 '2024/01/15/photo.jpg' -> '15'
+    """
+    if not path_prefix:
+        # 根路径：取第一段，如 '2024/01/photo.jpg' -> '2024'
+        return "SUBSTR(relative_path, 1, INSTR(relative_path || '/', '/') - 1)"
+    prefix_len = len(path_prefix)
+    # rest = SUBSTR(relative_path, prefix_len + 1) 即 path_prefix 之后的部分
+    # sub_name = rest 的第一段（到下一个 '/' 或结尾）
+    rest_expr = f"SUBSTR(relative_path, {prefix_len + 1})"
+    return f"SUBSTR({rest_expr}, 1, INSTR({rest_expr} || '/', '/') - 1)"
+
+
 async def get_subfolders(
     session,
     photos_dir: Path,
@@ -102,61 +117,84 @@ async def get_subfolders(
     sort_by: str = "filename",
     sort_order: str = "asc",
 ) -> list[dict]:
-    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。"""
-    path_depth = len(path.split("/")) if path else 0
+    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。
+    使用 SQL 聚合替代全量拉取，避免在大量图片时卡顿。
+    """
     path_prefix = path + "/" if path else ""
-    batch_stmt = select(Image.relative_path, Image.modified_at, Image.file_size)
+    sub_name_expr = _extract_direct_child_sqlite(path_prefix)
+
     if path:
         escaped = escape_like(path_prefix)
-        batch_stmt = batch_stmt.where(
-            Image.relative_path.like(f"{escaped}%", escape="\\"),
-            Image.relative_path.like(f"{escaped}%/%", escape="\\"),
+        where_clause = (
+            f"relative_path LIKE :like_prefix ESCAPE '\\' "
+            f"AND relative_path LIKE :like_sub ESCAPE '\\'"
         )
+        params = {"like_prefix": f"{escaped}%", "like_sub": f"{escaped}%/%"}
     else:
-        batch_stmt = batch_stmt.where(Image.relative_path.like("%/%"))
-    result = await session.execute(batch_stmt)
-    rows = result.fetchall()
-    subfolder_data: dict[str, list[tuple[str, float, int]]] = {}
-    for rel, mod, size in rows:
-        parts = rel.split("/")
-        if len(parts) <= path_depth:
-            continue
-        sub_name = parts[path_depth]
-        if sub_name not in subfolder_data:
-            subfolder_data[sub_name] = []
-        subfolder_data[sub_name].append((rel, mod or 0.0, size or 0))
+        where_clause = "relative_path LIKE '%/%'"
+        params = {}
+
+    # 1. SQL 聚合：直接子文件夹的 count, max(modified_at), max(file_size)
+    agg_sql = f"""
+        SELECT
+            {sub_name_expr} AS sub_name,
+            COUNT(*) AS cnt,
+            MAX(modified_at) AS max_mod,
+            MAX(file_size) AS max_sz
+        FROM images
+        WHERE {where_clause}
+        GROUP BY sub_name
+    """
+    agg_result = await session.execute(text(agg_sql), params)
+    agg_rows = agg_result.fetchall()
+
+    # 2. 文件系统：补充数据库中无图片的空文件夹
     fs_dir = photos_dir / path if path else photos_dir
+    db_names = {r[0] for r in agg_rows}
     if fs_dir.is_dir():
         children = await asyncio.to_thread(
             lambda: [c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")]
         )
         for child in children:
-            if child.name not in subfolder_data:
-                subfolder_data[child.name] = []
+            if child.name not in db_names:
+                agg_rows.append((child.name, 0, 0.0, 0))
+
+    # 3. 构建 subfolders 列表（先不含缩略图）
     subfolders: list[dict] = []
-    for name, items in subfolder_data.items():
+    for row in agg_rows:
+        name, count, max_mod, max_sz = row
         full_path = f"{path}/{name}" if path else name
-        if items:
-            items_sorted = sorted(items, key=lambda x: x[1], reverse=True)
-            count = len(items)
-            max_mod = items_sorted[0][1] if items_sorted else 0.0
-            max_size = max((x[2] for x in items), default=0)
-            thumbnails = [x[0] for x in items_sorted[:4]]
-        else:
-            count = 0
-            max_mod = 0.0
-            max_size = 0
-            thumbnails = []
         subfolders.append({
             "name": name,
             "full_path": full_path,
-            "thumbnails": thumbnails,
-            "image_count": count,
+            "thumbnails": [],  # 稍后按需查询
+            "image_count": count or 0,
             "_sort_key_filename": natural_sort_key(name),
             "_sort_key_folder_filename": natural_sort_key(full_path),
-            "_sort_key_modified_at": max_mod,
-            "_sort_key_file_size": max_size,
+            "_sort_key_modified_at": float(max_mod or 0.0),
+            "_sort_key_file_size": int(max_sz or 0),
         })
+
+    # 4. 按子文件夹单独查询缩略图（每文件夹 LIMIT 4），并行执行
+    async def fetch_thumbnails(sub: dict) -> None:
+        full_path = sub["full_path"]
+        if sub["image_count"] == 0:
+            return
+        escaped = escape_like(full_path + "/")
+        thumb_stmt = (
+            select(Image.relative_path)
+            .where(
+                Image.relative_path.like(f"{escaped}%", escape="\\"),
+            )
+            .order_by(Image.modified_at.desc())
+            .limit(4)
+        )
+        result = await session.execute(thumb_stmt)
+        sub["thumbnails"] = [r[0] for r in result.fetchall()]
+
+    await asyncio.gather(*[fetch_thumbnails(s) for s in subfolders])
+
+    # 5. 排序
     sort_col_map = {
         "filename": "_sort_key_filename",
         "folder_filename": "_sort_key_folder_filename",

@@ -1,5 +1,6 @@
 """FastPic 应用入口"""
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime as _dt
 from pathlib import Path
@@ -72,6 +73,28 @@ async def favicon():
 def _per_page_for_cols(cols: int) -> int:
     cols = max(2, min(8, cols))
     return cols * ((PER_PAGE + cols - 1) // cols)
+
+
+# count 短期缓存（无筛选时），减轻切换文件夹时的重复查询
+_COUNT_CACHE_TTL = 30.0
+_count_cache: dict[tuple[str, str], tuple[int, float]] = {}
+
+
+def _get_cached_count(path: str, mode: str) -> int | None:
+    key = (path or "", mode)
+    entry = _count_cache.get(key)
+    if entry is None:
+        return None
+    total, ts = entry
+    if time.monotonic() - ts > _COUNT_CACHE_TTL:
+        del _count_cache[key]
+        return None
+    return total
+
+
+def _set_cached_count(path: str, mode: str, total: int) -> None:
+    key = (path or "", mode)
+    _count_cache[key] = (total, time.monotonic())
 
 
 @app.get("/")
@@ -229,7 +252,17 @@ async def gallery(
             count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
         elif not filter_tag:
             count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
-    total = (await session.execute(count_stmt)).scalar() or 0
+
+    # 无筛选时使用 count 缓存
+    if not search and not has_filters and not filter_tag:
+        cached = _get_cached_count(path, mode)
+        if cached is not None:
+            total = cached
+        else:
+            total = (await session.execute(count_stmt)).scalar() or 0
+            _set_cached_count(path, mode, total)
+    else:
+        total = (await session.execute(count_stmt)).scalar() or 0
     subfolders = []
     if mode == "folder" and page == 1 and not search and not has_filters and not filter_tag:
         subfolders = await get_subfolders(session, PHOTOS_DIR, path, pf, sort_by, sort_order)

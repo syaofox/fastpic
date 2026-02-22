@@ -149,6 +149,9 @@
                 width: calc(16.666% - 0.833rem);
             }
         }
+        /* 切换文件夹时的加载指示器 */
+        #gallery-loading-indicator.htmx-indicator { opacity: 0; transition: opacity 0.2s; }
+        #gallery-loading-indicator.htmx-indicator.htmx-request { opacity: 1; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">

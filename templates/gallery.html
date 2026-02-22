@@ -9,6 +9,7 @@
            hx-get="/gallery?path=&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
+           hx-indicator="#gallery-loading-indicator"
            hx-on:click="document.querySelector('[name=path]').value = ''">全部文件夹</a>
         {% for i in range(breadcrumb_parts|length) %}
         <span class="mx-1">›</span>
@@ -21,6 +22,7 @@
            hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
+           hx-indicator="#gallery-loading-indicator"
            hx-on:click="document.querySelector('[name=path]').value = '{{ seg_path }}'">{{ breadcrumb_parts[i] }}</a>
         {% endif %}
         {% endfor %}
@@ -214,6 +216,7 @@
            hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
+           hx-indicator="#gallery-loading-indicator"
            onclick="if(window._selectMode){event.stopPropagation();event.preventDefault();window.handleItemClick(event,this.closest('.selectable-item'));return false;}"
            hx-on:click="if(!window._selectMode) document.querySelector('[name=path]').value = '{{ sub.full_path }}'">
             <div class="aspect-square grid grid-cols-2 grid-rows-2 gap-0.5 p-0.5 bg-slate-100">
