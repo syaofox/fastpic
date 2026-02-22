@@ -122,7 +122,9 @@ def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
             timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split(",")
+            # ffprobe 可能输出 "width,height" 或 "width\nheight"（部分 .ts 等格式）
+            raw = result.stdout.strip().replace(",", " ").replace("\n", " ")
+            parts = [p for p in raw.split() if p.isdigit()]
             if len(parts) >= 2:
                 return int(parts[0]), int(parts[1])
     except (subprocess.TimeoutExpired, FileNotFoundError, ValueError) as e:
