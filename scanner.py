@@ -5,7 +5,10 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageFile
+
+# 允许加载截断/损坏的图片（部分 JPG 可能缺少结束标记但仍可显示）
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
