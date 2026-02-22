@@ -158,7 +158,8 @@ async def gallery(
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）"""
     path = (path or "").strip().strip("/")
-    mode = "waterfall" if mode == "waterfall" else "folder"
+    valid_modes = ("folder", "list", "waterfall")
+    mode = mode if mode in valid_modes else "folder"
     per_page = _per_page_for_cols(cols)
     sort_columns = {
         "filename": case(
@@ -221,7 +222,7 @@ async def gallery(
             Tag, Tag.id == ImageTag.tag_id
         ).where(Tag.name == filter_tag)
         has_filters = True
-    if mode == "folder":
+    if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
             stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
@@ -246,7 +247,7 @@ async def gallery(
         count_stmt = count_stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
             Tag, Tag.id == ImageTag.tag_id
         ).where(Tag.name == filter_tag)
-    if mode == "folder":
+    if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
             count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
@@ -258,7 +259,7 @@ async def gallery(
     stmt_paged = stmt.offset(offset).limit(per_page + 1)
     need_count = search or has_filters or filter_tag or _get_cached_count(path, mode) is None
     need_subfolders = (
-        mode == "folder"
+        mode in ("folder", "list")
         and page == 1
         and not search
         and not has_filters
@@ -365,7 +366,8 @@ async def api_folder_images(
 ):
     """获取当前文件夹/模式下的全部图片（用于大图浏览模式）"""
     path = (path or "").strip().strip("/")
-    mode = "waterfall" if mode == "waterfall" else "folder"
+    valid_modes = ("folder", "list", "waterfall")
+    mode = mode if mode in valid_modes else "folder"
     sort_columns = {
         "filename": case(
             (Image.filename_natural.is_(None), Image.filename),
@@ -385,7 +387,7 @@ async def api_folder_images(
     if path:
         pf = path_filter_for_prefix(Image.relative_path, path)
         stmt = stmt.where(pf)
-    if mode == "folder":
+    if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
             stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))

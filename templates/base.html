@@ -70,6 +70,16 @@
             background: rgb(148 163 184);
         }
 
+        /* 列表模式：单列，每行缩略图+信息 */
+        #gallery-grid.gallery-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        #gallery-grid.gallery-list > .selectable-item {
+            width: 100%;
+        }
+
         /* 瀑布流：JS 列布局 */
         #wf-row {
             display: flex;
