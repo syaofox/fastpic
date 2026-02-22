@@ -6,13 +6,11 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from PIL import Image as PILImage, ImageFile
-
-# 允许加载截断/损坏的图片（部分 JPG 可能缺少结束标记但仍可显示）
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, async_session_factory, natural_sort_key
+from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".ts"}
@@ -33,11 +31,31 @@ def _relative_path(photos_dir: Path, full_path: Path) -> str:
     return str(rel).replace("\\", "/")
 
 
+def _load_image_maybe_truncated(full_path: Path) -> tuple[PILImage.Image, bool]:
+    """加载图片，若正常加载失败则尝试截断模式。返回 (img, is_corrupted)。"""
+    old_val = ImageFile.LOAD_TRUNCATED_IMAGES
+    try:
+        ImageFile.LOAD_TRUNCATED_IMAGES = False
+        img = PILImage.open(full_path)
+        img.load()
+        return (img, False)
+    except OSError:
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        try:
+            img = PILImage.open(full_path)
+            img.load()
+            return (img, True)
+        except Exception:
+            raise
+    finally:
+        ImageFile.LOAD_TRUNCATED_IMAGES = old_val
+
+
 def _generate_thumbnail(full_path: Path, cache_path: Path) -> bool:
     """为指定图片生成缩略图，返回是否成功"""
     try:
-        with PILImage.open(full_path) as img:
-            img.load()
+        img, _ = _load_image_maybe_truncated(full_path)
+        try:
             if img.width > THUMBNAIL_WIDTH:
                 ratio = THUMBNAIL_WIDTH / img.width
                 new_size = (THUMBNAIL_WIDTH, int(img.height * ratio))
@@ -47,7 +65,9 @@ def _generate_thumbnail(full_path: Path, cache_path: Path) -> bool:
             if thumb.mode in ("RGBA", "P"):
                 thumb = thumb.convert("RGB")
             thumb.save(cache_path, "WEBP", quality=85)
-        return True
+            return True
+        finally:
+            img.close()
     except Exception as e:
         print(f"[cache] 生成缩略图失败 {full_path}: {e}", flush=True)
         return False
@@ -55,20 +75,31 @@ def _generate_thumbnail(full_path: Path, cache_path: Path) -> bool:
 
 def get_media_metadata_and_thumbnail(
     full_path: Path, cache_path: Path, is_video: bool
-) -> tuple[int, int, float, int] | None:
-    """同步获取媒体元数据并生成缩略图，返回 (width, height, modified_at, file_size)，失败返回 None。
-    供 watcher、上传等场景复用。"""
+) -> tuple[int, int, float, int, bool] | None:
+    """同步获取媒体元数据并生成缩略图，返回 (width, height, modified_at, file_size, is_corrupted)，失败返回 None。
+    供 watcher、上传等场景复用。视频的 is_corrupted 恒为 False。"""
     try:
         modified_at = os.path.getmtime(full_path)
         file_size = os.path.getsize(full_path)
         if is_video:
             width, height = _get_video_dimensions(full_path)
             _generate_video_thumbnail(full_path, cache_path)
-        else:
-            with PILImage.open(full_path) as img:
-                width, height = img.size
-            _generate_thumbnail(full_path, cache_path)
-        return (width, height, modified_at, file_size)
+            return (width, height, modified_at, file_size, False)
+        img, is_corrupted = _load_image_maybe_truncated(full_path)
+        try:
+            width, height = img.size
+            if img.width > THUMBNAIL_WIDTH:
+                ratio = THUMBNAIL_WIDTH / img.width
+                new_size = (THUMBNAIL_WIDTH, int(img.height * ratio))
+                thumb = img.resize(new_size, PILImage.Resampling.LANCZOS)
+            else:
+                thumb = img.copy()
+            if thumb.mode in ("RGBA", "P"):
+                thumb = thumb.convert("RGB")
+            thumb.save(cache_path, "WEBP", quality=85)
+            return (width, height, modified_at, file_size, is_corrupted)
+        finally:
+            img.close()
     except Exception as e:
         print(f"[scanner] 处理失败 {full_path}: {e}", flush=True)
         return None
@@ -161,15 +192,15 @@ def _collect_video_files(photos_dir: Path) -> list[Path]:
 
 def _process_single_image_sync(
     full_path: Path, photos_dir: Path, cache_dir: Path
-) -> tuple[str, str, float, int, int, int] | None:
-    """同步处理单张图片：读取尺寸、生成缩略图，返回入库所需数据，失败返回 None"""
+) -> tuple[str, str, float, int, int, int, bool] | None:
+    """同步处理单张图片：读取尺寸、生成缩略图，返回 (filename, rel_path, modified_at, file_size, width, height, is_corrupted)，失败返回 None"""
     try:
         rel_path = _relative_path(photos_dir, full_path)
         modified_at = os.path.getmtime(full_path)
         file_size = os.path.getsize(full_path)
-        with PILImage.open(full_path) as img:
+        img, is_corrupted = _load_image_maybe_truncated(full_path)
+        try:
             width, height = img.size
-            img.load()
             if img.width > THUMBNAIL_WIDTH:
                 ratio = THUMBNAIL_WIDTH / img.width
                 new_size = (THUMBNAIL_WIDTH, int(img.height * ratio))
@@ -181,7 +212,9 @@ def _process_single_image_sync(
             cache_name = _cache_filename(rel_path)
             cache_path = cache_dir / cache_name
             thumb.save(cache_path, "WEBP", quality=85)
-        return (full_path.name, rel_path, modified_at, file_size, width, height)
+            return (full_path.name, rel_path, modified_at, file_size, width, height, is_corrupted)
+        finally:
+            img.close()
     except Exception as e:
         print(f"[scan] 处理失败 {full_path}: {e}", flush=True)
         return None
@@ -244,6 +277,8 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                 raw_results = await asyncio.gather(*tasks)
             return [r for r in raw_results if r is not None]
 
+        damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME)
+
         for full_path in image_files:
             if not full_path.is_file():
                 continue
@@ -264,7 +299,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                 results = await _process_batch(pending)
                 pending = []
                 for data in results:
-                    filename, rel_path, modified_at, file_size, width, height = data
+                    filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
                     record = Image(
                         filename=filename,
                         relative_path=rel_path,
@@ -277,6 +312,9 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                         media_type="image",
                     )
                     session.add(record)
+                    await session.flush()
+                    if is_corrupted and damaged_tag:
+                        await add_tag_to_image(session, record.id, damaged_tag)
                     count += 1
                     batch_count += 1
 
@@ -291,7 +329,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
         if pending:
             results = await _process_batch(pending)
             for data in results:
-                filename, rel_path, modified_at, file_size, width, height = data
+                filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
                 record = Image(
                     filename=filename,
                     relative_path=rel_path,
@@ -304,6 +342,9 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                     media_type="image",
                 )
                 session.add(record)
+                await session.flush()
+                if is_corrupted and damaged_tag:
+                    await add_tag_to_image(session, record.id, damaged_tag)
                 count += 1
                 batch_count += 1
 

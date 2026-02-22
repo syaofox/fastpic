@@ -28,6 +28,7 @@ from scanner import (
     get_media_metadata_and_thumbnail,
 )
 from models import Image, async_session_factory, natural_sort_key
+from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 from scan_state import begin_scan, end_scan
 
 from sqlmodel import select
@@ -99,8 +100,10 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             if data is None:
                 return
 
-            width, height, modified_at, file_size = data
+            width, height, modified_at, file_size, is_corrupted = data
             media_type = "video" if is_vid else "image"
+
+            damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME) if is_corrupted else None
 
             record = Image(
                 filename=full_path.name,
@@ -114,6 +117,9 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
                 media_type=media_type,
             )
             session.add(record)
+            await session.flush()
+            if is_corrupted and damaged_tag:
+                await add_tag_to_image(session, record.id, damaged_tag)
             await session.commit()
             print(f"[watcher] 新增: {rel_path}", flush=True)
         except IntegrityError:
@@ -184,7 +190,11 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
                     dst_path, new_cache, is_video,
                 )
                 if data:
-                    _, _, img.modified_at, img.file_size = data
+                    _, _, img.modified_at, img.file_size, is_corrupted = data
+                    if is_corrupted:
+                        damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME)
+                        if damaged_tag:
+                            await add_tag_to_image(session, img.id, damaged_tag)
 
             try:
                 session.add(img)

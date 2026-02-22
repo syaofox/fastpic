@@ -182,6 +182,7 @@ async def upload_images(
 ):
     """上传图片或视频到指定路径"""
     from scanner import get_media_metadata_and_thumbnail
+    from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
     target_path = (path or "").strip().strip("/")
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
@@ -242,7 +243,7 @@ async def upload_images(
             if data is None:
                 errors.append(f"{f.filename}: 处理失败")
                 continue
-            width, height, modified_at, file_size = data
+            width, height, modified_at, file_size, is_corrupted = data
             if existing_record:
                 existing_record.filename = dest.name
                 existing_record.filename_natural = natural_sort_key(dest.name)
@@ -253,6 +254,7 @@ async def upload_images(
                 existing_record.height = height
                 existing_record.media_type = "video" if is_video else "image"
                 session.add(existing_record)
+                record = existing_record
             else:
                 record = Image(
                     filename=dest.name,
@@ -266,6 +268,11 @@ async def upload_images(
                     media_type="video" if is_video else "image",
                 )
                 session.add(record)
+            if is_corrupted:
+                damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME)
+                if damaged_tag:
+                    await session.flush()
+                    await add_tag_to_image(session, record.id, damaged_tag)
             try:
                 await session.commit()
                 uploaded += 1
