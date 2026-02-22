@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Image, async_session_factory, natural_sort_key
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv"}
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".ts"}
 THUMBNAIL_WIDTH = 300
 # 多进程缩略图：并行度与批大小
 _MAX_WORKERS = min(32, (os.cpu_count() or 4) + 4)

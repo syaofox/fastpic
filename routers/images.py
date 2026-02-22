@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR
 from models import Image, Tag, ImageTag, get_async_session, natural_sort_key
-from scanner import _cache_filename, IMAGE_EXTENSIONS
+from scanner import _cache_filename, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from schemas import DeleteImagesRequest, DownloadZipRequest
 from utils.path_utils import escape_like, path_filter_for_prefix, resolve_and_validate_relative_path
 from utils.unique_path import unique_path
@@ -180,7 +180,7 @@ async def upload_images(
     files: list[UploadFile] = File(...),
     session: AsyncSession = Depends(get_async_session),
 ):
-    """上传图片到指定路径"""
+    """上传图片或视频到指定路径"""
     from scanner import get_media_metadata_and_thumbnail
 
     target_path = (path or "").strip().strip("/")
@@ -196,9 +196,10 @@ async def upload_images(
         if not f.filename:
             continue
         ext = Path(f.filename).suffix.lower()
-        if ext not in IMAGE_EXTENSIONS:
+        if ext not in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
             errors.append(f"{f.filename}: 不支持的格式 {ext}")
             continue
+        is_video = ext in VIDEO_EXTENSIONS
         try:
             content = await f.read()
         except Exception as e:
@@ -236,7 +237,7 @@ async def upload_images(
             cache_name = _cache_filename(rel_path)
             cache_path = CACHE_DIR / cache_name
             data = await asyncio.to_thread(
-                get_media_metadata_and_thumbnail, dest, cache_path, False
+                get_media_metadata_and_thumbnail, dest, cache_path, is_video
             )
             if data is None:
                 errors.append(f"{f.filename}: 处理失败")
@@ -250,6 +251,7 @@ async def upload_images(
                 existing_record.file_size = file_size
                 existing_record.width = width
                 existing_record.height = height
+                existing_record.media_type = "video" if is_video else "image"
                 session.add(existing_record)
             else:
                 record = Image(
@@ -261,6 +263,7 @@ async def upload_images(
                     height=height,
                     filename_natural=natural_sort_key(dest.name),
                     relative_path_natural=natural_sort_key(rel_path),
+                    media_type="video" if is_video else "image",
                 )
                 session.add(record)
             try:

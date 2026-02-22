@@ -1,5 +1,6 @@
 """FastPic 应用入口"""
 import asyncio
+import mimetypes
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime as _dt
@@ -450,5 +451,6 @@ async def debug_path_count(
 
 
 STATIC_DIR.mkdir(exist_ok=True)
+mimetypes.add_type("video/mp2t", ".ts")
 app.mount("/photos", StaticFiles(directory=str(PHOTOS_DIR)), name="photos")
 app.mount("/cache", StaticFiles(directory=str(CACHE_DIR)), name="cache")

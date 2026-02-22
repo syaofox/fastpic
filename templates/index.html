@@ -299,11 +299,19 @@ let slideshowInterval = parseFloat(localStorage.getItem('fastpic_slideshow_inter
 let slideshowMode = localStorage.getItem('fastpic_slideshow_mode') || 'loop';
 let videoAutoPlayNext = localStorage.getItem('fastpic_video_autoplay_next') === 'true';
 
+var _mpegtsPlayer = null;
+function _destroyMpegtsPlayer() {
+    if (_mpegtsPlayer) {
+        try { _mpegtsPlayer.destroy(); } catch (e) {}
+        _mpegtsPlayer = null;
+    }
+}
+
 /** 根据 URL 推断媒体类型（无 mediaTypes 时回退） */
 function _inferMediaType(url) {
     if (!url) return 'image';
     var u = (url + '').toLowerCase();
-    if (u.match(/\.(mp4|webm|mov|mkv)(\?|$)/)) return 'video';
+    if (u.match(/\.(mp4|webm|mov|mkv|ts)(\?|$)/)) return 'video';
     return 'image';
 }
 
@@ -329,20 +337,40 @@ function _showModalContent(url, mediaType) {
     if (!imgEl || !vidEl) return;
     var mt = mediaType || _inferMediaType(url);
     if (mt === 'video') {
+        _destroyMpegtsPlayer();
         imgEl.classList.add('hidden');
         imgEl.removeAttribute('src');
         imgEl.classList.remove('modal-img-loading');
         vidEl.classList.remove('hidden');
-        vidEl.src = url;
-        vidEl.load();
-        var p = vidEl.play();
-        if (p && typeof p.then === 'function') {
-            p.catch(function() {
+        vidEl.removeAttribute('src');
+        var isTs = /\.ts(\?|$)/i.test(url);
+        var fullUrl = url.startsWith('/') ? (window.location.origin + url) : url;
+        if (isTs && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+            _mpegtsPlayer = mpegts.createPlayer({
+                type: 'mpegts',
+                isLive: false,
+                url: fullUrl,
+                cors: true
+            }, { lazyLoad: true });
+            _mpegtsPlayer.attachMediaElement(vidEl);
+            _mpegtsPlayer.load();
+            _mpegtsPlayer.play().catch(function() {
                 vidEl.muted = true;
                 vidEl.play().catch(function(){});
             });
+        } else {
+            vidEl.src = url;
+            vidEl.load();
+            var p = vidEl.play();
+            if (p && typeof p.then === 'function') {
+                p.catch(function() {
+                    vidEl.muted = true;
+                    vidEl.play().catch(function(){});
+                });
+            }
         }
     } else {
+        _destroyMpegtsPlayer();
         vidEl.classList.add('hidden');
         vidEl.pause();
         vidEl.removeAttribute('src');
@@ -438,6 +466,7 @@ window.openModalFromGallery = openModalFromGallery;
 function closeModal(e) {
     if (e.target.id === 'modal' || e.target.id === 'modal-overlay') {
         stopSlideshow();
+        _destroyMpegtsPlayer();
         var vid = document.getElementById('modal-video');
         if (vid) { vid.pause(); vid.removeAttribute('src'); }
         if (document.fullscreenElement) document.exitFullscreen();
@@ -451,6 +480,7 @@ function closeModal(e) {
 
 function closeModalAndStopSlideshow() {
     stopSlideshow();
+    _destroyMpegtsPlayer();
     var vid = document.getElementById('modal-video');
     if (vid) { vid.pause(); vid.removeAttribute('src'); }
     if (document.fullscreenElement) document.exitFullscreen();
@@ -1601,7 +1631,7 @@ document.addEventListener('keydown', function(e) {
     };
 })();
 
-// ---------- 上传图片 ----------
+// ---------- 上传图片/视频 ----------
 (function() {
     function getCurrentPath() {
         var marker = document.getElementById('current-path-marker');
@@ -1621,15 +1651,15 @@ document.addEventListener('keydown', function(e) {
                     '<div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">' +
                         '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>' +
                     '</div>' +
-                    '<h3 class="text-lg font-semibold text-slate-800">上传图片</h3>' +
+                    '<h3 class="text-lg font-semibold text-slate-800">上传图片/视频</h3>' +
                 '</div>' +
                 '<div class="mb-3 text-sm text-slate-500">上传到：<span class="font-medium text-slate-700">' + (getCurrentPath() || '根目录') + '</span></div>' +
                 '<div id="upload-drop-zone" class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer">' +
                     '<svg class="w-10 h-10 mx-auto mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a2.25 2.25 0 002.25-2.25V5.25a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v13.5a2.25 2.25 0 002.25 2.25z"/></svg>' +
-                    '<p class="text-sm text-slate-600 mb-1">拖拽图片到此处，或</p>' +
+                    '<p class="text-sm text-slate-600 mb-1">拖拽图片或视频到此处，或</p>' +
                     '<button type="button" class="browse-btn text-sm text-blue-600 hover:text-blue-700 font-medium underline">浏览文件</button>' +
-                    '<input type="file" id="upload-file-input" multiple accept="image/*" class="hidden">' +
-                    '<p class="text-xs text-slate-400 mt-2">支持 JPG、PNG、GIF、WebP、BMP</p>' +
+                    '<input type="file" id="upload-file-input" multiple accept="image/*,video/*,.ts,video/mp2t" class="hidden">' +
+                    '<p class="text-xs text-slate-400 mt-2">支持 JPG、PNG、GIF、WebP、BMP、MP4、WebM、MOV、MKV、TS</p>' +
                 '</div>' +
                 '<div class="mt-3 flex items-center gap-3 text-sm text-slate-600">' +
                     '<span class="flex-shrink-0">重复文件：</span>' +
@@ -1700,8 +1730,13 @@ document.addEventListener('keydown', function(e) {
         }
 
         function addFiles(files) {
+            var mediaExts = /\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|mov|mkv|ts)(\?|$)/i;
             for (var i = 0; i < files.length; i++) {
-                if (files[i].type.startsWith('image/')) {
+                var t = (files[i].type || '').toLowerCase();
+                var name = (files[i].name || '').toLowerCase();
+                var byType = t.startsWith('image/') || t.startsWith('video/');
+                var byExt = mediaExts.test(name);
+                if (byType || byExt) {
                     selectedFiles.push(files[i]);
                 }
             }
@@ -1751,8 +1786,8 @@ document.addEventListener('keydown', function(e) {
                     var data = JSON.parse(xhr.responseText);
                     progressText.textContent = '上传完成';
                     progressBar.style.width = '100%';
-                    var summary = data.uploaded + ' 张成功';
-                    if (data.skipped > 0) summary += '，' + data.skipped + ' 张跳过（重复）';
+                    var summary = data.uploaded + ' 个成功';
+                    if (data.skipped > 0) summary += '，' + data.skipped + ' 个跳过（重复）';
                     progressCount.textContent = summary;
                     if (data.errors && data.errors.length > 0) {
                         errorEl.textContent = '部分失败: ' + data.errors.join('; ');
