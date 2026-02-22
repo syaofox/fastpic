@@ -13,7 +13,7 @@ from sqlalchemy import case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, STATIC_DIR, PER_PAGE, APP_VERSION
-from models import Image, Tag, ImageTag, init_db, get_async_session
+from models import Image, Tag, ImageTag, init_db, get_async_session, async_session_factory
 from scanner import scan_photos, scan_videos, cleanup_database, _cache_filename
 from scan_state import begin_scan, end_scan
 from watcher import start_watcher
@@ -253,23 +253,53 @@ async def gallery(
         elif not filter_tag:
             count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
 
-    # 无筛选时使用 count 缓存
-    if not search and not has_filters and not filter_tag:
+    # 并行执行 count、subfolders、images，减少总耗时
+    offset = (page - 1) * per_page
+    stmt_paged = stmt.offset(offset).limit(per_page + 1)
+    need_count = search or has_filters or filter_tag or _get_cached_count(path, mode) is None
+    need_subfolders = (
+        mode == "folder"
+        and page == 1
+        and not search
+        and not has_filters
+        and not filter_tag
+    )
+
+    async def _run_count():
         cached = _get_cached_count(path, mode)
         if cached is not None:
-            total = cached
-        else:
-            total = (await session.execute(count_stmt)).scalar() or 0
-            _set_cached_count(path, mode, total)
+            return cached
+        async with async_session_factory() as s:
+            t = (await s.execute(count_stmt)).scalar() or 0
+            if not search and not has_filters and not filter_tag:
+                _set_cached_count(path, mode, t)
+            return t
+
+    async def _run_subfolders():
+        if not need_subfolders:
+            return []
+        async with async_session_factory() as s:
+            return await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
+
+    async def _run_images():
+        async with async_session_factory() as s:
+            result = await s.execute(stmt_paged)
+            return list(result.scalars().all())
+
+    if need_count and need_subfolders:
+        total, subfolders, images_list = await asyncio.gather(
+            _run_count(), _run_subfolders(), _run_images()
+        )
+    elif need_count:
+        total, images_list = await asyncio.gather(_run_count(), _run_images())
+        subfolders = []
+    elif need_subfolders:
+        subfolders, images_list = await asyncio.gather(_run_subfolders(), _run_images())
+        total = _get_cached_count(path, mode) or 0
     else:
-        total = (await session.execute(count_stmt)).scalar() or 0
-    subfolders = []
-    if mode == "folder" and page == 1 and not search and not has_filters and not filter_tag:
-        subfolders = await get_subfolders(session, PHOTOS_DIR, path, pf, sort_by, sort_order)
-    offset = (page - 1) * per_page
-    stmt = stmt.offset(offset).limit(per_page + 1)
-    result = await session.execute(stmt)
-    images_list = list(result.scalars().all())
+        total = _get_cached_count(path, mode) or 0
+        subfolders = []
+        images_list = await _run_images()
     has_next = len(images_list) > per_page
     if has_next:
         images_list = images_list[:per_page]

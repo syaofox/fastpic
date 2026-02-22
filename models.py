@@ -60,7 +60,13 @@ class ImageTag(SQLModel, table=True):
 
 # 同步引擎用于 create_all
 sync_engine = create_engine(DATABASE_URL, echo=False)
-async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
+# 异步引擎：多连接池支持并行查询（count/subfolders/images 同时执行）
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    echo=False,
+    pool_size=10,
+    max_overflow=20,
+)
 event.listens_for(sync_engine, "connect")(_set_sqlite_pragma)
 event.listens_for(async_engine.sync_engine, "connect")(_set_sqlite_pragma)
 async_session_factory = async_sessionmaker(

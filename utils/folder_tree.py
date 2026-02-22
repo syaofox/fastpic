@@ -159,7 +159,7 @@ async def get_subfolders(
             if child.name not in db_names:
                 agg_rows.append((child.name, 0, 0.0, 0))
 
-    # 3. 构建 subfolders 列表（先不含缩略图）
+    # 3. 构建 subfolders 列表
     subfolders: list[dict] = []
     for row in agg_rows:
         name, count, max_mod, max_sz = row
@@ -167,7 +167,7 @@ async def get_subfolders(
         subfolders.append({
             "name": name,
             "full_path": full_path,
-            "thumbnails": [],  # 稍后按需查询
+            "thumbnails": [],
             "image_count": count or 0,
             "_sort_key_filename": natural_sort_key(name),
             "_sort_key_folder_filename": natural_sort_key(full_path),
@@ -175,24 +175,24 @@ async def get_subfolders(
             "_sort_key_file_size": int(max_sz or 0),
         })
 
-    # 4. 按子文件夹单独查询缩略图（每文件夹 LIMIT 4），并行执行
-    async def fetch_thumbnails(sub: dict) -> None:
-        full_path = sub["full_path"]
-        if sub["image_count"] == 0:
-            return
-        escaped = escape_like(full_path + "/")
-        thumb_stmt = (
-            select(Image.relative_path)
-            .where(
-                Image.relative_path.like(f"{escaped}%", escape="\\"),
+    # 4. 单次 SQL 查询获取所有子文件夹的缩略图（ROW_NUMBER 每文件夹取 4 张）
+    thumb_by_name: dict[str, list[str]] = {s["name"]: [] for s in subfolders}
+    if thumb_by_name:
+        thumb_sql = f"""
+            WITH base AS (
+                SELECT relative_path, {sub_name_expr} AS sub_name,
+                    ROW_NUMBER() OVER (PARTITION BY {sub_name_expr} ORDER BY modified_at DESC) AS rn
+                FROM images
+                WHERE {where_clause}
             )
-            .order_by(Image.modified_at.desc())
-            .limit(4)
-        )
-        result = await session.execute(thumb_stmt)
-        sub["thumbnails"] = [r[0] for r in result.fetchall()]
-
-    await asyncio.gather(*[fetch_thumbnails(s) for s in subfolders])
+            SELECT relative_path, sub_name FROM base WHERE rn <= 4
+        """
+        thumb_result = await session.execute(text(thumb_sql), params)
+        for rel_path, sub_name in thumb_result.fetchall():
+            if sub_name in thumb_by_name and len(thumb_by_name[sub_name]) < 4:
+                thumb_by_name[sub_name].append(rel_path)
+        for sub in subfolders:
+            sub["thumbnails"] = thumb_by_name.get(sub["name"], [])
 
     # 5. 排序
     sort_col_map = {
