@@ -2291,24 +2291,94 @@ document.addEventListener('keydown', function(e) {
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var subs = data.subfolders || [];
+                    var newFolderRow = '<div id="move-new-folder-row" class="mb-3 flex-shrink-0">' +
+                        '<div id="move-new-folder-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors text-blue-600">' +
+                        '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>' +
+                        '<span class="text-sm font-medium">新建文件夹</span>' +
+                        '</div>' +
+                        '<div id="move-new-folder-input-row" class="hidden flex items-center gap-2 mt-2">' +
+                        '<input type="text" id="move-new-folder-input" placeholder="输入文件夹名称" class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">' +
+                        '<button type="button" class="move-new-folder-confirm px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">创建</button>' +
+                        '<button type="button" class="move-new-folder-cancel px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                        '</div>' +
+                        '<div id="move-new-folder-error" class="hidden mt-1 text-sm text-red-500"></div>' +
+                        '</div>';
+                    var content = '';
                     if (subs.length === 0) {
-                        listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
+                        content = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
                     } else {
-                        listEl.innerHTML = subs.map(function(s) {
+                        content = subs.map(function(s) {
                             return '<div class="move-folder-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
                                 '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
                                 '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
                                 (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
                                 '</div>';
                         }).join('');
-                        listEl.querySelectorAll('.move-folder-item').forEach(function(el) {
-                            el.addEventListener('click', function() {
-                                currentPath = el.getAttribute('data-path') || '';
-                                renderBreadcrumb();
-                                loadSubfolders();
-                            });
+                    }
+                    listEl.innerHTML = newFolderRow + content;
+                    var newFolderBtn = listEl.querySelector('#move-new-folder-btn');
+                    var inputRow = listEl.querySelector('#move-new-folder-input-row');
+                    var newFolderInput = listEl.querySelector('#move-new-folder-input');
+                    var newFolderConfirm = listEl.querySelector('.move-new-folder-confirm');
+                    var newFolderCancel = listEl.querySelector('.move-new-folder-cancel');
+                    var newFolderError = listEl.querySelector('#move-new-folder-error');
+                    if (newFolderBtn) {
+                        newFolderBtn.addEventListener('click', function() {
+                            newFolderBtn.classList.add('hidden');
+                            inputRow.classList.remove('hidden');
+                            inputRow.classList.add('flex');
+                            if (newFolderError) newFolderError.classList.add('hidden');
+                            if (newFolderInput) { newFolderInput.value = ''; setTimeout(function() { newFolderInput.focus(); }, 50); }
                         });
                     }
+                    if (newFolderCancel) {
+                        newFolderCancel.addEventListener('click', function() {
+                            inputRow.classList.add('hidden');
+                            inputRow.classList.remove('flex');
+                            if (newFolderBtn) newFolderBtn.classList.remove('hidden');
+                            if (newFolderError) newFolderError.classList.add('hidden');
+                        });
+                    }
+                    function doCreateNewFolder() {
+                        var name = newFolderInput ? newFolderInput.value.trim() : '';
+                        if (!name) { if (newFolderError) { newFolderError.textContent = '名称不能为空'; newFolderError.classList.remove('hidden'); } return; }
+                        if (/[\/\\]/.test(name) || name.includes('..')) { if (newFolderError) { newFolderError.textContent = '名称不能包含 / \\ 或 ..'; newFolderError.classList.remove('hidden'); } return; }
+                        if (newFolderConfirm) newFolderConfirm.disabled = true;
+                        if (newFolderConfirm) newFolderConfirm.textContent = '创建中...';
+                        fetch('/api/create-folder', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({path: currentPath, name: name})
+                        }).then(function(r) { return r.json(); }).then(function(data) {
+                            if (data.ok) {
+                                if (inputRow) { inputRow.classList.add('hidden'); inputRow.classList.remove('flex'); }
+                                if (newFolderBtn) newFolderBtn.classList.remove('hidden');
+                                if (newFolderError) newFolderError.classList.add('hidden');
+                                if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
+                                loadSubfolders();
+                            } else {
+                                if (newFolderError) { newFolderError.textContent = data.error || '创建失败'; newFolderError.classList.remove('hidden'); }
+                                if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
+                            }
+                        }).catch(function(err) {
+                            if (newFolderError) { newFolderError.textContent = '请求失败: ' + err; newFolderError.classList.remove('hidden'); }
+                            if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
+                        });
+                    }
+                    if (newFolderConfirm) newFolderConfirm.addEventListener('click', doCreateNewFolder);
+                    if (newFolderInput) {
+                        newFolderInput.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') { e.preventDefault(); doCreateNewFolder(); }
+                            if (e.key === 'Escape') { if (newFolderCancel) newFolderCancel.click(); }
+                        });
+                    }
+                    listEl.querySelectorAll('.move-folder-item').forEach(function(el) {
+                        el.addEventListener('click', function() {
+                            currentPath = el.getAttribute('data-path') || '';
+                            renderBreadcrumb();
+                            loadSubfolders();
+                        });
+                    });
                 })
                 .catch(function(err) {
                     listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
