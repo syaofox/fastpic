@@ -1677,10 +1677,15 @@ document.addEventListener('keydown', function(e) {
 
 // ---------- 重命名文件夹 ----------
 (function() {
-    window.showRenameFolderDialog = function() {
-        var folders = (window.getSelectedFolders && window.getSelectedFolders()) || [];
-        if (folders.length !== 1) return;
-        var folderPath = folders[0];
+    window.showRenameFolderDialog = function(folderPathFromToolbar) {
+        var folderPath;
+        if (folderPathFromToolbar !== undefined && folderPathFromToolbar !== '') {
+            folderPath = folderPathFromToolbar;
+        } else {
+            var folders = (window.getSelectedFolders && window.getSelectedFolders()) || [];
+            if (folders.length !== 1) return;
+            folderPath = folders[0];
+        }
         var currentName = folderPath.split('/').pop() || folderPath;
 
         var old = document.getElementById('rename-folder-dialog');
@@ -1727,20 +1732,31 @@ document.addEventListener('keydown', function(e) {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({path: folderPath, new_name: newName})
-            }).then(function(r) { return r.json(); }).then(function(data) {
-                if (data.ok) {
+            }).then(function(r) {
+                var ct = r.headers.get('content-type') || '';
+                if (ct.includes('application/json')) return r.json();
+                return r.text().then(function(t) { throw new Error(r.status + ' ' + (t || r.statusText).slice(0, 80)); });
+            }).then(function(data) {
+                if (data && data.ok) {
                     overlay.remove();
                     if (window.exitSelectMode) window.exitSelectMode();
+                    var newName = input.value.trim();
+                    var parentPath = folderPath.split('/').slice(0, -1).join('/');
+                    var newPath = parentPath ? parentPath + '/' + newName : newName;
+                    var marker = document.getElementById('current-path-marker');
+                    if (marker) marker.setAttribute('data-path', newPath);
+                    var pathInput = document.querySelector('[name=path]');
+                    if (pathInput) pathInput.value = newPath;
                     refreshGalleryFromModal();
                     if (window.refreshSidebar) window.refreshSidebar();
                 } else {
-                    errorEl.textContent = data.error || '重命名失败';
+                    errorEl.textContent = (data && (data.error || data.detail)) || '重命名失败';
                     errorEl.classList.remove('hidden');
                     confirmBtn.disabled = false;
                     confirmBtn.textContent = '重命名';
                 }
             }).catch(function(err) {
-                errorEl.textContent = '请求失败: ' + err;
+                errorEl.textContent = '请求失败: ' + (err && err.message ? err.message : String(err));
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
                 confirmBtn.textContent = '重命名';
@@ -1752,7 +1768,7 @@ document.addEventListener('keydown', function(e) {
         overlay.querySelector('.rename-cancel-btn').addEventListener('click', function() { overlay.remove(); });
         overlay.querySelector('.rename-confirm-btn').addEventListener('click', doRename);
         input.addEventListener('keydown', function(e) { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') overlay.remove(); });
-        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        // 不响应遮罩点击关闭，避免误触（只能通过取消按钮或 Esc 关闭）
     };
 })();
 

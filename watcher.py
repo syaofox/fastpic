@@ -27,7 +27,7 @@ from scanner import (
     get_media_metadata_and_thumbnail,
 )
 from utils.images import cache_filename
-from models import Image, async_session_factory
+from models import Image, async_session_factory, natural_sort_key
 from utils.image_records import create_image_record
 from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 from scan_state import begin_scan, end_scan

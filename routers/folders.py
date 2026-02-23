@@ -199,35 +199,39 @@ async def rename_folder(
     except OSError as e:
         return {"ok": False, "error": f"重命名失败: {e}"}
 
-    pf = path_filter_for_prefix(Image.relative_path, folder_path)
-    stmt = select(Image).where(pf)
-    result = await session.execute(stmt)
-    images = list(result.scalars().all())
-    for img in images:
-        suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
-        new_rel = new_prefix + suffix
-        old_cache = CACHE_DIR / cache_filename(img.relative_path)
-        if old_cache.exists():
-            old_cache.unlink(missing_ok=True)
-        img.relative_path = new_rel
-        img.filename = Path(new_rel).name
-        img.filename_natural = natural_sort_key(img.filename)
-        img.relative_path_natural = natural_sort_key(new_rel)
-        new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-        if new_full.exists() and new_full.is_file():
-            img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-            img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-            new_cache = CACHE_DIR / cache_filename(new_rel)
-            if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-                await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
-            else:
-                await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
-        session.add(img)
+    try:
+        pf = path_filter_for_prefix(Image.relative_path, folder_path)
+        stmt = select(Image).where(pf)
+        result = await session.execute(stmt)
+        images = list(result.scalars().all())
+        for img in images:
+            suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+            new_rel = new_prefix + suffix
+            old_cache = CACHE_DIR / cache_filename(img.relative_path)
+            if old_cache.exists():
+                old_cache.unlink(missing_ok=True)
+            img.relative_path = new_rel
+            img.filename = Path(new_rel).name
+            img.filename_natural = natural_sort_key(img.filename)
+            img.relative_path_natural = natural_sort_key(new_rel)
+            new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+            if new_full.exists() and new_full.is_file():
+                img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+                img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
+                new_cache = CACHE_DIR / cache_filename(new_rel)
+                if new_full.suffix.lower() in VIDEO_EXTENSIONS:
+                    await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
+                else:
+                    await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+            session.add(img)
 
-    invalidate_folder_tree_cache()
-    await session.commit()
-    print(f"[api] 重命名文件夹: {folder_path} → {new_prefix}", flush=True)
-    return {"ok": True, "path": new_prefix}
+        invalidate_folder_tree_cache()
+        await session.commit()
+        print(f"[api] 重命名文件夹: {folder_path} → {new_prefix}", flush=True)
+        return {"ok": True, "path": new_prefix}
+    except Exception as e:
+        await session.rollback()
+        return {"ok": False, "error": f"更新数据库失败: {e}"}
 
 
 @router.post("/delete-folders")
