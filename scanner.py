@@ -14,7 +14,7 @@ from utils.images import cache_filename
 from utils.image_records import create_image_record
 from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".ts"}
 THUMBNAIL_WIDTH = 300
 # 多进程缩略图：并行度与批大小

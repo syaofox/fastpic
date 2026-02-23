@@ -2292,7 +2292,7 @@ document.addEventListener('keydown', function(e) {
                     '<p class="text-sm text-slate-600 mb-1">拖拽图片或视频到此处，或</p>' +
                     '<button type="button" class="browse-btn text-sm text-blue-600 hover:text-blue-700 font-medium underline">浏览文件</button>' +
                     '<input type="file" id="upload-file-input" multiple accept="image/*,video/*,.ts,video/mp2t" class="hidden">' +
-                    '<p class="text-xs text-slate-400 mt-2">支持 JPG、PNG、GIF、WebP、BMP、MP4、WebM、MOV、MKV、TS</p>' +
+                    '<p class="text-xs text-slate-400 mt-2">支持 JPG、PNG、GIF、WebP、AVIF、BMP、MP4、WebM、MOV、MKV、TS</p>' +
                 '</div>' +
                 '<div class="mt-3 flex items-center gap-3 text-sm text-slate-600">' +
                     '<span class="flex-shrink-0">重复文件：</span>' +
@@ -2363,7 +2363,7 @@ document.addEventListener('keydown', function(e) {
         }
 
         function addFiles(files) {
-            var mediaExts = /\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|mov|mkv|ts)(\?|$)/i;
+            var mediaExts = /\.(jpg|jpeg|png|gif|webp|avif|bmp|mp4|webm|mov|mkv|ts)(\?|$)/i;
             for (var i = 0; i < files.length; i++) {
                 var t = (files[i].type || '').toLowerCase();
                 var name = (files[i].name || '').toLowerCase();

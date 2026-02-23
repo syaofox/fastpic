@@ -488,6 +488,7 @@ class CachedStaticFiles(StaticFiles):
 
 STATIC_DIR.mkdir(exist_ok=True)
 mimetypes.add_type("video/mp2t", ".ts")
+mimetypes.add_type("image/avif", ".avif")
 app.mount(
     "/photos",
     CachedStaticFiles(directory=str(PHOTOS_DIR), cache_control="public, max-age=3600"),
