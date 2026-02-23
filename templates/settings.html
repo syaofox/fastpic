@@ -67,8 +67,9 @@
                 </div>
                 <div id="stats-container" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div class="text-center p-3 bg-slate-50 rounded-lg">
-                        <div class="text-2xl font-bold text-slate-800" id="stat-images">-</div>
-                        <div class="text-xs text-slate-500 mt-1">图片总数</div>
+                        <div class="text-2xl font-bold text-slate-800" id="stat-files">-</div>
+                        <div class="text-xs text-slate-500 mt-1">文件总数</div>
+                        <div class="text-xs text-slate-400 mt-0.5" id="stat-files-breakdown"></div>
                     </div>
                     <div class="text-center p-3 bg-slate-50 rounded-lg">
                         <div class="text-2xl font-bold text-slate-800" id="stat-folders">-</div>
@@ -720,7 +721,11 @@ function formatSize(bytes) {
 // 加载统计信息
 function loadStats() {
     fetch('/api/stats').then(function(r) { return r.json(); }).then(function(data) {
-        document.getElementById('stat-images').textContent = data.total_images.toLocaleString();
+        var imgCount = data.image_count || 0;
+        var vidCount = data.video_count || 0;
+        document.getElementById('stat-files').textContent = (imgCount + vidCount).toLocaleString();
+        document.getElementById('stat-files-breakdown').textContent =
+            '(图片:' + imgCount.toLocaleString() + ', 视频:' + vidCount.toLocaleString() + ')';
         document.getElementById('stat-folders').textContent = data.folder_count.toLocaleString();
         document.getElementById('stat-size').textContent = formatSize(data.total_size);
         document.getElementById('stat-cache').textContent = formatSize(data.cache_size) + ' (' + data.cache_count + ')';

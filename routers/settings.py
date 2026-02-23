@@ -108,13 +108,20 @@ async def scan_duplicates(
 @router.get("/api/stats")
 async def get_stats(session: AsyncSession = Depends(get_async_session)):
     """获取数据库和文件系统统计信息"""
-    total_images = (await session.execute(select(func.count(Image.id)))).scalar() or 0
+    image_count = (
+        await session.execute(select(func.count(Image.id)).where(Image.media_type == "image"))
+    ).scalar() or 0
+    video_count = (
+        await session.execute(select(func.count(Image.id)).where(Image.media_type == "video"))
+    ).scalar() or 0
     total_size = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
     folder_count, cache_count, cache_size = await asyncio.to_thread(
         stats_folder_and_cache, PHOTOS_DIR, CACHE_DIR
     )
     return {
-        "total_images": total_images,
+        "image_count": image_count,
+        "video_count": video_count,
+        "total_files": image_count + video_count,
         "total_size": total_size,
         "folder_count": folder_count,
         "cache_count": cache_count,
