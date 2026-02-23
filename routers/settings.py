@@ -52,8 +52,12 @@ async def trigger_scan():
 @router.post("/api/cleanup")
 async def trigger_cleanup():
     """手动触发数据库清理同步"""
-    result = await cleanup_database(PHOTOS_DIR, CACHE_DIR)
-    return result
+    begin_scan()
+    try:
+        result = await cleanup_database(PHOTOS_DIR, CACHE_DIR)
+        return result
+    finally:
+        end_scan()
 
 
 @router.post("/api/scan-duplicates")

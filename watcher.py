@@ -30,7 +30,7 @@ from utils.images import cache_filename
 from models import Image, async_session_factory, natural_sort_key
 from utils.image_records import create_image_record
 from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
-from scan_state import begin_scan, end_scan
+from scan_state import begin_scan, end_scan, is_scanning
 
 from sqlmodel import select
 
@@ -247,6 +247,12 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
         key = src
         path_events[key] = ev
 
+    # 若有扫描/清理在进行，暂不处理，将事件放回队列
+    if is_scanning():
+        for ev in path_events.values():
+            queue.put(ev)
+        return
+
     begin_scan()
     try:
         processed = 0
@@ -267,6 +273,9 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
             print(f"[watcher] 批量处理 {processed} 个文件变化", flush=True)
     finally:
         end_scan()
+        if processed > 0:
+            from utils.folder_tree import invalidate_folder_tree_cache
+            invalidate_folder_tree_cache()
 
 
 def start_watcher(photos_dir: Path, cache_dir: Path, loop: asyncio.AbstractEventLoop) -> Observer:
