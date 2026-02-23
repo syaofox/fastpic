@@ -4,11 +4,21 @@ import time
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlmodel import select
 
 from models import Image, natural_sort_key
 
-from .path_utils import escape_like
+from .path_utils import escape_like, LIKE_ESCAPE
+
+
+def _extract_direct_child(path_prefix: str) -> str:
+    """生成 SQL 表达式：从 relative_path 提取直接子文件夹名。
+    path_prefix 如 '2024/01/'，relative_path 如 '2024/01/15/photo.jpg' -> '15'
+    """
+    if not path_prefix:
+        return "SUBSTRING_INDEX(relative_path, '/', 1)"
+    prefix_len = len(path_prefix)
+    rest_expr = f"SUBSTRING(relative_path, {prefix_len + 1})"
+    return f"SUBSTRING_INDEX({rest_expr}, '/', 1)"
 
 
 def get_folder_tree(photos_dir: Path, rel_paths: list[str]) -> list[list[str]]:
@@ -95,20 +105,6 @@ async def get_folder_tree_cached(
         return folder_tree, nested_tree, folder_counts
 
 
-def _extract_direct_child_sqlite(path_prefix: str) -> str:
-    """生成 SQLite 表达式：从 relative_path 提取直接子文件夹名。
-    path_prefix 如 '2024/01/'，relative_path 如 '2024/01/15/photo.jpg' -> '15'
-    """
-    if not path_prefix:
-        # 根路径：取第一段，如 '2024/01/photo.jpg' -> '2024'
-        return "SUBSTR(relative_path, 1, INSTR(relative_path || '/', '/') - 1)"
-    prefix_len = len(path_prefix)
-    # rest = SUBSTR(relative_path, prefix_len + 1) 即 path_prefix 之后的部分
-    # sub_name = rest 的第一段（到下一个 '/' 或结尾）
-    rest_expr = f"SUBSTR(relative_path, {prefix_len + 1})"
-    return f"SUBSTR({rest_expr}, 1, INSTR({rest_expr} || '/', '/') - 1)"
-
-
 async def get_subfolders(
     session,
     photos_dir: Path,
@@ -117,24 +113,21 @@ async def get_subfolders(
     sort_by: str = "filename",
     sort_order: str = "asc",
 ) -> list[dict]:
-    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。
-    使用 SQL 聚合替代全量拉取，避免在大量图片时卡顿。
-    """
+    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。"""
     path_prefix = path + "/" if path else ""
-    sub_name_expr = _extract_direct_child_sqlite(path_prefix)
+    sub_name_expr = _extract_direct_child(path_prefix)
 
     if path:
         escaped = escape_like(path_prefix)
         where_clause = (
-            f"relative_path LIKE :like_prefix ESCAPE '\\' "
-            f"AND relative_path LIKE :like_sub ESCAPE '\\'"
+            f"relative_path LIKE :like_prefix ESCAPE '{LIKE_ESCAPE}' "
+            f"AND relative_path LIKE :like_sub ESCAPE '{LIKE_ESCAPE}'"
         )
         params = {"like_prefix": f"{escaped}%", "like_sub": f"{escaped}%/%"}
     else:
         where_clause = "relative_path LIKE '%/%'"
         params = {}
 
-    # 1. SQL 聚合：直接子文件夹的 count, max(modified_at), max(file_size)
     agg_sql = f"""
         SELECT
             {sub_name_expr} AS sub_name,
@@ -148,7 +141,6 @@ async def get_subfolders(
     agg_result = await session.execute(text(agg_sql), params)
     agg_rows = agg_result.fetchall()
 
-    # 2. 文件系统：补充数据库中无图片的空文件夹
     fs_dir = photos_dir / path if path else photos_dir
     db_names = {r[0] for r in agg_rows}
     if fs_dir.is_dir():
@@ -159,7 +151,6 @@ async def get_subfolders(
             if child.name not in db_names:
                 agg_rows.append((child.name, 0, 0.0, 0))
 
-    # 3. 构建 subfolders 列表
     subfolders: list[dict] = []
     for row in agg_rows:
         name, count, max_mod, max_sz = row
@@ -175,7 +166,6 @@ async def get_subfolders(
             "_sort_key_file_size": int(max_sz or 0),
         })
 
-    # 4. 单次 SQL 查询获取所有子文件夹的缩略图（ROW_NUMBER 每文件夹取 4 张）
     thumb_by_name: dict[str, list[str]] = {s["name"]: [] for s in subfolders}
     if thumb_by_name:
         thumb_sql = f"""
@@ -194,7 +184,6 @@ async def get_subfolders(
         for sub in subfolders:
             sub["thumbnails"] = thumb_by_name.get(sub["name"], [])
 
-    # 5. 排序
     sort_col_map = {
         "filename": "_sort_key_filename",
         "folder_filename": "_sort_key_folder_filename",

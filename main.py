@@ -20,7 +20,7 @@ from scan_state import begin_scan, end_scan
 from watcher import start_watcher
 from app_common import templates
 from routers import auth, tags, images, folders, settings
-from utils.path_utils import escape_like, path_filter_for_prefix
+from utils.path_utils import escape_like, path_filter_for_prefix, LIKE_ESCAPE
 from utils.folder_tree import get_folder_tree_cached, get_subfolders
 
 
@@ -189,7 +189,7 @@ async def gallery(
     has_filters = False
     if filter_filename:
         escaped_fn = escape_like(filter_filename)
-        stmt = stmt.where(Image.filename.ilike(f"%{escaped_fn}%", escape="\\"))
+        stmt = stmt.where(Image.filename.ilike(f"%{escaped_fn}%", escape=LIKE_ESCAPE))
         has_filters = True
     _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
     _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
@@ -226,7 +226,7 @@ async def gallery(
     if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
-            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
+            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
         elif not filter_tag:
             stmt = stmt.where(~Image.relative_path.like("%/%"))
     count_stmt = select(func.count(Image.id))
@@ -235,7 +235,7 @@ async def gallery(
     if search:
         count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
     if filter_filename:
-        count_stmt = count_stmt.where(Image.filename.ilike(f"%{escape_like(filter_filename)}%", escape="\\"))
+        count_stmt = count_stmt.where(Image.filename.ilike(f"%{escape_like(filter_filename)}%", escape=LIKE_ESCAPE))
     if _size_min is not None:
         count_stmt = count_stmt.where(Image.file_size >= _size_min)
     if _size_max is not None:
@@ -251,7 +251,7 @@ async def gallery(
     if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
-            count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
+            count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
         elif not filter_tag:
             count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
 
@@ -391,12 +391,12 @@ async def api_folder_images(
     if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
-            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape="\\"))
+            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
         else:
             stmt = stmt.where(~Image.relative_path.like("%/%"))
     filter_filename = (filter_filename or "").strip()
     if filter_filename:
-        stmt = stmt.where(Image.filename.ilike(f"%{escape_like(filter_filename)}%", escape="\\"))
+        stmt = stmt.where(Image.filename.ilike(f"%{escape_like(filter_filename)}%", escape=LIKE_ESCAPE))
     _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
     _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
     if _size_min is not None:

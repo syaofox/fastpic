@@ -23,7 +23,10 @@ router = APIRouter(tags=["settings"])
 @router.get("/settings")
 async def settings_page(request: Request):
     """设置页面"""
-    return templates.TemplateResponse("settings.html", {"request": request})
+    return templates.TemplateResponse(
+        "settings.html",
+        {"request": request, "db_display": "MariaDB"},
+    )
 
 
 @router.get("/api/scan-status")

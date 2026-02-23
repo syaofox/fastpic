@@ -1,10 +1,13 @@
 """路径工具：SQL LIKE 转义、路径校验、路径过滤条件"""
 from pathlib import Path
 
+# MariaDB 不支持 ESCAPE '\\' 会报语法错误，使用 !
+LIKE_ESCAPE = "!"
+
 
 def escape_like(value: str) -> str:
-    """转义 SQL LIKE 中的 % 和 _，避免被当作通配符"""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    """转义 SQL LIKE 中的 % 和 _"""
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def resolve_and_validate_relative_path(
@@ -32,7 +35,7 @@ def path_filter_for_prefix(relative_path_column, prefix: str, include_children: 
     escaped = escape_like(prefix)
     if include_children:
         return (
-            relative_path_column.like(f"{escaped}/%", escape="\\")
+            relative_path_column.like(f"{escaped}/%", escape=LIKE_ESCAPE)
             | (relative_path_column == prefix)
         )
     return relative_path_column == prefix

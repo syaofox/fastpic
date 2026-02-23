@@ -1,24 +1,24 @@
 import os
 import re
+import sys
 
-from sqlalchemy import event
 from sqlmodel import Field, SQLModel, create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-# 数据库存放在 data/ 目录下，支持通过环境变量覆盖
-_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.environ.get("DATA_DIR", "data"))
-os.makedirs(_DATA_DIR, exist_ok=True)
-DATABASE_URL = f"sqlite:///{_DATA_DIR}/fastpic.db"
-ASYNC_DATABASE_URL = f"sqlite+aiosqlite:///{_DATA_DIR}/fastpic.db"
+# 数据库配置：仅支持 MariaDB，需设置 MYSQL_HOST
+_MYSQL_HOST = os.environ.get("MYSQL_HOST", "").strip()
+_MYSQL_USER = os.environ.get("MYSQL_USER", "fastpic")
+_MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "fastpic")
+_MYSQL_DATABASE = os.environ.get("MYSQL_DATABASE", "fastpic")
 
+if not _MYSQL_HOST:
+    print("错误: 请设置 MYSQL_HOST 环境变量连接 MariaDB", file=sys.stderr)
+    sys.exit(1)
 
-def _set_sqlite_pragma(dbapi_conn, connection_record):
-    """启用 WAL 模式与 busy_timeout，提升并发读写性能"""
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
-    cursor.close()
-
+_db_user = _MYSQL_USER
+_db_pass = _MYSQL_PASSWORD.replace("%", "%%")
+DATABASE_URL = f"mysql+pymysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
+ASYNC_DATABASE_URL = f"mysql+aiomysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
 
 # 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
 _NATURAL_PAD = 10
@@ -58,17 +58,13 @@ class ImageTag(SQLModel, table=True):
     tag_id: int = Field(foreign_key="tags.id", primary_key=True)
 
 
-# 同步引擎用于 create_all
 sync_engine = create_engine(DATABASE_URL, echo=False)
-# 异步引擎：多连接池支持并行查询（count/subfolders/images 同时执行）
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,
     echo=False,
     pool_size=10,
     max_overflow=20,
 )
-event.listens_for(sync_engine, "connect")(_set_sqlite_pragma)
-event.listens_for(async_engine.sync_engine, "connect")(_set_sqlite_pragma)
 async_session_factory = async_sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
 )
@@ -79,13 +75,14 @@ def _run_natural_sort_migration() -> None:
     from sqlalchemy import text
 
     with sync_engine.connect() as conn:
-        r = conn.execute(text("PRAGMA table_info(images)"))
-        cols = {row[1] for row in r.fetchall()}
-        if "filename_natural" not in cols:
-            conn.execute(text("ALTER TABLE images ADD COLUMN filename_natural TEXT"))
-            conn.execute(text("ALTER TABLE images ADD COLUMN relative_path_natural TEXT"))
+        r = conn.execute(text(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'filename_natural'"
+        ))
+        if r.fetchone() is None:
+            conn.execute(text("ALTER TABLE images ADD COLUMN filename_natural VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE images ADD COLUMN relative_path_natural VARCHAR(512)"))
             conn.commit()
-        # 回填：对空值用 natural_sort_key 生成并更新
         r = conn.execute(
             text("SELECT id, filename, relative_path FROM images WHERE filename_natural IS NULL")
         )
@@ -100,13 +97,15 @@ def _run_natural_sort_migration() -> None:
                     {"nfn": nfn, "nrp": nrp, "kid": kid},
                 )
             conn.commit()
-        # 创建索引以加速排序
         try:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_images_filename_natural ON images(filename_natural)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_images_relative_path_natural ON images(relative_path_natural)"))
-            conn.commit()
+            conn.execute(text("CREATE INDEX ix_images_filename_natural ON images(filename_natural)"))
         except Exception:
             pass
+        try:
+            conn.execute(text("CREATE INDEX ix_images_relative_path_natural ON images(relative_path_natural)"))
+        except Exception:
+            pass
+        conn.commit()
 
 
 def _run_media_type_migration() -> None:
@@ -114,17 +113,19 @@ def _run_media_type_migration() -> None:
     from sqlalchemy import text
 
     with sync_engine.connect() as conn:
-        r = conn.execute(text("PRAGMA table_info(images)"))
-        cols = {row[1] for row in r.fetchall()}
-        if "media_type" not in cols:
-            conn.execute(text("ALTER TABLE images ADD COLUMN media_type TEXT DEFAULT 'image'"))
+        r = conn.execute(text(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'media_type'"
+        ))
+        if r.fetchone() is None:
+            conn.execute(text("ALTER TABLE images ADD COLUMN media_type VARCHAR(32) DEFAULT 'image'"))
             conn.execute(text("UPDATE images SET media_type = 'image' WHERE media_type IS NULL"))
             conn.commit()
         try:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_images_media_type ON images(media_type)"))
-            conn.commit()
+            conn.execute(text("CREATE INDEX ix_images_media_type ON images(media_type)"))
         except Exception:
             pass
+        conn.commit()
 
 
 def _run_tags_migration() -> None:
@@ -132,17 +133,23 @@ def _run_tags_migration() -> None:
     from sqlalchemy import text
 
     with sync_engine.connect() as conn:
-        r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='tags'"))
+        r = conn.execute(text(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tags'"
+        ))
         if r.fetchone() is None:
             conn.execute(text(
-                "CREATE TABLE tags (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, name VARCHAR NOT NULL)"
+                "CREATE TABLE tags (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL)"
             ))
             conn.execute(text("CREATE UNIQUE INDEX ix_tags_name ON tags (name)"))
             conn.commit()
-        r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='image_tags'"))
+        r = conn.execute(text(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'image_tags'"
+        ))
         if r.fetchone() is None:
             conn.execute(text(
-                "CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, "
+                "CREATE TABLE image_tags (image_id BIGINT NOT NULL, tag_id BIGINT NOT NULL, "
                 "PRIMARY KEY (image_id, tag_id), "
                 "FOREIGN KEY(image_id) REFERENCES images (id), FOREIGN KEY(tag_id) REFERENCES tags (id))"
             ))

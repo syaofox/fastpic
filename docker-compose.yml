@@ -1,4 +1,27 @@
 services:
+  mariadb:
+    image: mariadb:11
+    container_name: fastpic-mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fastpic}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fastpic}
+      MYSQL_USER: ${MYSQL_USER:-fastpic}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-fastpic}
+    # 性能调优：可通过 MARIADB_BUFFER_POOL_SIZE、MARIADB_LOG_FILE_SIZE 覆盖
+    command:
+      - mariadbd
+      - --innodb-buffer-pool-size=${MARIADB_BUFFER_POOL_SIZE:-4028M}
+      - --innodb-log-file-size=${MARIADB_LOG_FILE_SIZE:-512M}
+      - --transaction-isolation=READ-COMMITTED
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   fastpic:
     build:
       context: .
@@ -7,22 +30,25 @@ services:
         PGID: ${PGID:-1000}
     container_name: fastpic
     restart: unless-stopped
-    # 以宿主用户身份运行，确保对挂载卷有读写权限
+    depends_on:
+      mariadb:
+        condition: service_healthy
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8000:8000"
     environment:
-      # 时区（环境变量兜底，优先使用挂载的宿主时区文件）
       - TZ=${TZ:-Asia/Shanghai}
-      # 访问密码（留空或不设置则不启用密码保护）
       - ACCESS_PASSWORD=${ACCESS_PASSWORD:-0928}
+      - MYSQL_HOST=mariadb
+      - MYSQL_USER=${MYSQL_USER:-fastpic}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-fastpic}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-fastpic}
     volumes:
-      # 宿主时区同步（只读挂载）
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      # 数据库（含 SQLite WAL/journal 文件）
       - ./data:/app/data
-      # 缩略图缓存
       - ./cache:/app/cache
-      # 图片文件夹
       - ./photos:/app/photos
+
+volumes:
+  mariadb_data:

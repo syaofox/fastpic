@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from models import Image, Tag, ImageTag, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas import AddTagsRequest, RenameTagRequest, MergeTagRequest, BatchDeleteTagsRequest
-from utils.path_utils import escape_like
+from utils.path_utils import escape_like, LIKE_ESCAPE
 
 router = APIRouter(prefix="/api", tags=["tags"])
 
@@ -29,7 +29,7 @@ async def list_tags(
     )
     if q:
         q_escaped = escape_like(q.strip())
-        stmt = stmt.where(Tag.name.ilike(f"%{q_escaped}%", escape="\\"))
+        stmt = stmt.where(Tag.name.ilike(f"%{q_escaped}%", escape=LIKE_ESCAPE))
     stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     rows = result.fetchall()
