@@ -83,6 +83,15 @@ class PathCountCache(SQLModel, table=True):
     updated_at: float = 0
 
 
+class FolderThumbnail(SQLModel, table=True):
+    """用户指定的文件夹缩略图，优先于自动选取。同一文件夹最多 4 张。"""
+    __tablename__ = "folder_thumbnails"
+
+    folder_path: str = Field(primary_key=True)
+    image_relative_path: str = Field(primary_key=True)
+    display_order: int = 0
+
+
 sync_engine = create_engine(DATABASE_URL, echo=False)
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,

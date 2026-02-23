@@ -59,6 +59,10 @@ class CreateFolderRequest(BaseModel):
     name: str
 
 
+class AddFolderThumbnailRequest(BaseModel):
+    relative_path: str  # 图片相对路径，如 "2024/01/15/photo.jpg"，需在该文件夹下（含子目录）
+
+
 class RenameFolderRequest(BaseModel):
     path: str  # 完整路径，如 "2024/01"
     new_name: str  # 新文件夹名（不含路径）

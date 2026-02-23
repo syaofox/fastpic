@@ -5,13 +5,13 @@ import shutil
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR
-from models import Image, get_async_session, natural_sort_key
+from models import Image, FolderThumbnail, get_async_session, natural_sort_key
 from scanner import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -29,6 +29,7 @@ from schemas import (
     RenameImageRequest,
     BatchRenameInfoRequest,
     BatchRenameRequest,
+    AddFolderThumbnailRequest,
 )
 from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.unique_path import unique_path
@@ -786,6 +787,66 @@ async def create_folder(body: CreateFolderRequest):
     invalidate_folder_tree_cache()
     print(f"[api] 创建文件夹: {rel}", flush=True)
     return {"ok": True, "path": rel}
+
+
+@router.post("/folders/{folder_path:path}/thumbnails")
+async def add_folder_thumbnail(
+    folder_path: str,
+    body: AddFolderThumbnailRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """将指定图片设为文件夹缩略图（图片需在该文件夹下含子目录）。最多 4 张，后添加的排在后面。"""
+    folder_path = normalize_path(folder_path, allow_empty=False)
+    if folder_path is None:
+        raise HTTPException(status_code=400, detail="文件夹路径不合法")
+    rel_path = normalize_path(body.relative_path, allow_empty=False)
+    if rel_path is None:
+        raise HTTPException(status_code=400, detail="图片路径不合法")
+    if rel_path != folder_path and not rel_path.startswith(folder_path + "/"):
+        raise HTTPException(status_code=400, detail="图片路径不在该文件夹下")
+    img = await session.execute(select(Image).where(Image.relative_path == rel_path))
+    img = img.scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="图片不存在或已删除")
+    existing = await session.execute(
+        select(FolderThumbnail).where(FolderThumbnail.folder_path == folder_path)
+    )
+    existing_list = list(existing.scalars().all())
+    if len(existing_list) >= 4:
+        raise HTTPException(status_code=400, detail="该文件夹缩略图已达上限（4 张）")
+    if any(ft.image_relative_path == rel_path for ft in existing_list):
+        raise HTTPException(status_code=400, detail="该图片已是缩略图")
+    display_order = max((ft.display_order for ft in existing_list), default=-1) + 1
+    session.add(FolderThumbnail(folder_path=folder_path, image_relative_path=rel_path, display_order=display_order))
+    await session.commit()
+    return {"ok": True, "folder_path": folder_path, "relative_path": rel_path}
+
+
+@router.delete("/folders/{folder_path:path}/thumbnails/{image_path:path}")
+async def remove_folder_thumbnail(
+    folder_path: str,
+    image_path: str,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """移除文件夹的指定缩略图。"""
+    folder_path = normalize_path(folder_path, allow_empty=False)
+    if folder_path is None:
+        raise HTTPException(status_code=400, detail="文件夹路径不合法")
+    rel_path = normalize_path(image_path, allow_empty=False)
+    if rel_path is None:
+        raise HTTPException(status_code=400, detail="图片路径不合法")
+    result = await session.execute(
+        select(FolderThumbnail).where(
+            FolderThumbnail.folder_path == folder_path,
+            FolderThumbnail.image_relative_path == rel_path,
+        )
+    )
+    ft = result.scalar_one_or_none()
+    if not ft:
+        raise HTTPException(status_code=404, detail="该缩略图不存在")
+    await session.delete(ft)
+    await session.commit()
+    return {"ok": True}
 
 
 @router.get("/subfolders")

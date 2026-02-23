@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlmodel import select
 from sqlalchemy import text
 
-from models import Image, natural_sort_key
+from models import Image, FolderThumbnail, natural_sort_key
 
 from .path_utils import escape_like, LIKE_ESCAPE
 
@@ -69,6 +69,100 @@ def build_nested_tree(flat_folders: list[list[str]]) -> dict:
                 d[part] = {}
             d = d[part]
     return root
+
+
+async def _empty_list_coro() -> list:
+    return []
+
+
+async def _get_user_thumbnails(session, folder_paths: list[str], limit: int = 4) -> dict[str, list[str]]:
+    """获取用户指定的文件夹缩略图，按 display_order 排序，每文件夹最多 limit 张。"""
+    if not folder_paths:
+        return {}
+    stmt = (
+        select(FolderThumbnail.folder_path, FolderThumbnail.image_relative_path, FolderThumbnail.display_order)
+        .where(FolderThumbnail.folder_path.in_(folder_paths))
+        .order_by(FolderThumbnail.folder_path, FolderThumbnail.display_order)
+    )
+    result = await session.execute(stmt)
+    rows = result.fetchall()
+    out: dict[str, list[str]] = {fp: [] for fp in folder_paths}
+    for folder_path, rel_path, _ in rows:
+        if folder_path in out and len(out[folder_path]) < limit:
+            out[folder_path].append(rel_path)
+    return out
+
+
+async def _get_direct_layer_thumbnails(
+    session,
+    folder_path: str,
+    limit: int = 4,
+    exclude_paths: set[str] | None = None,
+) -> list[str]:
+    """查询 folder_path 下直接一层的图片（不含子目录），按 modified_at DESC 取前 limit 张。
+    条件：relative_path LIKE 'folder/%' AND NOT LIKE 'folder/%/%'，可利用索引。"""
+    exclude_paths = exclude_paths or set()
+    escaped = escape_like(folder_path)
+    like_prefix = f"{escaped}/%"
+    like_prefix_sub = f"{escaped}/%/%"
+    sql = text(
+        "SELECT relative_path FROM images "
+        f"WHERE relative_path LIKE :like_prefix ESCAPE '{LIKE_ESCAPE}' "
+        f"AND relative_path NOT LIKE :like_prefix_sub ESCAPE '{LIKE_ESCAPE}' "
+        "ORDER BY modified_at DESC LIMIT :lim"
+    )
+    result = await session.execute(
+        sql,
+        {"like_prefix": like_prefix, "like_prefix_sub": like_prefix_sub, "lim": limit + 20},
+    )
+    out: list[str] = []
+    for row in result.fetchall():
+        rp = row[0]
+        if rp in exclude_paths:
+            continue
+        out.append(rp)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def get_root_subfolders_from_counts(
+    folder_counts: dict[str, int],
+    session,
+    limit_thumbnails: int = 4,
+) -> list[dict]:
+    """从 folder_counts 提取根路径下的直接子文件夹，避免 path='' 时 get_subfolders 的全表扫描。
+    使用 _get_direct_layer_thumbnails 获取每层缩略图（索引友好）。
+    返回格式与 get_subfolders 兼容：[{name, full_path, thumbnails, image_count}, ...]，按名称自然排序。"""
+    result: list[dict] = []
+    for path_key, count in folder_counts.items():
+        if path_key == "" or "/" in path_key:
+            continue
+        result.append({
+            "name": path_key,
+            "full_path": path_key,
+            "thumbnails": [],
+            "image_count": count,
+        })
+    result.sort(key=lambda s: natural_sort_key(s["name"]))
+    folder_paths = [sub["full_path"] for sub in result]
+    user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=limit_thumbnails)
+    thumb_tasks = []
+    for sub in result:
+        fp = sub["full_path"]
+        ut = user_thumbs.get(fp, [])
+        need = limit_thumbnails - len(ut)
+        thumb_tasks.append(
+            _get_direct_layer_thumbnails(session, fp, limit=need, exclude_paths=set(ut))
+            if need > 0
+            else _empty_list_coro()
+        )
+    auto_results = await asyncio.gather(*thumb_tasks)
+    for sub, auto_thumbs in zip(result, auto_results):
+        fp = sub["full_path"]
+        ut = user_thumbs.get(fp, [])
+        sub["thumbnails"] = (ut + list(auto_thumbs))[:limit_thumbnails]
+    return result
 
 
 _FOLDER_TREE_CACHE_TTL = 60.0
@@ -229,23 +323,23 @@ async def get_subfolders(
             "_sort_key_file_size": int(max_sz or 0),
         })
 
-    thumb_by_name: dict[str, list[str]] = {s["name"]: [] for s in subfolders}
-    if thumb_by_name:
-        thumb_sql = f"""
-            WITH base AS (
-                SELECT relative_path, {sub_name_expr} AS sub_name,
-                    ROW_NUMBER() OVER (PARTITION BY {sub_name_expr} ORDER BY modified_at DESC) AS rn
-                FROM images
-                WHERE {where_clause}
-            )
-            SELECT relative_path, sub_name FROM base WHERE rn <= 4
-        """
-        thumb_result = await session.execute(text(thumb_sql), params)
-        for rel_path, sub_name in thumb_result.fetchall():
-            if sub_name in thumb_by_name and len(thumb_by_name[sub_name]) < 4:
-                thumb_by_name[sub_name].append(rel_path)
-        for sub in subfolders:
-            sub["thumbnails"] = thumb_by_name.get(sub["name"], [])
+    folder_paths = [sub["full_path"] for sub in subfolders]
+    user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=4)
+    thumb_tasks = []
+    for sub in subfolders:
+        fp = sub["full_path"]
+        ut = user_thumbs.get(fp, [])
+        need = 4 - len(ut)
+        thumb_tasks.append(
+            _get_direct_layer_thumbnails(session, fp, limit=need, exclude_paths=set(ut))
+            if need > 0
+            else _empty_list_coro()
+        )
+    auto_results = await asyncio.gather(*thumb_tasks)
+    for sub, auto_thumbs in zip(subfolders, auto_results):
+        fp = sub["full_path"]
+        ut = user_thumbs.get(fp, [])
+        sub["thumbnails"] = (ut + list(auto_thumbs))[:4]
 
     sort_col_map = {
         "filename": "_sort_key_filename",

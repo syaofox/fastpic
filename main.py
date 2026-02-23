@@ -31,6 +31,7 @@ from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.folder_tree import (
     get_folder_tree_cached,
     get_subfolders,
+    get_root_subfolders_from_counts,
     _FOLDER_TREE_MAX_DEPTH,
 )
 from utils.query_builder import (
@@ -42,7 +43,7 @@ from utils.query_builder import (
 
 
 async def _background_scan():
-    """后台扫描包装：先清理再扫描，捕获并打印异常"""
+    """后台扫描包装：先清理再扫描，捕获并打印异常。扫描完成后预热 folder_tree 缓存。"""
     begin_scan()
     try:
         await cleanup_database(PHOTOS_DIR, CACHE_DIR)
@@ -55,6 +56,12 @@ async def _background_scan():
         traceback.print_exc()
     finally:
         end_scan()
+        try:
+            async with async_session_factory() as session:
+                await get_folder_tree_cached(PHOTOS_DIR, session=session)
+            print("[scan] folder_tree 缓存已预热")
+        except Exception as e:
+            print(f"[scan] folder_tree 预热失败: {e}")
 
 
 @asynccontextmanager
@@ -161,10 +168,7 @@ async def _set_path_count_to_db(path: str, mode: str, total: int) -> None:
 
 @app.get("/")
 async def index(request: Request, session: AsyncSession = Depends(get_async_session)):
-    """返回主页框架"""
-    folder_tree, nested_tree, folder_counts = await get_folder_tree_cached(
-        PHOTOS_DIR, session=session
-    )
+    """返回主页框架。侧边栏文件夹树通过 hx-get 懒加载，减轻首屏负担。"""
     tag_stmt = (
         select(Tag.name, func.count(ImageTag.image_id).label("count"))
         .outerjoin(ImageTag, ImageTag.tag_id == Tag.id)
@@ -178,9 +182,6 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
         "index.html",
         {
             "request": request,
-            "folder_tree": folder_tree,
-            "nested_tree": nested_tree,
-            "folder_counts": folder_counts,
             "all_tags": all_tags,
             "version": APP_VERSION,
         },
@@ -330,6 +331,11 @@ async def gallery(
     async def _run_subfolders():
         if not need_subfolders:
             return []
+        if path == "":
+            _, _, folder_counts = await get_folder_tree_cached(
+                PHOTOS_DIR, session=session
+            )
+            return await get_root_subfolders_from_counts(folder_counts, session)
         async with async_session_factory() as s:
             return await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
 
