@@ -53,8 +53,8 @@ alwaysApply: false
 
 - 侧栏：`toggleSidebar`、`refreshSidebar`
 - 图库：`refreshGallery`、`rebuildWaterfall`、`syncGalleryGridCols`、`getFilterState`
-- 选择模式：`toggleSelectMode`、`toggleSelectAll`、`exitSelectMode`、`handleItemClick`、`getSelectedFolders`、`confirmDeleteSelected`、`downloadSelected`
-- 对话框：`showCreateFolderDialog`、`showUploadDialog`、`showMoveDialog`、`showRenameFolderDialog`、`showMoveDialogForCurrentImage`
+- 选择模式：`toggleSelectMode`、`toggleSelectAll`、`exitSelectMode`、`handleItemClick`、`getSelectedFolders`、`getSelectedImages`、`confirmDeleteSelected`、`downloadSelected`
+- 对话框：`showCreateFolderDialog`、`showUploadDialog`、`showMoveDialog`、`showRenameDialog`、`showRenameFolderDialog`、`showRenameImageDialog`、`showBatchRenameDialog`、`showMoveDialogForCurrentImage`
 - 操作：`showOperationLoading`、`hideOperationLoading`、`openModalFromGallery`
 
 ## 示例

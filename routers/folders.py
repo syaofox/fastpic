@@ -25,6 +25,9 @@ from schemas import (
     MergeFoldersRequest,
     CreateFolderRequest,
     RenameFolderRequest,
+    RenameImageRequest,
+    BatchRenameInfoRequest,
+    BatchRenameRequest,
 )
 from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.unique_path import unique_path
@@ -232,6 +235,263 @@ async def rename_folder(
     except Exception as e:
         await session.rollback()
         return {"ok": False, "error": f"更新数据库失败: {e}"}
+
+
+def _invalid_filename(name: str) -> bool:
+    """检查文件名是否包含非法字符"""
+    if not name or ".." in name:
+        return True
+    for c in "/\\:*?\"<>|":
+        if c in name:
+            return True
+    return False
+
+
+@router.post("/rename-image")
+async def rename_image(
+    body: RenameImageRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """重命名单张图片/视频（仅修改文件名，保持在同一目录）"""
+    new_filename = (body.new_filename or "").strip()
+    if not new_filename:
+        return {"ok": False, "error": "新文件名不能为空"}
+    if _invalid_filename(new_filename):
+        return {"ok": False, "error": "文件名包含非法字符"}
+
+    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+    if Path(new_filename).suffix.lower() not in media_extensions:
+        return {"ok": False, "error": "不支持的文件格式"}
+
+    result = await session.execute(select(Image).where(Image.id == body.id))
+    img = result.scalar_one_or_none()
+    if not img:
+        return {"ok": False, "error": "图片不存在"}
+
+    src_path = PHOTOS_DIR / img.relative_path
+    if not src_path.exists() or not src_path.is_file():
+        return {"ok": False, "error": "文件不存在"}
+
+    parent_dir = src_path.parent
+    dest_path = parent_dir / new_filename
+    if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+        dest_path = unique_path(parent_dir, new_filename, suffix_style="underscore")
+        new_filename = dest_path.name
+
+    new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
+    if new_rel == img.relative_path:
+        return {"ok": True, "path": new_rel}
+
+    try:
+        await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
+    except OSError as e:
+        return {"ok": False, "error": f"重命名失败: {e}"}
+
+    old_cache = CACHE_DIR / cache_filename(img.relative_path)
+    if old_cache.exists():
+        old_cache.unlink(missing_ok=True)
+    img.relative_path = new_rel
+    img.filename = dest_path.name
+    img.filename_natural = natural_sort_key(dest_path.name)
+    img.relative_path_natural = natural_sort_key(new_rel)
+    img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
+    img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
+    new_cache = CACHE_DIR / cache_filename(new_rel)
+    if dest_path.suffix.lower() in VIDEO_EXTENSIONS:
+        await asyncio.to_thread(_generate_video_thumbnail, dest_path, new_cache)
+    else:
+        await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
+    session.add(img)
+    await session.commit()
+    print(f"[api] 重命名图片: {img.relative_path} → {new_rel}", flush=True)
+    return {"ok": True, "path": new_rel}
+
+
+@router.post("/batch-rename-info")
+async def batch_rename_info(
+    body: BatchRenameInfoRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """获取批量重命名所需的项目信息（当前名称等）"""
+    images: list[dict] = []
+    folders: list[dict] = []
+
+    if body.image_ids:
+        stmt = select(Image).where(Image.id.in_(body.image_ids))
+        result = await session.execute(stmt)
+        for img in result.scalars().all():
+            images.append({
+                "id": img.id,
+                "filename": img.filename,
+                "relative_path": img.relative_path,
+                "modified_at": img.modified_at,
+            })
+
+    for folder_path in body.folder_paths or []:
+        folder_path = normalize_path(folder_path, allow_empty=False)
+        if folder_path is None:
+            continue
+        src_path = PHOTOS_DIR / folder_path
+        if not src_path.exists() or not src_path.is_dir():
+            continue
+        name = Path(folder_path).name
+        try:
+            mtime = await asyncio.to_thread(os.path.getmtime, src_path)
+        except OSError:
+            mtime = 0.0
+        folders.append({"path": folder_path, "name": name, "modified_at": mtime})
+
+    return {"images": images, "folders": folders}
+
+
+@router.post("/batch-rename")
+async def batch_rename(
+    body: BatchRenameRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """执行批量重命名（文件夹 + 图片）"""
+    folder_count = 0
+    image_count = 0
+    errors: list[str] = []
+
+    # 先处理文件夹重命名
+    for item in body.folder_renames or []:
+        folder_path = normalize_path(item.path, allow_empty=False)
+        if folder_path is None:
+            errors.append(f"{item.path}: 路径不合法")
+            continue
+        new_name = (item.new_name or "").strip().strip("/")
+        if not new_name:
+            errors.append(f"{item.path}: 新名称不能为空")
+            continue
+        if ".." in new_name or "/" in new_name or "\\" in new_name:
+            errors.append(f"{item.path}: 新名称不合法")
+            continue
+
+        parts = folder_path.rsplit("/", 1)
+        parent = parts[0] if len(parts) == 2 else ""
+        target_dir = PHOTOS_DIR / parent if parent else PHOTOS_DIR
+        new_prefix = f"{parent}/{new_name}" if parent else new_name
+
+        src_path = PHOTOS_DIR / folder_path
+        if not src_path.exists() or not src_path.is_dir():
+            errors.append(f"{folder_path}: 文件夹不存在")
+            continue
+        if Path(folder_path).name == new_name and (target_dir / new_name).resolve() == src_path.resolve():
+            folder_count += 1
+            continue
+        dest_path = target_dir / new_name
+        if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+            errors.append(f"{folder_path}: 目标已存在")
+            continue
+
+        try:
+            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
+        except OSError as e:
+            errors.append(f"{folder_path}: {e}")
+            continue
+
+        try:
+            pf = path_filter_for_prefix(Image.relative_path, folder_path)
+            stmt = select(Image).where(pf)
+            result = await session.execute(stmt)
+            for img in result.scalars().all():
+                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                new_rel = new_prefix + suffix
+                old_cache = CACHE_DIR / cache_filename(img.relative_path)
+                if old_cache.exists():
+                    old_cache.unlink(missing_ok=True)
+                img.relative_path = new_rel
+                img.filename = Path(new_rel).name
+                img.filename_natural = natural_sort_key(img.filename)
+                img.relative_path_natural = natural_sort_key(new_rel)
+                new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+                if new_full.exists() and new_full.is_file():
+                    img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+                    img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
+                    new_cache = CACHE_DIR / cache_filename(new_rel)
+                    if new_full.suffix.lower() in VIDEO_EXTENSIONS:
+                        await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
+                    else:
+                        await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+                session.add(img)
+            invalidate_folder_tree_cache()
+            folder_count += 1
+            print(f"[api] 批量重命名文件夹: {folder_path} → {new_prefix}", flush=True)
+        except Exception as e:
+            errors.append(f"{folder_path}: 更新数据库失败 {e}")
+
+    # 再处理图片重命名
+    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+    for item in body.image_renames or []:
+        result = await session.execute(select(Image).where(Image.id == item.id))
+        img = result.scalar_one_or_none()
+        if not img:
+            errors.append(f"id={item.id}: 图片不存在")
+            continue
+        new_filename = (item.new_filename or "").strip()
+        if not new_filename:
+            errors.append(f"{img.filename}: 新文件名不能为空")
+            continue
+        if _invalid_filename(new_filename):
+            errors.append(f"{img.filename}: 文件名包含非法字符")
+            continue
+        if Path(new_filename).suffix.lower() not in media_extensions:
+            errors.append(f"{img.filename}: 不支持的格式")
+            continue
+
+        src_path = PHOTOS_DIR / img.relative_path
+        if not src_path.exists() or not src_path.is_file():
+            errors.append(f"{img.filename}: 文件不存在")
+            continue
+
+        parent_dir = src_path.parent
+        dest_path = parent_dir / new_filename
+        if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+            dest_path = unique_path(parent_dir, new_filename, suffix_style="underscore")
+            new_filename = dest_path.name
+
+        new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
+        if new_rel == img.relative_path:
+            image_count += 1
+            continue
+
+        try:
+            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
+        except OSError as e:
+            errors.append(f"{img.filename}: {e}")
+            continue
+
+        old_cache = CACHE_DIR / cache_filename(img.relative_path)
+        if old_cache.exists():
+            old_cache.unlink(missing_ok=True)
+        img.relative_path = new_rel
+        img.filename = dest_path.name
+        img.filename_natural = natural_sort_key(dest_path.name)
+        img.relative_path_natural = natural_sort_key(new_rel)
+        img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
+        img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
+        new_cache = CACHE_DIR / cache_filename(new_rel)
+        if dest_path.suffix.lower() in VIDEO_EXTENSIONS:
+            await asyncio.to_thread(_generate_video_thumbnail, dest_path, new_cache)
+        else:
+            await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
+        session.add(img)
+        image_count += 1
+        print(f"[api] 批量重命名图片: {img.relative_path} → {new_rel}", flush=True)
+
+    try:
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        errors.append(f"提交失败: {e}")
+
+    return {
+        "ok": len(errors) == 0,
+        "folder_count": folder_count,
+        "image_count": image_count,
+        "errors": errors,
+    }
 
 
 @router.post("/delete-folders")

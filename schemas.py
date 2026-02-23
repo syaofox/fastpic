@@ -59,3 +59,28 @@ class CreateFolderRequest(BaseModel):
 class RenameFolderRequest(BaseModel):
     path: str  # 完整路径，如 "2024/01"
     new_name: str  # 新文件夹名（不含路径）
+
+
+class RenameImageRequest(BaseModel):
+    id: int
+    new_filename: str
+
+
+class BatchRenameInfoRequest(BaseModel):
+    image_ids: list[int] = []
+    folder_paths: list[str] = []
+
+
+class FolderRenameItem(BaseModel):
+    path: str
+    new_name: str
+
+
+class ImageRenameItem(BaseModel):
+    id: int
+    new_filename: str
+
+
+class BatchRenameRequest(BaseModel):
+    folder_renames: list[FolderRenameItem] = []
+    image_renames: list[ImageRenameItem] = []
