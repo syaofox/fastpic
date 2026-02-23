@@ -3,7 +3,7 @@
 # ============================================================
 
 # ---------- 阶段 1: 构建依赖 ----------
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 
 # 安装 uv（极速 Python 包管理器）
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -23,7 +23,7 @@ COPY . .
 RUN mkdir -p /app/static
 
 # ---------- 阶段 2: 运行时镜像 ----------
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 # 时区支持 + ffmpeg（视频缩略图生成）
 RUN apt-get update \

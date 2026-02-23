@@ -5,7 +5,7 @@ alwaysApply: true
 
 # FastPic 开发命令指南
 
-项目使用 **uv** 管理 Python 虚拟环境，开发环境为 **Linux Mint**。
+项目使用 **uv** 管理 Python 虚拟环境，开发环境为 **Linux Mint**。Python 3.13+。
 
 ## 环境准备
 
@@ -52,8 +52,14 @@ curl -X POST http://localhost:8000/scan
 # 构建镜像
 docker compose build
 
-# 启动容器
+# 启动容器（含 MariaDB）
 docker compose up -d
+
+# 停止容器
+docker compose down
+
+# 重新构建并启动（代码或依赖变更后）
+docker compose build --no-cache && docker compose up -d
 
 # 查看日志
 docker compose logs -f
@@ -63,4 +69,15 @@ docker compose logs -f
 
 - 图片根目录：`photos/`
 - 缩略图缓存：`cache/`
+- 静态资源：`static/`
 - 数据库：MariaDB（`data/` 目录）
+
+## Docker 环境变量（可选 .env）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ACCESS_PASSWORD` | `0928` | 访问密码 |
+| `MAX_UPLOAD_FILE_SIZE` | `1000M` | 单文件上传上限 |
+| `MAX_UPLOAD_TOTAL_SIZE` | `5000M` | 总上传上限 |
+| `TZ` | `Asia/Shanghai` | 时区 |
+| `PUID` / `PGID` | `1000` | 容器内用户 UID/GID |
