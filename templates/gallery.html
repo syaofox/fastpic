@@ -210,7 +210,7 @@
             <div class="w-20 h-20 flex-shrink-0 rounded overflow-hidden bg-slate-100">
                 {% if sub.thumbnails %}
                 <img src="/cache/{{ sub.thumbnails[0]|cache_key }}"
-                     alt=""
+                     alt="文件夹 {{ sub.name }} 缩略图"
                      class="w-full h-full object-cover"
                      loading="lazy">
                 {% else %}
@@ -231,7 +231,7 @@
                 <div class="bg-slate-200 overflow-hidden">
                     {% if i < (sub.thumbnails|length) %}
                     <img src="/cache/{{ sub.thumbnails[i]|cache_key }}"
-                         alt=""
+                         alt="文件夹 {{ sub.name }} 缩略图"
                          class="w-full h-full object-cover"
                          loading="lazy">
                     {% endif %}

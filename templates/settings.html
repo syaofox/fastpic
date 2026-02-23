@@ -725,8 +725,8 @@ function loadStats() {
         document.getElementById('stat-size').textContent = formatSize(data.total_size);
         document.getElementById('stat-cache').textContent = formatSize(data.cache_size) + ' (' + data.cache_count + ')';
         document.getElementById('stats-paths').innerHTML =
-            '<div>图片目录：<span class="text-slate-600 font-mono">' + data.photos_dir + '</span></div>' +
-            '<div>缓存目录：<span class="text-slate-600 font-mono">' + data.cache_dir + '</span></div>';
+            '<div>图片目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.photos_dir || '') + '</span></div>' +
+            '<div>缓存目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.cache_dir || '') + '</span></div>';
     }).catch(function(err) {
         console.error('加载统计失败:', err);
     });
@@ -897,8 +897,8 @@ function renderDuplicateGroups(groups) {
     var listEl = document.getElementById('dup-groups-list');
     listEl.innerHTML = groups.map(function(grp, gi) {
         var itemsHtml = grp.items.map(function(item, ii) {
-            var pathEsc = (item.relative_path || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-            var nameEsc = (item.filename || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            var pathEsc = escapeAttr(item.relative_path || '');
+            var nameEsc = escapeAttr(item.filename || '');
             var thumbSrc = '/cache/' + (item.cache_key || '');
             return '<div class="flex flex-col items-center gap-2 p-3 bg-white rounded-lg border border-slate-100 hover:border-slate-200">' +
                 '<input type="checkbox" class="dup-item-checkbox rounded border-slate-300 text-red-600 focus:ring-red-500" data-id="' + item.id + '" data-group="' + gi + '" title="勾选以删除">' +

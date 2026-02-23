@@ -157,7 +157,7 @@
 </div>
 
 <!-- 大图预览模态框 -->
-<div id="modal" class="fixed inset-0 z-50" onclick="closeModal(event)">
+<div id="modal" class="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="modal-image-counter" aria-hidden="true" onclick="closeModal(event)">
     <div id="modal-overlay" class="absolute inset-0 bg-black/80 flex flex-row">
         <!-- 左侧：主内容区（点击空白区域关闭） -->
         <div class="flex-1 min-w-0 relative flex items-center justify-center" onclick="handleModalContentClick(event)">
@@ -167,7 +167,7 @@
             <div class="flex items-center gap-2">
                 <button type="button" id="slideshow-btn" onclick="toggleSlideshow(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
-                        title="幻灯片播放">
+                        title="幻灯片播放" aria-label="幻灯片播放">
                     <!-- 播放图标 -->
                     <svg id="slideshow-play-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     <!-- 暂停图标 -->
@@ -177,7 +177,7 @@
                 <div class="relative" id="slideshow-interval-wrapper">
                     <button type="button" id="slideshow-interval-btn" onclick="toggleSlideshowInterval(); event.stopPropagation();"
                             class="px-2.5 py-1.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white text-xs font-medium transition-all"
-                            title="播放间隔">
+                            title="播放间隔" aria-label="播放间隔">
                         <span id="slideshow-interval-label">2s</span>
                     </button>
                     <div id="slideshow-interval-popover" class="hidden absolute left-0 top-full mt-2 p-3 bg-slate-800/95 backdrop-blur rounded-lg shadow-xl border border-white/10 min-w-[200px]">
@@ -200,7 +200,7 @@
                 <!-- 视频自动播放下一个 -->
                 <button type="button" id="video-autoplay-next-btn" onclick="toggleVideoAutoPlayNext(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
-                        title="视频播完后自动切换下一个">
+                        title="视频播完后自动切换下一个" aria-label="视频播完后自动切换下一个">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
                 </button>
             </div>
@@ -208,19 +208,19 @@
             <div class="flex items-center gap-2">
                 <button type="button" id="modal-info-btn" onclick="toggleImageInfo(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all flex-shrink-0"
-                        title="图片信息">
+                        title="图片信息" aria-label="图片信息">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 </button>
                 <button type="button" id="modal-toolbar-toggle" onclick="toggleModalToolbar(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all flex-shrink-0"
-                        title="展开/收起工具栏">
+                        title="展开/收起工具栏" aria-label="展开或收起工具栏">
                     <svg id="modal-toolbar-expand-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     <svg id="modal-toolbar-collapse-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
                 </button>
                 <div id="modal-toolbar-buttons" class="flex items-center gap-2 overflow-hidden max-w-[999px] opacity-100 transition-all duration-200">
                 <button type="button" id="modal-fullscreen-btn" onclick="toggleModalFullscreen(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
-                        title="全屏查看 (F)">
+                        title="全屏查看 (F)" aria-label="全屏查看">
                     <!-- 进入全屏图标 -->
                     <svg id="fullscreen-enter-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
                     <!-- 退出全屏图标 -->
@@ -228,31 +228,31 @@
                 </button>
                 <button type="button" id="modal-move-btn" onclick="window.showMoveDialogForCurrentImage && window.showMoveDialogForCurrentImage(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
-                        title="移动到其他文件夹">
+                        title="移动到其他文件夹" aria-label="移动到其他文件夹">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
                 </button>
                 <button type="button" id="modal-download-btn" onclick="downloadCurrentImage(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all"
-                        title="下载当前图片">
+                        title="下载当前图片" aria-label="下载当前图片">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 </button>
                 <button type="button" id="modal-delete-btn" onclick="deleteCurrentImage(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-red-500/80 text-white/80 hover:text-white transition-all"
-                        title="删除当前图片">
+                        title="删除当前图片" aria-label="删除当前图片">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                 </button>
-                <button type="button" onclick="closeModalAndStopSlideshow(); event.stopPropagation();"
+                <button type="button" id="modal-close-btn" onclick="closeModalAndStopSlideshow(); event.stopPropagation();"
                         class="p-2.5 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all flex-shrink-0"
-                        title="关闭">
+                        title="关闭" aria-label="关闭预览">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
                 </div>
             </div>
         </div>
-        <button type="button" onclick="prevImage(); event.stopPropagation();" class="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-xl sm:text-2xl flex items-center justify-center">‹</button>
+        <button type="button" id="modal-prev-btn" onclick="prevImage(); event.stopPropagation();" class="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-xl sm:text-2xl flex items-center justify-center" aria-label="上一张">‹</button>
         <img id="modal-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain" onclick="event.stopPropagation()">
         <video id="modal-video" class="max-w-[90vw] max-h-[90vh] object-contain hidden" controls onclick="event.stopPropagation()"></video>
-        <button type="button" onclick="nextImage(); event.stopPropagation();" class="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-xl sm:text-2xl flex items-center justify-center">›</button>
+        <button type="button" id="modal-next-btn" onclick="nextImage(); event.stopPropagation();" class="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 hover:bg-white/40 text-white text-xl sm:text-2xl flex items-center justify-center" aria-label="下一张">›</button>
         <div id="modal-image-counter" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/50 text-white/90 text-sm font-medium" onclick="event.stopPropagation()">1/1</div>
         </div>
         <!-- 右侧：图片信息面板（由「图片信息」按钮开关；移动端为底部抽屉） -->
@@ -264,6 +264,7 @@
     </div>
 </div>
 
+<script src="/static/js/utils.js"></script>
 <script>
 // 侧边栏开关（默认隐藏，localStorage 持久化）
 (function() {
@@ -375,6 +376,8 @@ function _showModalContent(url, mediaType) {
         imgEl.classList.remove('modal-img-loading');
         vidEl.classList.remove('hidden');
         vidEl.removeAttribute('src');
+        var vidFilename = (url && url.split('/').pop()) ? decodeURIComponent(url.split('/').pop().split('?')[0]) : '';
+        vidEl.title = vidFilename || '视频预览';
         var isTs = /\.ts(\?|$)/i.test(url);
         var fullUrl = url.startsWith('/') ? (window.location.origin + url) : url;
         if (isTs && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
@@ -409,6 +412,7 @@ function _showModalContent(url, mediaType) {
         imgEl.classList.remove('hidden');
         imgEl.classList.add('modal-img-loading');
         imgEl.src = url;
+        imgEl.alt = (url && url.split('/').pop()) ? decodeURIComponent(url.split('/').pop()) : '图片预览';
         if (imgEl.complete && imgEl.naturalWidth) {
             imgEl.classList.remove('modal-img-loading');
         } else {
@@ -436,6 +440,8 @@ function _showModalContentWhenReady(url, mediaType, cb) {
     }
 }
 
+var _lastFocusedBeforeModal = null;
+
 function openModal(photoUrl, index, allUrls, allIds, mediaTypes) {
     modalImages = allUrls || [];
     modalImageIds = allIds || [];
@@ -443,9 +449,13 @@ function openModal(photoUrl, index, allUrls, allIds, mediaTypes) {
     modalIndex = index;
     _showModalContent(photoUrl, modalMediaTypes[index]);
     var modal = document.getElementById('modal');
+    _lastFocusedBeforeModal = document.activeElement;
     requestAnimationFrame(function() {
         requestAnimationFrame(function() {
             modal.classList.add('modal-open');
+            modal.setAttribute('aria-hidden', 'false');
+            var closeBtn = document.getElementById('modal-close-btn');
+            if (closeBtn) closeBtn.focus();
         });
     });
     applyModalToolbarState(isModalToolbarCollapsed());
@@ -505,9 +515,13 @@ function closeModal(e) {
         if (document.fullscreenElement) document.exitFullscreen();
         var modal = document.getElementById('modal');
         modal.classList.remove('modal-open');
+        modal.setAttribute('aria-hidden', 'true');
         var panel = document.getElementById('modal-image-info-panel');
         if (panel) panel.classList.add('hidden');
         _updateImageInfoBtnState(false);
+        if (_lastFocusedBeforeModal && typeof _lastFocusedBeforeModal.focus === 'function') {
+            _lastFocusedBeforeModal.focus();
+        }
     }
 }
 
@@ -519,9 +533,13 @@ function closeModalAndStopSlideshow() {
     if (document.fullscreenElement) document.exitFullscreen();
     var modal = document.getElementById('modal');
     modal.classList.remove('modal-open');
+    modal.setAttribute('aria-hidden', 'true');
     var panel = document.getElementById('modal-image-info-panel');
     if (panel) panel.classList.add('hidden');
     _updateImageInfoBtnState(false);
+    if (_lastFocusedBeforeModal && typeof _lastFocusedBeforeModal.focus === 'function') {
+        _lastFocusedBeforeModal.focus();
+    }
 }
 
 function handleModalContentClick(e) {
@@ -1028,8 +1046,7 @@ function deleteCurrentImage() {
 
             if (modalImages.length === 0) {
                 // 没有图片了，关闭模态框并刷新画廊
-                var m = document.getElementById('modal');
-                m.classList.remove('modal-open');
+                closeModalAndStopSlideshow();
                 refreshGalleryFromModal();
             } else {
                 // 调整索引，显示下一张（或最后一张）
@@ -1046,7 +1063,7 @@ function deleteCurrentImage() {
             if (btn) btn.disabled = false;
         }).catch(function(err) {
             console.error('删除失败:', err);
-            alert('删除失败');
+            if (typeof showToast === 'function') showToast('删除失败', 'error');
             if (btn) btn.disabled = false;
         });
     });
@@ -1069,19 +1086,13 @@ function downloadCurrentImage() {
 function refreshGalleryFromModal() {
     var marker = document.getElementById('current-path-marker');
     var path = marker ? (marker.getAttribute('data-path') || '') : '';
-    var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
-    var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
-    var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
-    var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
-    var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
-    var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
-        '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
-        '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
-        '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
-        '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-        '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
-        '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
-    htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+    var opts = marker ? {
+        mode: marker.getAttribute('data-mode') || 'folder',
+        sortBy: marker.getAttribute('data-sort-by') || 'modified_at',
+        sortOrder: marker.getAttribute('data-sort-order') || 'desc',
+        cols: marker.getAttribute('data-cols') || (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4')
+    } : undefined;
+    htmx.ajax('GET', buildGalleryUrl(path, opts), {target: '#gallery-container', swap: 'innerHTML'});
 }
 
 document.addEventListener('keydown', function(e) {
@@ -1949,7 +1960,6 @@ document.addEventListener('keydown', function(e) {
     function triggerSort(sortBy, sortOrder) {
         var marker = document.getElementById('current-path-marker');
         var path = marker ? (marker.getAttribute('data-path') || '') : '';
-        var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
         var sortByInput = document.getElementById('sort-by-input');
         var sortOrderInput = document.getElementById('sort-order-input');
         if (sortByInput) sortByInput.value = sortBy;
@@ -1957,18 +1967,13 @@ document.addEventListener('keydown', function(e) {
         localStorage.setItem('fastpic_sort_by', sortBy);
         localStorage.setItem('fastpic_sort_order', sortOrder);
 
-        var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
-        var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
-        var encodedPath = encodeURIComponent(path);
-        var url = '/gallery?path=' + encodedPath + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
-            '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
-            '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
-            '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
-            '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
-            '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
-
-        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+        var opts = marker ? {
+            mode: marker.getAttribute('data-mode') || 'folder',
+            sortBy: sortBy,
+            sortOrder: sortOrder,
+            cols: marker.getAttribute('data-cols') || (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4')
+        } : { sortBy: sortBy, sortOrder: sortOrder };
+        htmx.ajax('GET', buildGalleryUrl(path, opts), {target: '#gallery-container', swap: 'innerHTML'});
     }
 
     document.body.addEventListener('click', function(e) {
@@ -2254,7 +2259,7 @@ document.addEventListener('keydown', function(e) {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }).catch(function(err) {
-            alert(err.message || '下载失败');
+            if (typeof showToast === 'function') showToast(err.message || '下载失败', 'error');
         }).finally(function() {
             if (btn) btn.disabled = false;
             if (window.hideOperationLoading) window.hideOperationLoading();
@@ -2338,7 +2343,7 @@ document.addEventListener('keydown', function(e) {
             if (folderPaths.length > 0) refreshSidebar();
         }).catch(function(err) {
             console.error('删除失败:', err);
-            alert('删除失败，请查看控制台日志');
+            if (typeof showToast === 'function') showToast('删除失败，请查看控制台日志', 'error');
             if (delBtn) delBtn.disabled = false;
             if (fabDelBtn) {
                 fabDelBtn.disabled = false;
@@ -2577,7 +2582,7 @@ document.addEventListener('keydown', function(e) {
                         if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
                     }
                     if (allErrors.length > 0) {
-                        alert('已移动 ' + totalMoved + ' 项，失败 ' + allErrors.length + ' 项：' + allErrors.join('；'));
+                        if (typeof showToast === 'function') showToast('已移动 ' + totalMoved + ' 项，失败 ' + allErrors.length + ' 项：' + allErrors.join('；'), 'error');
                     }
                     if (!fromModal) {
                         refreshGallery();
@@ -2596,6 +2601,7 @@ document.addEventListener('keydown', function(e) {
                 }
             }).catch(function(err) {
                 console.error('移动失败:', err);
+                if (typeof showToast === 'function') showToast('移动失败', 'error');
                 errorEl.textContent = '请求失败: ' + err;
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
@@ -2625,8 +2631,7 @@ document.addEventListener('keydown', function(e) {
                 modalImageIds.splice(modalIndex, 1);
                 modalMediaTypes.splice(modalIndex, 1);
                 if (modalImages.length === 0) {
-                    var m = document.getElementById('modal');
-                    m.classList.remove('modal-open');
+                    closeModalAndStopSlideshow();
                 } else {
                     if (modalIndex >= modalImages.length) modalIndex = modalImages.length - 1;
                     _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
@@ -2641,20 +2646,14 @@ document.addEventListener('keydown', function(e) {
     function refreshGallery() {
         var marker = document.getElementById('current-path-marker');
         var path = marker ? (marker.getAttribute('data-path') || '') : '';
-        var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
-        var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
-        var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
         var colsInput = document.getElementById('cols-input');
-        var cols = (colsInput && colsInput.value) ? colsInput.value : (marker ? (marker.getAttribute('data-cols') || '4') : '4');
-        var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
-        var url = '/gallery?path=' + encodeURIComponent(path) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
-            '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
-            '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
-            '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
-            '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
-            '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
-        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+        var opts = marker ? {
+            mode: marker.getAttribute('data-mode') || 'folder',
+            sortBy: marker.getAttribute('data-sort-by') || 'modified_at',
+            sortOrder: marker.getAttribute('data-sort-order') || 'desc',
+            cols: (colsInput && colsInput.value) ? colsInput.value : (marker.getAttribute('data-cols') || '4')
+        } : undefined;
+        htmx.ajax('GET', buildGalleryUrl(path, opts), {target: '#gallery-container', swap: 'innerHTML'});
     }
     window.refreshGallery = refreshGallery;
 
@@ -2718,24 +2717,14 @@ document.addEventListener('keydown', function(e) {
     function triggerFilteredGallery(filters) {
         var marker = document.getElementById('current-path-marker');
         var path = marker ? (marker.getAttribute('data-path') || '') : '';
-        var mode = marker ? (marker.getAttribute('data-mode') || 'folder') : 'folder';
-        var sortBy = marker ? (marker.getAttribute('data-sort-by') || 'modified_at') : 'modified_at';
-        var sortOrder = marker ? (marker.getAttribute('data-sort-order') || 'desc') : 'desc';
-        var cols = marker ? (marker.getAttribute('data-cols') || '4') : (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4');
-
-        var url = '/gallery?path=' + encodeURIComponent(path) +
-            '&search=&mode=' + mode +
-            '&sort_by=' + sortBy +
-            '&sort_order=' + sortOrder +
-            '&page=1&cols=' + encodeURIComponent(cols) +
-            '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
-            '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
-            '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
-            '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-            '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
-            '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
-
-        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+        var opts = marker ? {
+            mode: marker.getAttribute('data-mode') || 'folder',
+            sortBy: marker.getAttribute('data-sort-by') || 'modified_at',
+            sortOrder: marker.getAttribute('data-sort-order') || 'desc',
+            cols: marker.getAttribute('data-cols') || (document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4'),
+            filters: filters
+        } : { filters: filters };
+        htmx.ajax('GET', buildGalleryUrl(path, opts), {target: '#gallery-container', swap: 'innerHTML'});
     }
 
     function positionFilterPopover(btn, popover) {
@@ -2881,15 +2870,8 @@ document.addEventListener('keydown', function(e) {
     function navigateToDir(dirPath) {
         dropdown.classList.add('hidden');
         searchInput.value = '';
-        // 更新隐藏的 path input
         document.querySelector('[name=path]').value = dirPath;
-        // 通过 HTMX 加载该目录的 gallery
-        var mode = document.getElementById('mode-input') ? document.getElementById('mode-input').value : 'folder';
-        var sortBy = document.getElementById('sort-by-input') ? document.getElementById('sort-by-input').value : 'modified_at';
-        var sortOrder = document.getElementById('sort-order-input') ? document.getElementById('sort-order-input').value : 'desc';
-        var cols = document.getElementById('cols-input') ? document.getElementById('cols-input').value : '4';
-        var url = '/gallery?path=' + encodeURIComponent(dirPath) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols);
-        htmx.ajax('GET', url, {target: '#gallery-container', swap: 'innerHTML'});
+        htmx.ajax('GET', buildGalleryUrl(dirPath, { filters: {} }), {target: '#gallery-container', swap: 'innerHTML'});
     }
 
     if (searchInput) {
@@ -2903,15 +2885,17 @@ document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 dropdown.classList.add('hidden');
                 this.blur();
+                return;
             }
             if (e.key === 'Enter') {
-                // 选中第一个结果
-                var first = dropdown.querySelector('.dir-search-item');
-                if (first) {
-                    navigateToDir(first.getAttribute('data-path'));
+                var active = dropdown.querySelector('.dir-search-item.bg-blue-50');
+                var target = active || dropdown.querySelector('.dir-search-item');
+                if (target) {
+                    e.preventDefault();
+                    navigateToDir(target.getAttribute('data-path'));
                 }
+                return;
             }
-            // 上下键导航
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
                 var items = dropdown.querySelectorAll('.dir-search-item');
@@ -2921,23 +2905,11 @@ document.addEventListener('keydown', function(e) {
                 for (var i = 0; i < items.length; i++) {
                     if (items[i] === active) { idx = i; break; }
                 }
-                // 移除当前高亮
                 if (active) active.classList.remove('bg-blue-50');
                 if (e.key === 'ArrowDown') idx = (idx + 1) % items.length;
                 else idx = idx <= 0 ? items.length - 1 : idx - 1;
                 items[idx].classList.add('bg-blue-50');
                 items[idx].scrollIntoView({block: 'nearest'});
-            }
-        });
-
-        // 处理 Enter 键选中高亮项
-        searchInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                var active = dropdown.querySelector('.dir-search-item.bg-blue-50');
-                if (active) {
-                    e.preventDefault();
-                    navigateToDir(active.getAttribute('data-path'));
-                }
             }
         });
     }
@@ -2960,29 +2932,6 @@ document.addEventListener('keydown', function(e) {
         }
     });
 })();
-
-// 构建 gallery 请求 URL（用于 popstate 恢复）
-function buildGalleryUrl(path) {
-    var mode = (document.getElementById('mode-input') && document.getElementById('mode-input').value) || 'folder';
-    var sortBy = (document.getElementById('sort-by-input') && document.getElementById('sort-by-input').value) || 'modified_at';
-    var sortOrder = (document.getElementById('sort-order-input') && document.getElementById('sort-order-input').value) || 'desc';
-    var cols = (document.getElementById('cols-input') && document.getElementById('cols-input').value) || '4';
-    var filters = (typeof window.getFilterState === 'function') ? window.getFilterState() : {};
-    var url = '/gallery?path=' + encodeURIComponent(path || '') + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
-        '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
-        '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
-        '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
-        '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
-        '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
-        '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
-    return url;
-}
-
-// 从 location.search 解析 path 参数
-function getPathFromUrl() {
-    var params = new URLSearchParams(location.search);
-    return params.get('path') || '';
-}
 
 // popstate：浏览器后退/前进时加载对应 gallery；若大图模式已打开则先关闭
 window.addEventListener('popstate', function(ev) {

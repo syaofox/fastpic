@@ -13,6 +13,7 @@ alwaysApply: false
 - **脚本**：无独立打包；脚本放在 base 的 block 之后或页面底部；跨页入口（如 `toggleSidebar`、`showCreateFolderDialog`）挂在 `window.xxx`。
 - **语言**：`lang="zh-CN"`，提示/按钮用简体中文。
 - **工具函数**：base 已提供 `escapeHtml(s)`、`escapeAttr(s)`，用于 JS 中安全输出。
+- **innerHTML 安全**：凡通过 JS 的 `innerHTML` 写入用户可控或服务端数据，必须使用 `escapeHtml`（文本内容）或 `escapeAttr`（属性值）转义，防止 XSS。
 
 ## 模板过滤器
 

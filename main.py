@@ -370,3 +370,4 @@ app.mount(
     ),
     name="cache",
 )
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
