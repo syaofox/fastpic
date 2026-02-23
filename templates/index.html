@@ -1901,37 +1901,12 @@ document.addEventListener('keydown', function(e) {
                     '</div>' +
                     '<h3 class="text-lg font-semibold text-slate-800">批量重命名</h3>' +
                 '</div>' +
-                '<div class="p-4 border-b border-slate-200 space-y-3 flex-shrink-0">' +
-                    '<div class="flex gap-2 flex-wrap">' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-rename-op" value="replace" checked class="accent-blue-500"> 查找替换</label>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-rename-op" value="prefix" class="accent-blue-500"> 添加前缀</label>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-rename-op" value="suffix" class="accent-blue-500"> 添加后缀</label>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-rename-op" value="delete" class="accent-blue-500"> 删除字符</label>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-rename-op" value="sequence" class="accent-blue-500"> 添加序号</label>' +
+                '<div class="p-4 border-b border-slate-200 flex-shrink-0">' +
+                    '<div class="flex items-center justify-between mb-2">' +
+                        '<span class="text-sm font-medium text-slate-700">规则（按顺序执行）</span>' +
+                        '<button type="button" id="batch-add-rule" class="text-sm px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors">+ 添加规则</button>' +
                     '</div>' +
-                    '<div id="batch-rename-op-replace" class="space-y-2">' +
-                        '<div class="flex gap-2 items-center"><input type="text" id="batch-find" placeholder="查找" class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"><input type="text" id="batch-replace" placeholder="替换为" class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>' +
-                        '<div class="flex flex-wrap items-center gap-x-4 gap-y-1">' +
-                            '<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="batch-regex" class="accent-blue-500"> 使用正则表达式</label>' +
-                            '<span class="text-xs text-slate-500">如 \\d+ 匹配数字、. 匹配任意字符；替换中 $1 $2 可引用括号捕获</span>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div id="batch-rename-op-prefix" class="hidden"><input type="text" id="batch-prefix" placeholder="前缀" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>' +
-                    '<div id="batch-rename-op-suffix" class="hidden"><input type="text" id="batch-suffix" placeholder="后缀（图片/视频时插入到扩展名前）" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>' +
-                    '<div id="batch-rename-op-delete" class="hidden flex gap-2 items-center">' +
-                        '<input type="number" id="batch-delete-n" min="0" value="1" class="w-20 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">' +
-                        '<span>个字符</span>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-delete-pos" value="start" checked class="accent-blue-500"> 从头</label>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-delete-pos" value="end" class="accent-blue-500"> 从尾</label>' +
-                    '</div>' +
-                    '<div id="batch-rename-op-sequence" class="hidden flex flex-wrap gap-4 items-center">' +
-                        '<div class="flex items-center gap-2"><label class="text-sm text-slate-600">起始</label><input type="number" id="batch-seq-start" min="0" value="0" class="w-16 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>' +
-                        '<div class="flex items-center gap-2"><label class="text-sm text-slate-600">补零位数</label><input type="number" id="batch-seq-pad" min="0" value="2" class="w-16 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="2" title="如 2 则 01、02...；0 则不补零"></div>' +
-                        '<div class="flex items-center gap-2"><label class="text-sm text-slate-600">分隔符</label><input type="text" id="batch-seq-sep" value="_" maxlength="2" class="w-12 px-2 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="_" title="序号与名称之间的分隔，可留空"></div>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-seq-pos" value="prefix" checked class="accent-blue-500"> 前缀</label>' +
-                        '<label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="batch-seq-pos" value="suffix" class="accent-blue-500"> 后缀</label>' +
-                        '<span class="text-xs text-slate-500">序号按预览区排序顺序</span>' +
-                    '</div>' +
+                    '<div id="batch-rules-list" class="space-y-2 max-h-40 overflow-y-auto"></div>' +
                 '</div>' +
                 '<div class="flex-1 min-h-0 overflow-auto p-4">' +
                     '<div class="flex items-center justify-between gap-2 mb-2">' +
@@ -1955,6 +1930,8 @@ document.addEventListener('keydown', function(e) {
                 '</div>' +
             '</div>';
         document.body.appendChild(overlay);
+        overlay._rules = [{ type: 'replace', find: '', replace: '', regex: false }];
+        renderRulesList();
 
         var items = [];
         var isFolder = folders.length > 0;
@@ -1971,57 +1948,179 @@ document.addEventListener('keydown', function(e) {
         });
 
         function getStemAndExt(filename) {
+            if (!filename) return {stem: '', ext: ''};
+            if (filename.charAt(0) === '.') return {stem: '', ext: filename};
             var i = filename.lastIndexOf('.');
             if (i <= 0) return {stem: filename, ext: ''};
             return {stem: filename.slice(0, i), ext: filename.slice(i)};
         }
-        function applyRule(name, isMedia, indexForSequence) {
-            var op = overlay.querySelector('input[name="batch-rename-op"]:checked').value;
+        function applySingleRule(name, isMedia, rule, indexForSequence) {
             var result = name;
-            if (op === 'sequence' && indexForSequence !== undefined) {
-                var start = parseInt(overlay.querySelector('#batch-seq-start').value, 10) || 0;
-                var pad = Math.max(0, Math.min(10, parseInt(overlay.querySelector('#batch-seq-pad').value, 10) || 0));
-                var sep = (overlay.querySelector('#batch-seq-sep') && overlay.querySelector('#batch-seq-sep').value) || '';
-                if (/[\/\\:*?"<>|]/.test(sep)) sep = '_';
+            if (rule.type === 'sequence' && indexForSequence !== undefined) {
+                var start = parseInt(rule.seqStart, 10) || 0;
+                var pad = Math.max(0, Math.min(10, parseInt(rule.seqPad, 10) || 0));
+                var sep = (rule.seqSep || '').replace(/[\/\\:*?"<>|]/g, '') || '_';
                 var num = start + indexForSequence;
                 var seqStr = pad > 0 ? String(num).padStart(pad, '0') : String(num);
-                var asPrefix = overlay.querySelector('input[name="batch-seq-pos"]:checked').value === 'prefix';
+                var asPrefix = rule.seqPos !== 'suffix';
                 if (isMedia) {
                     var se = getStemAndExt(name);
                     result = asPrefix ? seqStr + sep + se.stem + se.ext : se.stem + sep + seqStr + se.ext;
                 } else {
                     result = asPrefix ? seqStr + sep + name : name + sep + seqStr;
                 }
-            } else if (op === 'replace') {
-                var find = overlay.querySelector('#batch-find').value;
-                var repl = overlay.querySelector('#batch-replace').value;
-                var useRegex = overlay.querySelector('#batch-regex').checked;
+            } else if (rule.type === 'replace') {
+                var find = rule.find || '';
+                var repl = rule.replace || '';
                 if (!find) return name;
                 try {
                     if (isMedia) {
                         var se = getStemAndExt(name);
-                        var newStem = useRegex ? se.stem.replace(new RegExp(find, 'g'), repl) : se.stem.split(find).join(repl);
+                        var newStem = rule.regex ? se.stem.replace(new RegExp(find, 'g'), repl) : se.stem.split(find).join(repl);
                         result = newStem + se.ext;
                     } else {
-                        if (useRegex) result = name.replace(new RegExp(find, 'g'), repl);
-                        else result = name.split(find).join(repl);
+                        result = rule.regex ? name.replace(new RegExp(find, 'g'), repl) : name.split(find).join(repl);
                     }
                 } catch (e) { return {error: e.message}; }
-            } else if (op === 'prefix') {
-                var prefix = overlay.querySelector('#batch-prefix').value;
+            } else if (rule.type === 'prefix') {
+                var prefix = rule.prefix || '';
                 if (isMedia) { var se = getStemAndExt(name); result = prefix + se.stem + se.ext; }
                 else result = prefix + name;
-            } else if (op === 'suffix') {
-                var suffix = overlay.querySelector('#batch-suffix').value;
+            } else if (rule.type === 'suffix') {
+                var suffix = rule.suffix || '';
                 if (isMedia) { var se = getStemAndExt(name); result = se.stem + suffix + se.ext; }
                 else result = name + suffix;
-            } else if (op === 'delete') {
-                var n = parseInt(overlay.querySelector('#batch-delete-n').value, 10) || 0;
-                var fromEnd = overlay.querySelector('input[name="batch-delete-pos"]:checked').value === 'end';
+            } else if (rule.type === 'delete') {
+                var n = parseInt(rule.deleteN, 10) || 0;
+                var fromEnd = rule.deletePos === 'end';
                 if (isMedia) { var se = getStemAndExt(name); var s = se.stem; result = fromEnd ? s.slice(0, Math.max(0, s.length - n)) + se.ext : s.slice(n) + se.ext; }
                 else result = fromEnd ? name.slice(0, Math.max(0, name.length - n)) : name.slice(n);
             }
             return result;
+        }
+        function applyAllRules(name, isMedia, indexForSequence) {
+            var r = name;
+            for (var i = 0; i < overlay._rules.length; i++) {
+                r = applySingleRule(r, isMedia, overlay._rules[i], indexForSequence);
+                if (r && typeof r === 'object' && r.error) return r;
+            }
+            return r;
+        }
+        function renderRuleCard(idx, rule) {
+            var type = rule.type || 'replace';
+            var card = document.createElement('div');
+            card.className = 'batch-rule-card flex flex-wrap items-start gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50';
+            card.dataset.ruleIdx = idx;
+            var typeSelect = '<select class="rule-type-select text-sm px-2 py-1.5 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">' +
+                '<option value="replace"' + (type === 'replace' ? ' selected' : '') + '>查找替换</option>' +
+                '<option value="prefix"' + (type === 'prefix' ? ' selected' : '') + '>添加前缀</option>' +
+                '<option value="suffix"' + (type === 'suffix' ? ' selected' : '') + '>添加后缀</option>' +
+                '<option value="delete"' + (type === 'delete' ? ' selected' : '') + '>删除字符</option>' +
+                '<option value="sequence"' + (type === 'sequence' ? ' selected' : '') + '>添加序号</option>' +
+            '</select>';
+            var configHtml = '';
+            if (type === 'replace') {
+                configHtml = '<div class="flex-1 min-w-0 flex flex-wrap gap-2 items-center">' +
+                    '<input type="text" class="rule-find px-2 py-1.5 border border-slate-300 rounded text-sm flex-1 min-w-[80px]" placeholder="查找" value="' + escapeAttr(rule.find || '') + '">' +
+                    '<input type="text" class="rule-replace px-2 py-1.5 border border-slate-300 rounded text-sm flex-1 min-w-[80px]" placeholder="替换为" value="' + escapeAttr(rule.replace || '') + '">' +
+                    '<label class="flex items-center gap-1 cursor-pointer text-xs"><input type="checkbox" class="rule-regex accent-blue-500"' + (rule.regex ? ' checked' : '') + '> 正则</label>' +
+                '</div>';
+            } else if (type === 'prefix') {
+                configHtml = '<input type="text" class="rule-prefix flex-1 min-w-[120px] px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="前缀" value="' + escapeAttr(rule.prefix || '') + '">';
+            } else if (type === 'suffix') {
+                configHtml = '<input type="text" class="rule-suffix flex-1 min-w-[120px] px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="后缀" value="' + escapeAttr(rule.suffix || '') + '">';
+            } else if (type === 'delete') {
+                configHtml = '<div class="flex flex-wrap gap-2 items-center">' +
+                    '<input type="number" class="rule-delete-n w-14 px-2 py-1.5 border border-slate-300 rounded text-sm" min="0" value="' + (rule.deleteN || 1) + '">' +
+                    '<span class="text-xs">个字符</span>' +
+                    '<label class="flex items-center gap-1 cursor-pointer text-xs"><input type="radio" name="rule-del-pos-' + idx + '" value="start" class="accent-blue-500"' + (rule.deletePos !== 'end' ? ' checked' : '') + '> 从头</label>' +
+                    '<label class="flex items-center gap-1 cursor-pointer text-xs"><input type="radio" name="rule-del-pos-' + idx + '" value="end" class="accent-blue-500"' + (rule.deletePos === 'end' ? ' checked' : '') + '> 从尾</label>' +
+                '</div>';
+            } else if (type === 'sequence') {
+                configHtml = '<div class="flex flex-wrap gap-2 items-center">' +
+                    '<input type="number" class="rule-seq-start w-14 px-2 py-1.5 border border-slate-300 rounded text-sm" min="0" value="' + (rule.seqStart || 0) + '" placeholder="起始">' +
+                    '<input type="number" class="rule-seq-pad w-14 px-2 py-1.5 border border-slate-300 rounded text-sm" min="0" value="' + (rule.seqPad || 2) + '" placeholder="补零">' +
+                    '<input type="text" class="rule-seq-sep w-10 px-2 py-1.5 border border-slate-300 rounded text-sm" value="' + escapeAttr(rule.seqSep || '_') + '" maxlength="2" placeholder="_">' +
+                    '<label class="flex items-center gap-1 cursor-pointer text-xs"><input type="radio" name="rule-seq-pos-' + idx + '" value="prefix" class="accent-blue-500"' + (rule.seqPos !== 'suffix' ? ' checked' : '') + '> 前缀</label>' +
+                    '<label class="flex items-center gap-1 cursor-pointer text-xs"><input type="radio" name="rule-seq-pos-' + idx + '" value="suffix" class="accent-blue-500"' + (rule.seqPos === 'suffix' ? ' checked' : '') + '> 后缀</label>' +
+                    '<span class="text-xs text-slate-500">按预览区排序</span>' +
+                '</div>';
+            }
+            card.innerHTML = '<div class="flex items-center gap-1 text-slate-500">' +
+                '<span class="rule-order text-xs font-medium">' + (idx + 1) + '</span>' +
+                '</div>' + typeSelect + '<div class="rule-config flex-1 min-w-0 flex flex-wrap gap-2">' + configHtml + '</div>' +
+                '<div class="flex gap-1">' +
+                '<button type="button" class="rule-move-up px-2 py-1 text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded text-xs" title="上移">↑</button>' +
+                '<button type="button" class="rule-move-down px-2 py-1 text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded text-xs" title="下移">↓</button>' +
+                '<button type="button" class="rule-delete px-2 py-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded text-xs">删除</button>' +
+                '</div>';
+            return card;
+        }
+        function syncRuleFromCard(card) {
+            var idx = parseInt(card.dataset.ruleIdx, 10);
+            var rule = overlay._rules[idx];
+            if (!rule) return;
+            rule.type = card.querySelector('.rule-type-select').value;
+            var findIn = card.querySelector('.rule-find');
+            if (findIn) rule.find = findIn.value;
+            var replaceIn = card.querySelector('.rule-replace');
+            if (replaceIn) rule.replace = replaceIn.value;
+            var regexIn = card.querySelector('.rule-regex');
+            if (regexIn) rule.regex = regexIn.checked;
+            var prefixIn = card.querySelector('.rule-prefix');
+            if (prefixIn) rule.prefix = prefixIn.value;
+            var suffixIn = card.querySelector('.rule-suffix');
+            if (suffixIn) rule.suffix = suffixIn.value;
+            var delNIn = card.querySelector('.rule-delete-n');
+            if (delNIn) rule.deleteN = delNIn.value;
+            var delPosIn = card.querySelector('input[name="rule-del-pos-' + idx + '"]:checked');
+            if (delPosIn) rule.deletePos = delPosIn.value;
+            var seqStartIn = card.querySelector('.rule-seq-start');
+            if (seqStartIn) rule.seqStart = seqStartIn.value;
+            var seqPadIn = card.querySelector('.rule-seq-pad');
+            if (seqPadIn) rule.seqPad = seqPadIn.value;
+            var seqSepIn = card.querySelector('.rule-seq-sep');
+            if (seqSepIn) rule.seqSep = seqSepIn.value;
+            var seqPosIn = card.querySelector('input[name="rule-seq-pos-' + idx + '"]:checked');
+            if (seqPosIn) rule.seqPos = seqPosIn.value;
+        }
+        function renderRulesList() {
+            var list = overlay.querySelector('#batch-rules-list');
+            if (!list) return;
+            list.innerHTML = '';
+            overlay._rules.forEach(function(rule, idx) {
+                var card = renderRuleCard(idx, rule);
+                list.appendChild(card);
+                card.querySelector('.rule-type-select').addEventListener('change', function() {
+                    var defaults = { replace: { find: '', replace: '', regex: false }, prefix: { prefix: '' }, suffix: { suffix: '' }, delete: { deleteN: '1', deletePos: 'start' }, sequence: { seqStart: '0', seqPad: '2', seqSep: '_', seqPos: 'prefix' } };
+                    overlay._rules[idx] = { type: this.value };
+                    var d = defaults[this.value] || {};
+                    for (var k in d) overlay._rules[idx][k] = d[k];
+                    renderRulesList();
+                    renderBatchPreview();
+                });
+                card.querySelectorAll('.rule-find, .rule-replace, .rule-prefix, .rule-suffix, .rule-delete-n, .rule-seq-start, .rule-seq-pad, .rule-seq-sep').forEach(function(inp) {
+                    inp.addEventListener('input', function() { syncRuleFromCard(card); renderBatchPreview(); });
+                });
+                card.querySelectorAll('.rule-regex, input[name^="rule-del-pos-"], input[name^="rule-seq-pos-"]').forEach(function(inp) {
+                    inp.addEventListener('change', function() { syncRuleFromCard(card); renderBatchPreview(); });
+                });
+                var delBtn = card.querySelector('.rule-delete');
+                if (delBtn) delBtn.addEventListener('click', function() {
+                    overlay._rules.splice(idx, 1);
+                    if (overlay._rules.length === 0) overlay._rules.push({ type: 'replace', find: '', replace: '', regex: false });
+                    renderRulesList();
+                    renderBatchPreview();
+                });
+                var upBtn = card.querySelector('.rule-move-up');
+                if (upBtn) upBtn.addEventListener('click', function() {
+                    if (idx > 0) { var t = overlay._rules[idx]; overlay._rules[idx] = overlay._rules[idx - 1]; overlay._rules[idx - 1] = t; renderRulesList(); renderBatchPreview(); }
+                });
+                var downBtn = card.querySelector('.rule-move-down');
+                if (downBtn) downBtn.addEventListener('click', function() {
+                    if (idx < overlay._rules.length - 1) { var t = overlay._rules[idx]; overlay._rules[idx] = overlay._rules[idx + 1]; overlay._rules[idx + 1] = t; renderRulesList(); renderBatchPreview(); }
+                });
+            });
         }
         function getSortedItems() {
             var sortVal = (overlay.querySelector('#batch-preview-sort') && overlay.querySelector('#batch-preview-sort').value) || 'original';
@@ -2041,8 +2140,8 @@ document.addEventListener('keydown', function(e) {
             return copy;
         }
         function renderBatchPreview() {
-            var op = overlay.querySelector('input[name="batch-rename-op"]:checked').value;
             var sortedItems = getSortedItems();
+            var hasSeq = overlay._rules.some(function(r) { return r.type === 'sequence'; });
             var tbody = [];
             var hasError = false;
             var folderRenames = [];
@@ -2050,7 +2149,7 @@ document.addEventListener('keydown', function(e) {
             for (var i = 0; i < sortedItems.length; i++) {
                 var it = sortedItems[i];
                 var isMedia = it.type === 'image';
-                var newName = applyRule(it.name, isMedia, op === 'sequence' ? i : undefined);
+                var newName = applyAllRules(it.name, isMedia, hasSeq ? i : undefined);
                 if (newName && typeof newName === 'object' && newName.error) { tbody.push('<tr class="bg-red-50"><td class="px-3 py-2">' + escapeHtml(it.name) + '</td><td class="px-3 py-2 text-red-600">正则错误: ' + escapeHtml(newName.error) + '</td></tr>'); hasError = true; continue; }
                 if (!newName || /[\/\\:*?"<>|]/.test(newName) || newName.includes('..')) { tbody.push('<tr class="bg-red-50"><td class="px-3 py-2">' + escapeHtml(it.name) + '</td><td class="px-3 py-2 text-red-600">无效名称</td></tr>'); hasError = true; continue; }
                 if (isMedia) imageRenames.push({id: it.id, new_filename: newName});
@@ -2063,27 +2162,11 @@ document.addEventListener('keydown', function(e) {
             overlay._imageRenames = imageRenames;
             overlay._hasError = hasError;
         }
-        function onOpChange() {
-            var op = overlay.querySelector('input[name="batch-rename-op"]:checked').value;
-            ['replace','prefix','suffix','delete','sequence'].forEach(function(o) {
-                var el = overlay.querySelector('#batch-rename-op-' + o);
-                if (el) el.classList.toggle('hidden', o !== op);
-            });
+        overlay.querySelector('#batch-add-rule').addEventListener('click', function() {
+            overlay._rules.push({ type: 'replace', find: '', replace: '', regex: false });
+            renderRulesList();
             renderBatchPreview();
-        }
-        overlay.querySelectorAll('input[name="batch-rename-op"]').forEach(function(r) { r.addEventListener('change', onOpChange); });
-        overlay.querySelector('#batch-find').addEventListener('input', renderBatchPreview);
-        overlay.querySelector('#batch-replace').addEventListener('input', renderBatchPreview);
-        overlay.querySelector('#batch-regex').addEventListener('change', renderBatchPreview);
-        overlay.querySelector('#batch-prefix').addEventListener('input', renderBatchPreview);
-        overlay.querySelector('#batch-suffix').addEventListener('input', renderBatchPreview);
-        overlay.querySelector('#batch-delete-n').addEventListener('input', renderBatchPreview);
-        overlay.querySelectorAll('input[name="batch-delete-pos"]').forEach(function(r) { r.addEventListener('change', renderBatchPreview); });
-        overlay.querySelector('#batch-seq-start').addEventListener('input', renderBatchPreview);
-        overlay.querySelector('#batch-seq-pad').addEventListener('input', renderBatchPreview);
-        var seqSepEl = overlay.querySelector('#batch-seq-sep');
-        if (seqSepEl) seqSepEl.addEventListener('input', renderBatchPreview);
-        overlay.querySelectorAll('input[name="batch-seq-pos"]').forEach(function(r) { r.addEventListener('change', renderBatchPreview); });
+        });
         var sortSelect = overlay.querySelector('#batch-preview-sort');
         if (sortSelect) sortSelect.addEventListener('change', renderBatchPreview);
 
