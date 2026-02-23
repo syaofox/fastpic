@@ -465,6 +465,7 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds, pageMediaTypes
     if (total <= pageUrls.length) return;
     var params = new URLSearchParams({
         path: marker.getAttribute('data-path') || '',
+        search: marker.getAttribute('data-search') || '',
         mode: marker.getAttribute('data-mode') || 'folder',
         sort_by: marker.getAttribute('data-sort-by') || 'modified_at',
         sort_order: marker.getAttribute('data-sort-order') || 'desc',

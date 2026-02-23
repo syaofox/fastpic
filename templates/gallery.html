@@ -1,5 +1,5 @@
 {% if not append %}
-<div id="current-path-marker" data-path="{{ path }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" data-filter-tag="{{ filter_tag or '' }}" class="hidden"></div>
+<div id="current-path-marker" data-path="{{ path }}" data-search="{{ search|default('') }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" data-filter-tag="{{ filter_tag or '' }}" class="hidden"></div>
 <!-- 顶栏：面包屑 + 操作按钮 -->
 <div class="gallery-top-bar flex items-center gap-2 sm:gap-3 flex-wrap">
     <!-- 面包屑 -->
@@ -276,6 +276,7 @@
                 <img src="/cache/{{ img.relative_path|cache_key }}"
                      alt="{{ img.filename }}"
                      class="w-full {{ 'h-full object-cover' if mode in ('folder', 'list') else 'h-auto' }}"
+                     decoding="async"
                      {% if is_first_screen %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}
                      onerror="this.style.visibility='hidden'">
                 {% if mt == 'video' %}

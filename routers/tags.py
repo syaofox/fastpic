@@ -113,20 +113,23 @@ async def merge_tag(
         select(ImageTag.image_id).where(ImageTag.tag_id == source_tag.id)
     )
     image_ids = [r[0] for r in img_result.fetchall()]
-    for image_id in image_ids:
-        has_target = await session.execute(
-            select(ImageTag).where(
-                ImageTag.image_id == image_id,
+    if image_ids:
+        existing_result = await session.execute(
+            select(ImageTag.image_id).where(
+                ImageTag.image_id.in_(image_ids),
                 ImageTag.tag_id == target_tag.id,
             )
         )
-        if has_target.scalar_one_or_none() is None:
-            session.add(ImageTag(image_id=image_id, tag_id=target_tag.id))
+        existing_ids = {r[0] for r in existing_result.fetchall()}
+        to_add = [
+            ImageTag(image_id=i, tag_id=target_tag.id)
+            for i in image_ids
+            if i not in existing_ids
+        ]
+        if to_add:
+            session.add_all(to_add)
         await session.execute(
-            delete(ImageTag).where(
-                ImageTag.image_id == image_id,
-                ImageTag.tag_id == source_tag.id,
-            )
+            delete(ImageTag).where(ImageTag.tag_id == source_tag.id)
         )
     await session.delete(source_tag)
     try:

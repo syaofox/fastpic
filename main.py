@@ -276,9 +276,13 @@ async def gallery(
     )
 
 
+_FOLDER_IMAGES_MAX = 5000  # 大图模式最大返回数量，防止 DoS
+
+
 @app.get("/api/folder-images")
 async def api_folder_images(
     path: str = "",
+    search: str = "",
     mode: str = "folder",
     sort_by: str = "modified_at",
     sort_order: str = "desc",
@@ -297,18 +301,26 @@ async def api_folder_images(
     sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
-    stmt = select(Image).order_by(order_clause)
+    stmt = (
+        select(Image.id, Image.relative_path, Image.media_type)
+        .order_by(order_clause)
+        .limit(_FOLDER_IMAGES_MAX + 1)
+    )
     parsed = parse_filter_params(
         filter_filename, filter_size_min, filter_size_max,
         filter_date_from, filter_date_to, filter_tag,
     )
     stmt, _, _ = apply_image_filters(stmt, path, search, mode, parsed)
     result = await session.execute(stmt)
-    images_list = list(result.scalars().all())
+    rows = result.fetchall()
+    truncated = len(rows) > _FOLDER_IMAGES_MAX
+    if truncated:
+        rows = rows[:_FOLDER_IMAGES_MAX]
     return {
-        "urls": ["/photos/" + img.relative_path for img in images_list],
-        "ids": [img.id for img in images_list],
-        "media_types": [getattr(img, "media_type", "image") for img in images_list],
+        "urls": ["/photos/" + r.relative_path for r in rows],
+        "ids": [r.id for r in rows],
+        "media_types": [getattr(r, "media_type", "image") for r in rows],
+        "truncated": truncated,
     }
 
 
@@ -329,7 +341,32 @@ async def debug_path_count(
     return {"path": path, "total": total, "sample_paths": sample_paths}
 
 
+class CachedStaticFiles(StaticFiles):
+    """带 Cache-Control 头的静态文件服务"""
+
+    def __init__(self, *args, cache_control: str = "", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cache_control = cache_control
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if self.cache_control and hasattr(response, "headers"):
+            response.headers.setdefault("Cache-Control", self.cache_control)
+        return response
+
+
 STATIC_DIR.mkdir(exist_ok=True)
 mimetypes.add_type("video/mp2t", ".ts")
-app.mount("/photos", StaticFiles(directory=str(PHOTOS_DIR)), name="photos")
-app.mount("/cache", StaticFiles(directory=str(CACHE_DIR)), name="cache")
+app.mount(
+    "/photos",
+    CachedStaticFiles(directory=str(PHOTOS_DIR), cache_control="public, max-age=3600"),
+    name="photos",
+)
+app.mount(
+    "/cache",
+    CachedStaticFiles(
+        directory=str(CACHE_DIR),
+        cache_control="public, max-age=86400, immutable",
+    ),
+    name="cache",
+)
