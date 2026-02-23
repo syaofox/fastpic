@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PIL import Image as PILImage, ImageFile
 from sqlmodel import select
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, async_session_factory
@@ -304,13 +305,16 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
             if not check_batch:
                 continue
             rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
-            result = await session.execute(
-                select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
-            )
-            existing = {r[0] for r in result.fetchall()}
+            with session.no_autoflush:
+                result = await session.execute(
+                    select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
+                )
+                existing_rows = result.fetchall()
+            # MySQL 默认 collation 大小写不敏感，需用小写比较
+            existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if rel_path in existing or rel_path.lower() in seen_in_run:
+                if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
 
@@ -343,8 +347,11 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                     batch_count += 1
 
                 if batch_count >= DB_BATCH_SIZE:
-                    await session.commit()
-                    print(f"[scan] 进度: {count}/{total_files}", flush=True)
+                    try:
+                        await session.commit()
+                    except (IntegrityError, DataError) as e:
+                        await session.rollback()
+                        print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
                     batch_count = 0
 
                 await asyncio.sleep(0)  # 让出事件循环
@@ -377,7 +384,11 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
 
         # 提交剩余
         if batch_count > 0:
-            await session.commit()
+            try:
+                await session.commit()
+            except (IntegrityError, DataError) as e:
+                await session.rollback()
+                print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
         print(f"[scan] 图片扫描完成，新增 {count} 条记录", flush=True)
 
     return count
@@ -445,13 +456,16 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
             if not check_batch:
                 continue
             rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
-            result = await session.execute(
-                select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
-            )
-            existing = {r[0] for r in result.fetchall()}
+            with session.no_autoflush:
+                result = await session.execute(
+                    select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
+                )
+                existing_rows = result.fetchall()
+            # MySQL 默认 collation 大小写不敏感，需用小写比较
+            existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if rel_path in existing or rel_path.lower() in seen_in_run:
+                if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
 
@@ -480,8 +494,11 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
                     batch_count += 1
 
                 if batch_count >= DB_BATCH_SIZE:
-                    await session.commit()
-                    print(f"[scan] 视频进度: {count}/{len(video_files)}", flush=True)
+                    try:
+                        await session.commit()
+                    except (IntegrityError, DataError) as e:
+                        await session.rollback()
+                        print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
                     batch_count = 0
 
                 await asyncio.sleep(0)
@@ -509,7 +526,11 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
                 batch_count += 1
 
         if batch_count > 0:
-            await session.commit()
+            try:
+                await session.commit()
+            except (IntegrityError, DataError) as e:
+                await session.rollback()
+                print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
         if count:
             print(f"[scan] 视频扫描完成，新增 {count} 条记录", flush=True)
 

@@ -3,7 +3,7 @@ import re
 import sys
 
 from sqlmodel import Field, SQLModel, create_engine
-from sqlalchemy import Column, String
+from sqlalchemy import BigInteger, Column, String
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 # 数据库配置：仅支持 MariaDB，需设置 MYSQL_HOST
@@ -45,7 +45,7 @@ class Image(SQLModel, table=True):
     filename: str = Field(index=True)
     relative_path: str = Field(unique=True, index=True)
     modified_at: float = Field(index=True)
-    file_size: int = Field(default=0, index=True)
+    file_size: int = Field(default=0, sa_column=Column(BigInteger, default=0, index=True))
     width: int = 0
     height: int = 0
     filename_natural: str | None = Field(
@@ -168,6 +168,21 @@ def _run_path_count_cache_migration() -> None:
             conn.commit()
 
 
+def _run_file_size_migration() -> None:
+    """将 file_size 从 INT 改为 BIGINT，支持超大视频文件（>2GB）"""
+    from sqlalchemy import text
+
+    with sync_engine.connect() as conn:
+        r = conn.execute(text(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'file_size'"
+        ))
+        row = r.fetchone()
+        if row and row[0].upper() == "INT":
+            conn.execute(text("ALTER TABLE images MODIFY COLUMN file_size BIGINT NOT NULL DEFAULT 0"))
+            conn.commit()
+
+
 def _run_tags_migration() -> None:
     """创建 tags 和 image_tags 表（若不存在）"""
     from sqlalchemy import text
@@ -201,6 +216,7 @@ def init_db() -> None:
     SQLModel.metadata.create_all(sync_engine)
     _run_natural_sort_index_migration()
     _run_media_type_migration()
+    _run_file_size_migration()
     _run_tags_migration()
     _run_fulltext_migration()
     _run_path_count_cache_migration()
