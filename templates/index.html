@@ -2144,6 +2144,17 @@ document.addEventListener('keydown', function(e) {
         updateDeleteButton();
     };
 
+    // 捕获阶段拦截：选择模式下点击 selectable-item（含文件夹内的链接）时，优先处理选择，阻止导航/HTMX
+    document.addEventListener('click', function(e) {
+        if (!isSelectMode()) return;
+        var item = e.target.closest('.selectable-item');
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        window.handleItemClick(e, item);
+    }, true);
+
     window.toggleSelectAll = function() {
         var items = document.querySelectorAll('.selectable-item');
         // 判断是全选还是取消全选
