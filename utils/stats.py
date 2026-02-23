@@ -1,36 +1,14 @@
 """统计工具：优先从数据库统计，避免百万级文件系统遍历"""
-import asyncio
 import os
 from pathlib import Path
 
-_STATS_BATCH_SIZE = 20000
 
+async def stats_folder_count_from_db(session) -> int:
+    """从数据库 SQL 聚合统计文件夹数量（distinct path prefixes），支持百万级"""
+    from utils.folder_tree import _get_folder_counts_from_sql
 
-async def stats_folder_count_from_db(session, batch_size: int = _STATS_BATCH_SIZE) -> int:
-    """从数据库分批统计文件夹数量（distinct path prefixes），支持百万级"""
-    from sqlmodel import select
-    from models import Image
-
-    folders: set[str] = set()
-    last_id = 0
-    while True:
-        stmt = (
-            select(Image.id, Image.relative_path)
-            .where(Image.id > last_id)
-            .order_by(Image.id)
-            .limit(batch_size)
-        )
-        result = await session.execute(stmt)
-        rows = result.fetchall()
-        if not rows:
-            break
-        for rid, rp in rows:
-            last_id = rid or last_id
-            parts = rp.split("/")
-            for i in range(1, len(parts)):
-                folders.add("/".join(parts[:i]))
-        await asyncio.sleep(0)
-    return len(folders)
+    counts = await _get_folder_counts_from_sql(session)
+    return len([k for k in counts if k != ""])
 
 
 def stats_cache_only(cache_dir: Path) -> tuple[int, int]:

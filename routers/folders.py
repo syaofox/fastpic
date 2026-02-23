@@ -36,6 +36,7 @@ from utils.unique_path import unique_path
 from utils.images import delete_image_files
 from utils.folder_tree import (
     get_folder_tree_cached,
+    get_folder_counts_for_search,
     invalidate_folder_tree_cache,
     get_subfolders,
     scan_all_dirs_for_search,
@@ -869,47 +870,17 @@ async def get_subfolders_api(
     }
 
 
-_SEARCH_DIRS_BATCH_SIZE = 20000
-
-
 @router.get("/search-dirs")
 async def search_dirs(
     q: str = "",
     limit: int = 20,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """全局目录搜索（分批加载，支持百万级）"""
+    """全局目录搜索（SQL 聚合 folder_counts，max_depth=10 支持更深目录）"""
     q = (q or "").strip()
     if not q:
         return {"dirs": []}
-    dir_counts: dict[str, int] = {}
-    last_id = 0
-    while True:
-        stmt = (
-            select(Image.id, Image.relative_path)
-            .where(Image.id > last_id)
-            .order_by(Image.id)
-            .limit(_SEARCH_DIRS_BATCH_SIZE)
-        )
-        result = await session.execute(stmt)
-        rows = result.fetchall()
-        if not rows:
-            break
-        for row in rows:
-            rid, rp = row
-            last_id = rid
-            parts = rp.rsplit("/", 1)
-            dir_path = parts[0] if len(parts) == 2 else ""
-            dir_counts[dir_path] = dir_counts.get(dir_path, 0) + 1
-        await asyncio.sleep(0)
-    full_dir_counts: dict[str, int] = {}
-    for dir_path, count in dir_counts.items():
-        if not dir_path:
-            continue
-        parts = dir_path.split("/")
-        for i in range(1, len(parts) + 1):
-            prefix = "/".join(parts[:i])
-            full_dir_counts[prefix] = full_dir_counts.get(prefix, 0) + count
+    full_dir_counts = dict(await get_folder_counts_for_search(session))
     await asyncio.to_thread(scan_all_dirs_for_search, PHOTOS_DIR, "", full_dir_counts)
     matched = []
     for dir_path, count in sorted(full_dir_counts.items()):

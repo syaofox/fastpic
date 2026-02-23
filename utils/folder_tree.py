@@ -180,22 +180,33 @@ def invalidate_folder_tree_cache() -> None:
         pass
 
 
-async def _get_folder_counts_from_sql(session) -> dict[str, int]:
-    """用单条 SQL 聚合查询获取各文件夹路径的图片数量，替代分批加载 + Python 累加。"""
-    sql = text("""
+def _build_folder_counts_sql(max_depth: int) -> str:
+    """生成 folder_counts 聚合 SQL，max_depth 为最大路径深度（不含文件名）。"""
+    parts = ["SELECT '' AS prefix FROM images"]
+    for i in range(1, max_depth + 1):
+        like_pattern = "%" + "/%" * i
+        parts.append(
+            f"SELECT SUBSTRING_INDEX(relative_path, '/', {i}) FROM images "
+            f"WHERE relative_path LIKE '{like_pattern}'"
+        )
+    union_sql = " UNION ALL ".join(parts)
+    return f"""
         SELECT prefix, COUNT(*) AS cnt FROM (
-            SELECT '' AS prefix FROM images
-            UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 1) FROM images WHERE relative_path LIKE '%/%'
-            UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 2) FROM images WHERE relative_path LIKE '%/%/%'
-            UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 3) FROM images WHERE relative_path LIKE '%/%/%/%'
-            UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 4) FROM images WHERE relative_path LIKE '%/%/%/%/%'
+            {union_sql}
         ) t
         GROUP BY prefix
-    """)
+    """
+
+
+_SEARCH_DIRS_MAX_DEPTH = 10  # 目录搜索支持的最大深度，超过侧边栏树状图
+
+
+async def _get_folder_counts_from_sql(
+    session, max_depth: int = _FOLDER_TREE_MAX_DEPTH
+) -> dict[str, int]:
+    """用单条 SQL 聚合查询获取各文件夹路径的图片数量，替代分批加载 + Python 累加。
+    max_depth: 最大路径深度，默认 4；search_dirs 等场景可传更大值（如 10）以支持更深目录。"""
+    sql = text(_build_folder_counts_sql(max_depth))
     result = await session.execute(sql)
     rows = result.fetchall()
     counts: dict[str, int] = {"": 0}
@@ -203,6 +214,11 @@ async def _get_folder_counts_from_sql(session) -> dict[str, int]:
         prefix, cnt = row[0], row[1]
         counts[prefix] = int(cnt)
     return counts
+
+
+async def get_folder_counts_for_search(session) -> dict[str, int]:
+    """获取用于目录搜索的 folder_counts（max_depth=10）"""
+    return await _get_folder_counts_from_sql(session, max_depth=_SEARCH_DIRS_MAX_DEPTH)
 
 
 async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
