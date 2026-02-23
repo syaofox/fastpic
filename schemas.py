@@ -54,3 +54,8 @@ class MoveFoldersRequest(BaseModel):
 class CreateFolderRequest(BaseModel):
     path: str
     name: str
+
+
+class RenameFolderRequest(BaseModel):
+    path: str  # 完整路径，如 "2024/01"
+    new_name: str  # 新文件夹名（不含路径）

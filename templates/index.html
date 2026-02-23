@@ -101,6 +101,10 @@
             <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
             <span class="hidden sm:inline">移动</span>
         </button>
+        <button type="button" id="select-mode-fab-rename" class="hidden px-3 py-2 sm:px-4 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.showRenameFolderDialog && window.showRenameFolderDialog()">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            <span class="hidden sm:inline">重命名</span>
+        </button>
         <button type="button" id="select-mode-fab-download" class="px-3 py-2 sm:px-4 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium transition-colors flex items-center gap-1.5" onclick="window.downloadSelected && window.downloadSelected()">
             <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             <span class="hidden sm:inline">下载</span>
@@ -1631,6 +1635,84 @@ document.addEventListener('keydown', function(e) {
     };
 })();
 
+// ---------- 重命名文件夹 ----------
+(function() {
+    window.showRenameFolderDialog = function() {
+        var folders = (window.getSelectedFolders && window.getSelectedFolders()) || [];
+        if (folders.length !== 1) return;
+        var folderPath = folders[0];
+        var currentName = folderPath.split('/').pop() || folderPath;
+
+        var old = document.getElementById('rename-folder-dialog');
+        if (old) old.remove();
+
+        var overlay = document.createElement('div');
+        overlay.id = 'rename-folder-dialog';
+        overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40';
+        overlay.innerHTML =
+            '<div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6">' +
+                '<div class="flex items-center gap-3 mb-4">' +
+                    '<div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">' +
+                        '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>' +
+                    '</div>' +
+                    '<h3 class="text-lg font-semibold text-slate-800">重命名文件夹</h3>' +
+                '</div>' +
+                '<div class="mb-2 text-sm text-slate-500">路径：<span class="font-medium text-slate-700">' + (folderPath || '根目录') + '</span></div>' +
+                '<input type="text" id="rename-folder-name" placeholder="输入新名称" value="' + (currentName || '').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '" ' +
+                    'class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-1">' +
+                '<div id="rename-folder-error" class="text-sm text-red-500 mb-4 hidden"></div>' +
+                '<div class="flex justify-end gap-3 mt-4">' +
+                    '<button type="button" class="rename-cancel-btn px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                    '<button type="button" class="rename-confirm-btn px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">重命名</button>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+
+        var input = overlay.querySelector('#rename-folder-name');
+        var errorEl = overlay.querySelector('#rename-folder-error');
+        setTimeout(function() { input.focus(); input.select(); }, 50);
+
+        function doRename() {
+            var newName = input.value.trim();
+            if (!newName) { errorEl.textContent = '名称不能为空'; errorEl.classList.remove('hidden'); return; }
+            if (/[\/\\]/.test(newName) || newName.includes('..')) { errorEl.textContent = '名称不能包含 / \\ 或 ..'; errorEl.classList.remove('hidden'); return; }
+
+            var confirmBtn = overlay.querySelector('.rename-confirm-btn');
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = '重命名中...';
+
+            fetch('/api/rename-folder', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: folderPath, new_name: newName})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.ok) {
+                    overlay.remove();
+                    if (window.exitSelectMode) window.exitSelectMode();
+                    refreshGalleryFromModal();
+                    if (window.refreshSidebar) window.refreshSidebar();
+                } else {
+                    errorEl.textContent = data.error || '重命名失败';
+                    errorEl.classList.remove('hidden');
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = '重命名';
+                }
+            }).catch(function(err) {
+                errorEl.textContent = '请求失败: ' + err;
+                errorEl.classList.remove('hidden');
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = '重命名';
+            });
+        }
+
+        overlay.querySelector('.rename-cancel-btn').addEventListener('click', function() { overlay.remove(); });
+        overlay.querySelector('.rename-confirm-btn').addEventListener('click', doRename);
+        input.addEventListener('keydown', function(e) { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') overlay.remove(); });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    };
+})();
+
 // ---------- 上传图片/视频 ----------
 (function() {
     function getCurrentPath() {
@@ -1950,6 +2032,8 @@ document.addEventListener('keydown', function(e) {
     window.toggleSelectMode = function() {
         if (isSelectMode()) { exitSelectMode(); } else { enterSelectMode(); }
     };
+    window.exitSelectMode = exitSelectMode;
+    window.getSelectedFolders = function() { return Array.from(_selectedFolders); };
 
     function checkItem(item) {
         item.setAttribute('data-selected', 'true');
@@ -1974,10 +2058,12 @@ document.addEventListener('keydown', function(e) {
     function updateDeleteButton() {
         var total = _selectedImages.size + _selectedFolders.size;
         var imgCount = _selectedImages.size;
+        var folderCount = _selectedFolders.size;
         var delBtn = document.getElementById('delete-selected-btn');
         var moveBtn = document.getElementById('move-selected-btn');
         var downloadBtn = document.getElementById('download-selected-btn');
         var fabMoveBtn = document.getElementById('select-mode-fab-move');
+        var fabRenameBtn = document.getElementById('select-mode-fab-rename');
         var countText = document.getElementById('delete-count-text');
         var fab = document.getElementById('select-mode-fab');
         var fabCount = document.getElementById('select-mode-fab-count');
@@ -1988,6 +2074,7 @@ document.addEventListener('keydown', function(e) {
             if (countText) countText.textContent = '删除 (' + total + ')';
             if (moveBtn) (total > 0 ? moveBtn.classList.remove('hidden') : moveBtn.classList.add('hidden'));
             if (fabMoveBtn) (total > 0 ? fabMoveBtn.classList.remove('hidden') : fabMoveBtn.classList.add('hidden'));
+            if (fabRenameBtn) (folderCount === 1 && imgCount === 0 ? fabRenameBtn.classList.remove('hidden') : fabRenameBtn.classList.add('hidden'));
             if (fab) fab.classList.remove('hidden');
             if (fabCount) fabCount.textContent = '已选 ' + total + ' 项';
             if (scrollEl) scrollEl.classList.add('pb-24');
@@ -1996,6 +2083,7 @@ document.addEventListener('keydown', function(e) {
             if (downloadBtn) downloadBtn.classList.add('hidden');
             if (moveBtn) moveBtn.classList.add('hidden');
             if (fabMoveBtn) fabMoveBtn.classList.add('hidden');
+            if (fabRenameBtn) fabRenameBtn.classList.add('hidden');
             if (fab) fab.classList.add('hidden');
             if (scrollEl) scrollEl.classList.remove('pb-24');
         }
@@ -2527,6 +2615,7 @@ document.addEventListener('keydown', function(e) {
             })
             .catch(function(err) { console.error('刷新侧栏失败:', err); });
     }
+    window.refreshSidebar = refreshSidebar;
 
     // HTMX 加载新内容后，如果处于选择模式，需要更新新内容的复选框状态
     document.body.addEventListener('htmx:afterSettle', function(ev) {

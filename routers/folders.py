@@ -24,6 +24,7 @@ from schemas import (
     DeleteFoldersRequest,
     MergeFoldersRequest,
     CreateFolderRequest,
+    RenameFolderRequest,
 )
 from utils.path_utils import path_filter_for_prefix
 from utils.unique_path import unique_path
@@ -160,6 +161,75 @@ async def move_folders(
         print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
     await session.commit()
     return {"moved": moved, "errors": errors}
+
+
+@router.post("/rename-folder")
+async def rename_folder(
+    body: RenameFolderRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """重命名文件夹（移动到同一父目录下的新名称）"""
+    folder_path = (body.path or "").strip().strip("/")
+    new_name = (body.new_name or "").strip().strip("/")
+    if not folder_path:
+        return {"ok": False, "error": "文件夹路径不能为空"}
+    if not new_name:
+        return {"ok": False, "error": "新名称不能为空"}
+    if ".." in new_name or "/" in new_name or "\\" in new_name:
+        return {"ok": False, "error": "新名称不合法"}
+    if ".." in folder_path or folder_path.startswith("/"):
+        return {"ok": False, "error": "路径不合法"}
+
+    parts = folder_path.rsplit("/", 1)
+    parent = parts[0] if len(parts) == 2 else ""
+    target_dir = PHOTOS_DIR / parent if parent else PHOTOS_DIR
+    new_prefix = f"{parent}/{new_name}" if parent else new_name
+
+    if new_prefix == folder_path and Path(folder_path).name == new_name:
+        return {"ok": True, "path": new_prefix}
+
+    src_path = PHOTOS_DIR / folder_path
+    if not src_path.exists() or not src_path.is_dir():
+        return {"ok": False, "error": "文件夹不存在"}
+
+    dest_path = target_dir / new_name
+    if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+        return {"ok": False, "error": "目标文件夹已存在"}
+
+    try:
+        shutil.move(str(src_path), str(dest_path))
+    except OSError as e:
+        return {"ok": False, "error": f"重命名失败: {e}"}
+
+    pf = path_filter_for_prefix(Image.relative_path, folder_path)
+    stmt = select(Image).where(pf)
+    result = await session.execute(stmt)
+    images = list(result.scalars().all())
+    for img in images:
+        suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+        new_rel = new_prefix + suffix
+        old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+        if old_cache.exists():
+            old_cache.unlink(missing_ok=True)
+        img.relative_path = new_rel
+        img.filename = Path(new_rel).name
+        img.filename_natural = natural_sort_key(img.filename)
+        img.relative_path_natural = natural_sort_key(new_rel)
+        new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+        if new_full.exists() and new_full.is_file():
+            img.modified_at = os.path.getmtime(new_full)
+            img.file_size = os.path.getsize(new_full)
+            new_cache = CACHE_DIR / _cache_filename(new_rel)
+            if new_full.suffix.lower() in VIDEO_EXTENSIONS:
+                _generate_video_thumbnail(new_full, new_cache)
+            else:
+                _generate_thumbnail(new_full, new_cache)
+        session.add(img)
+
+    invalidate_folder_tree_cache()
+    await session.commit()
+    print(f"[api] 重命名文件夹: {folder_path} → {new_prefix}", flush=True)
+    return {"ok": True, "path": new_prefix}
 
 
 @router.post("/delete-folders")
