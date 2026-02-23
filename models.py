@@ -109,26 +109,6 @@ def _run_natural_sort_index_migration() -> None:
         conn.commit()
 
 
-def _run_media_type_migration() -> None:
-    """为已有表添加 media_type 列并回填为 image"""
-    from sqlalchemy import text
-
-    with sync_engine.connect() as conn:
-        r = conn.execute(text(
-            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'media_type'"
-        ))
-        if r.fetchone() is None:
-            conn.execute(text("ALTER TABLE images ADD COLUMN media_type VARCHAR(32) DEFAULT 'image'"))
-            conn.execute(text("UPDATE images SET media_type = 'image' WHERE media_type IS NULL"))
-            conn.commit()
-        try:
-            conn.execute(text("CREATE INDEX ix_images_media_type ON images(media_type)"))
-        except Exception:
-            pass
-        conn.commit()
-
-
 def _run_fulltext_migration() -> None:
     """为 images.filename 添加 FULLTEXT 索引，支持百万级搜索"""
     from sqlalchemy import text
@@ -147,82 +127,11 @@ def _run_fulltext_migration() -> None:
                 conn.rollback()
 
 
-def _run_path_count_cache_migration() -> None:
-    """创建 path_count_cache 表（若不存在）"""
-    from sqlalchemy import text
-
-    with sync_engine.connect() as conn:
-        r = conn.execute(text(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'path_count_cache'"
-        ))
-        if r.fetchone() is None:
-            conn.execute(text(
-                "CREATE TABLE path_count_cache ("
-                "path VARCHAR(512) NOT NULL, "
-                "mode VARCHAR(32) NOT NULL, "
-                "total INT NOT NULL DEFAULT 0, "
-                "updated_at DOUBLE NOT NULL DEFAULT 0, "
-                "PRIMARY KEY (path, mode))"
-            ))
-            conn.commit()
-
-
-def _run_file_size_migration() -> None:
-    """将 file_size 从 INT 改为 BIGINT，支持超大视频文件（>2GB）"""
-    from sqlalchemy import text
-
-    with sync_engine.connect() as conn:
-        r = conn.execute(text(
-            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'file_size'"
-        ))
-        row = r.fetchone()
-        if row and row[0].upper() == "INT":
-            conn.execute(text("ALTER TABLE images MODIFY COLUMN file_size BIGINT NOT NULL DEFAULT 0"))
-            conn.commit()
-
-
-def _run_tags_migration() -> None:
-    """创建 tags 和 image_tags 表（若不存在）"""
-    from sqlalchemy import text
-
-    with sync_engine.connect() as conn:
-        r = conn.execute(text(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tags'"
-        ))
-        if r.fetchone() is None:
-            conn.execute(text(
-                "CREATE TABLE tags (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL)"
-            ))
-            conn.execute(text("CREATE UNIQUE INDEX ix_tags_name ON tags (name)"))
-            conn.commit()
-        r = conn.execute(text(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'image_tags'"
-        ))
-        if r.fetchone() is None:
-            conn.execute(text(
-                "CREATE TABLE image_tags (image_id BIGINT NOT NULL, tag_id BIGINT NOT NULL, "
-                "PRIMARY KEY (image_id, tag_id), "
-                "FOREIGN KEY(image_id) REFERENCES images (id), FOREIGN KEY(tag_id) REFERENCES tags (id))"
-            ))
-            conn.commit()
-
-
 def init_db() -> None:
     """创建数据库表（仅支持全新部署）"""
     SQLModel.metadata.create_all(sync_engine)
     _run_natural_sort_index_migration()
-    _run_media_type_migration()
-    _run_file_size_migration()
-    _run_tags_migration()
     _run_fulltext_migration()
-    _run_path_count_cache_migration()
-    _run_tags_migration()
-    _run_fulltext_migration()
-    _run_path_count_cache_migration()
 
 
 async def get_async_session():
