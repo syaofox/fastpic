@@ -2478,8 +2478,26 @@ document.addEventListener('keydown', function(e) {
     window._selectMode = false;
     var _selectedImages = new Set();  // image ids
     var _selectedFolders = new Set(); // folder paths
+    var _lastClickedAnchor = null;    // { type, id, path } 用于 Shift 范围选择
 
     function isSelectMode() { return window._selectMode; }
+
+    function getItemsInOrder() {
+        return Array.from(document.querySelectorAll('#gallery-grid .selectable-item'));
+    }
+    function getItemKey(item) {
+        var type = item.getAttribute('data-type');
+        if (type === 'folder') return { type: 'folder', id: null, path: item.getAttribute('data-folder-path') };
+        return { type: type || 'image', id: parseInt(item.getAttribute('data-image-id')) || null, path: null };
+    }
+    function findItemIndex(items, key) {
+        for (var i = 0; i < items.length; i++) {
+            var k = getItemKey(items[i]);
+            if (key.type === 'folder' && k.path === key.path) return i;
+            if (key.type !== 'folder' && k.id === key.id) return i;
+        }
+        return -1;
+    }
 
     function enterSelectMode() {
         window._selectMode = true;
@@ -2495,6 +2513,7 @@ document.addEventListener('keydown', function(e) {
         window._selectMode = false;
         _selectedImages.clear();
         _selectedFolders.clear();
+        _lastClickedAnchor = null;
         var btn = document.getElementById('select-mode-btn');
         if (btn) { btn.classList.remove('bg-blue-100', 'text-blue-600'); btn.classList.add('hover:bg-slate-100', 'hover:text-slate-700'); }
         var selAllBtn = document.getElementById('select-all-btn');
@@ -2579,6 +2598,19 @@ document.addEventListener('keydown', function(e) {
         }
     }
 
+    function applySelectionToItem(item, select) {
+        var type = item.getAttribute('data-type');
+        if (select) {
+            checkItem(item);
+            if (type === 'image' || type === 'video') _selectedImages.add(parseInt(item.getAttribute('data-image-id')));
+            if (type === 'folder') _selectedFolders.add(item.getAttribute('data-folder-path'));
+        } else {
+            uncheckItem(item);
+            if (type === 'image' || type === 'video') _selectedImages.delete(parseInt(item.getAttribute('data-image-id')));
+            if (type === 'folder') _selectedFolders.delete(item.getAttribute('data-folder-path'));
+        }
+    }
+
     window.handleItemClick = function(event, item) {
         if (!isSelectMode()) {
             // 非选择模式：文件夹正常导航，图片正常预览
@@ -2589,17 +2621,47 @@ document.addEventListener('keydown', function(e) {
         event.stopPropagation();
 
         var type = item.getAttribute('data-type');
-        var isSelected = item.getAttribute('data-selected') === 'true';
+        var currentKey = getItemKey(item);
 
-        if (isSelected) {
-            uncheckItem(item);
-            if (type === 'image' || type === 'video') _selectedImages.delete(parseInt(item.getAttribute('data-image-id')));
-            if (type === 'folder') _selectedFolders.delete(item.getAttribute('data-folder-path'));
-        } else {
-            checkItem(item);
-            if (type === 'image' || type === 'video') _selectedImages.add(parseInt(item.getAttribute('data-image-id')));
-            if (type === 'folder') _selectedFolders.add(item.getAttribute('data-folder-path'));
+        // Alt: 反选
+        if (event.altKey) {
+            var items = getItemsInOrder();
+            items.forEach(function(it) {
+                var sel = it.getAttribute('data-selected') === 'true';
+                applySelectionToItem(it, !sel);
+            });
+            _lastClickedAnchor = currentKey;
+            updateDeleteButton();
+            return;
         }
+
+        // Shift: 范围选择（替换为锚点到当前的区间）
+        if (event.shiftKey) {
+            var items = getItemsInOrder();
+            var anchorIdx = _lastClickedAnchor ? findItemIndex(items, _lastClickedAnchor) : -1;
+            var currentIdx = findItemIndex(items, currentKey);
+            if (currentIdx < 0) { _lastClickedAnchor = currentKey; updateDeleteButton(); return; }
+            if (anchorIdx < 0) {
+                // 无锚点：仅选中当前项
+                applySelectionToItem(item, true);
+            } else {
+                var lo = Math.min(anchorIdx, currentIdx);
+                var hi = Math.max(anchorIdx, currentIdx);
+                // 先清空当前可见项的选择，再选中范围
+                items.forEach(function(it) { applySelectionToItem(it, false); });
+                for (var i = lo; i <= hi; i++) {
+                    applySelectionToItem(items[i], true);
+                }
+            }
+            _lastClickedAnchor = currentKey;
+            updateDeleteButton();
+            return;
+        }
+
+        // Ctrl/Meta 或无：切换当前项
+        var isSelected = item.getAttribute('data-selected') === 'true';
+        applySelectionToItem(item, !isSelected);
+        _lastClickedAnchor = currentKey;
         updateDeleteButton();
     };
 
