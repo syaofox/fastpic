@@ -80,5 +80,7 @@ docker compose logs -f
 | `ACCESS_PASSWORD` | `0928` | 访问密码 |
 | `MAX_UPLOAD_FILE_SIZE` | `1000M` | 单文件上传上限 |
 | `MAX_UPLOAD_TOTAL_SIZE` | `5000M` | 总上传上限 |
+| `DB_POOL_SIZE` | `10` | 数据库连接池大小，百万级建议 20 |
+| `DB_MAX_OVERFLOW` | `20` | 连接池最大溢出，百万级建议 40 |
 | `TZ` | `Asia/Shanghai` | 时区 |
 | `PUID` / `PGID` | `1000` | 容器内用户 UID/GID |

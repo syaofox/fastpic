@@ -11,6 +11,8 @@
 #   ACCESS_PASSWORD           访问密码，默认 0928
 #   MAX_UPLOAD_FILE_SIZE      单文件上传上限，默认 1000M
 #   MAX_UPLOAD_TOTAL_SIZE     总上传上限，默认 5000M
+#   DB_POOL_SIZE              数据库连接池大小，默认 10，百万级建议 20
+#   DB_MAX_OVERFLOW           连接池最大溢出，默认 20，百万级建议 40
 #
 # MariaDB 数据库
 #   MYSQL_ROOT_PASSWORD       root 密码，默认 fastpic
@@ -70,6 +72,8 @@ services:
       - MYSQL_USER=${MYSQL_USER:-fastpic}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-fastpic}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-fastpic}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-40}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
