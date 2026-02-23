@@ -50,6 +50,7 @@ def _load_image_maybe_truncated(full_path: Path) -> tuple[PILImage.Image, bool]:
 def _generate_thumbnail(full_path: Path, cache_path: Path) -> bool:
     """为指定图片生成缩略图，返回是否成功"""
     try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         img, _ = _load_image_maybe_truncated(full_path)
         try:
             if img.width > THUMBNAIL_WIDTH:
@@ -75,6 +76,7 @@ def get_media_metadata_and_thumbnail(
     """同步获取媒体元数据并生成缩略图，返回 (width, height, modified_at, file_size, is_corrupted)，失败返回 None。
     供 watcher、上传等场景复用。视频的 is_corrupted 恒为 False。"""
     try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         modified_at = os.path.getmtime(full_path)
         file_size = os.path.getsize(full_path)
         if is_video:
@@ -131,6 +133,7 @@ def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
 def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
     """使用 ffmpeg 从视频第一帧提取缩略图并转为 WebP"""
     try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_jpg = cache_path.with_suffix(".tmp.jpg")
         result = subprocess.run(
             [
@@ -209,6 +212,7 @@ def _process_single_image_sync(
                 thumb = thumb.convert("RGB")
             cache_name = cache_filename(rel_path)
             cache_path = cache_dir / cache_name
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
             thumb.save(cache_path, "WEBP", quality=85)
             return (full_path.name, rel_path, modified_at, file_size, width, height, is_corrupted)
         finally:
@@ -517,16 +521,17 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
         if stale_removed:
             print(f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
 
-    # ── 第 2 步：清除孤儿缓存文件（iterdir 在线程中执行） ──
+    # ── 第 2 步：清除孤儿缓存文件（rglob 递归遍历分层目录） ──
     def _list_cache_webp(cache_dir: Path) -> list[Path]:
         if not cache_dir.exists():
             return []
-        return [f for f in cache_dir.iterdir() if f.suffix == ".webp"]
+        return list(cache_dir.rglob("*.webp"))
 
     if cache_dir.exists():
         cache_files = await asyncio.to_thread(_list_cache_webp, cache_dir)
         for cache_file in cache_files:
-            if cache_file.name not in valid_cache_names:
+            rel = str(cache_file.relative_to(cache_dir)).replace("\\", "/")
+            if rel not in valid_cache_names:
                 cache_file.unlink(missing_ok=True)
                 orphan_cache_removed += 1
 

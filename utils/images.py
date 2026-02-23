@@ -4,8 +4,9 @@ from pathlib import Path
 
 
 def cache_filename(relative_path: str) -> str:
-    """根据相对路径生成缩略图缓存文件名"""
-    return hashlib.md5(relative_path.encode()).hexdigest() + ".webp"
+    """根据相对路径生成缩略图缓存文件名，使用分层目录 hash[:2]/hash[2:].webp 避免单目录文件过多"""
+    h = hashlib.md5(relative_path.encode()).hexdigest()
+    return f"{h[:2]}/{h[2:]}.webp"
 
 
 def delete_image_files(relative_path: str, photos_dir: Path, cache_dir: Path) -> None:

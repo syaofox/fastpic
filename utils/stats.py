@@ -12,8 +12,7 @@ def stats_folder_and_cache(photos_dir: Path, cache_dir: Path) -> tuple[int, int,
     cache_count = 0
     cache_size = 0
     if cache_dir.exists():
-        for f in cache_dir.iterdir():
-            if f.suffix == ".webp":
-                cache_count += 1
-                cache_size += f.stat().st_size
+        for f in cache_dir.rglob("*.webp"):
+            cache_count += 1
+            cache_size += f.stat().st_size
     return folder_count, cache_count, cache_size

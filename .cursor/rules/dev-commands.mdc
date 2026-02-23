@@ -65,10 +65,11 @@ docker compose build --no-cache && docker compose up -d
 docker compose logs -f
 ```
 
+
 ## 常用路径
 
 - 图片根目录：`photos/`
-- 缩略图缓存：`cache/`
+- 缩略图缓存：`cache/`（分层结构：`cache/{hash[:2]}/{hash[2:]}.webp`）
 - 静态资源：`static/`
 - 数据库：MariaDB（`data/` 目录）
 
