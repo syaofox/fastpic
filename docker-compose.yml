@@ -3,6 +3,7 @@ services:
     image: mariadb:11
     container_name: fastpic-mariadb
     restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fastpic}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-fastpic}
@@ -15,7 +16,7 @@ services:
       - --innodb-log-file-size=${MARIADB_LOG_FILE_SIZE:-512M}
       - --transaction-isolation=READ-COMMITTED
     volumes:
-      - mariadb_data:/var/lib/mysql
+      - ./data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -46,9 +47,9 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./data:/app/data
+      # - ./data:/app/data
       - ./cache:/app/cache
       - ./photos:/app/photos
 
-volumes:
-  mariadb_data:
+# volumes:
+#   mariadb_data:
