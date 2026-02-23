@@ -8,25 +8,53 @@ alwaysApply: false
 
 ## 前端风格
 
-- **布局**：页面一律继承 `templates/base.html`，使用 `{% block content %}`；公共片段放 `templates/partials/`，用 `{% include "partials/xxx.html" with context %}`。
+- **布局**：页面一律继承 `templates/base.html`，使用 `{% block content %}`；公共片段放 `templates/partials/`，用 `{% include "partials/xxx.html" with context %}`；可复用宏放 `templates/macros/`，用 `{% from "macros/xxx.html" import xxx %}`。
 - **样式**：Tailwind CDN（与 base 一致）；主色 `blue-500/600`，中性色 `slate-*`；圆角 `rounded-lg`，输入/按钮统一 `focus:ring-2 focus:ring-blue-500 focus:border-blue-500`；滚动条与 base 一致（`scrollbar-width: thin` + webkit）。
 - **脚本**：无独立打包；脚本放在 base 的 block 之后或页面底部；跨页入口（如 `toggleSidebar`、`showCreateFolderDialog`）挂在 `window.xxx`。
 - **语言**：`lang="zh-CN"`，提示/按钮用简体中文。
+- **工具函数**：base 已提供 `escapeHtml(s)`、`escapeAttr(s)`，用于 JS 中安全输出。
+
+## 模板过滤器
+
+- `|urlencode_path`：路径/搜索词/标签等 URL 编码，避免中文或特殊字符问题。
+- `|cache_key`：图片路径转缩略图缓存 key，用于 `/cache/xxx` 链接。
+- `|format_date`：时间戳转可读日期。
+- `|format_filesize`：字节数转可读大小。
 
 ## HTMX 约定
 
-- **列表刷新**：`hx-get` + `hx-target="#gallery-container"`（或对应容器）+ `hx-swap="innerHTML"`；全局状态用 `hx-include="#cols-input, #sort-by-input, ..."` 指向隐藏 input。
-- **参数一致**：链接/按钮触发替换时，`hx-get` 的 query 带齐 path、mode、sort_by、sort_order、page、cols、filter_*，与 main.py 的 `/gallery` 等一致。
-- **路径编码**：URL 中的路径/搜索词用模板过滤器 `|urlencode_path`，避免中文或特殊字符问题。
-- **首次加载**：容器内放“加载中...”或 `htmx-indicator`，用 `hx-trigger="load"` 触发首次请求。
+- **列表刷新**：`hx-get` + `hx-target="#gallery-container"`（或对应容器）+ `hx-swap="innerHTML"`；全局状态用 `hx-include="#cols-input, #sort-by-input, #sort-order-input, #mode-input"` 指向 index 顶栏的隐藏 input。
+- **参数一致**：链接/按钮触发替换时，`hx-get` 的 query 带齐 path、search、mode、sort_by、sort_order、page、cols、filter_*，与 main.py 的 `/gallery` 一致。完整参数：
+  - `path`、`search`、`mode`（folder/list/waterfall）、`sort_by`、`sort_order`、`page`、`cols`
+  - `filter_filename`、`filter_size_min`、`filter_size_max`、`filter_date_from`、`filter_date_to`、`filter_tag`
+- **路径编码**：URL 中的路径/搜索词/标签用 `|urlencode_path`。
+- **首次加载**：容器内放「加载中...」或 `htmx-indicator`，用 `hx-trigger="load"` 触发首次请求。
+- **加载指示**：用 `hx-indicator="#gallery-loading-indicator"` 等指向对应元素，避免重复定义。
+- **无限滚动**：用 `scroll-sentinel` + `hx-trigger="intersect once root:#scroll-container threshold:0"` + `hx-swap="beforeend"` + `hx-target="#gallery-grid"`，分页加载时 `page` 递增。
 
 ## 公共模式与复用
 
+- **隐藏 input**：index 顶栏有 `#path-input`、`#mode-input`、`#cols-input`、`#sort-by-input`、`#sort-order-input`，供 hx-include 或 JS 读取。
+- **状态标记**：`#current-path-marker` 上有 `data-path`、`data-mode`、`data-sort-by`、`data-sort-order`、`data-cols`、`data-total`、`data-filter-*`，供 JS 拼出正确的 `hx-get` URL。
 - **面包屑**：与 gallery.html 一致，用 `breadcrumb_parts` 循环，每段链接的 `hx-get` 带齐当前 mode/sort/filter 参数。
-- **状态**：用隐藏的 `data-path`、`data-mode`、`data-sort-by` 等放在 `#current-path-marker` 或容器上，供 JS 拼出正确的 `hx-get` URL。
-- **文件夹树**：复用 `templates/partials/folder_tree.html` 的 macro `render_folder`；链接带 `hx-include="#mode-input, #sort-by-input, #sort-order-input, #cols-input"`，并同步 `document.querySelector('[name=path]').value`。
-- **筛选**：筛选条件与 gallery 的 `filter_*` 参数对应；刷新时把 filter 参数一并写入 `hx-get`。
+- **文件夹树**：复用 `templates/partials/folder_tree.html` 的 macro `render_folder`；链接带 `hx-include="#mode-input, #sort-by-input, #sort-order-input, #cols-input"`，并同步 `document.querySelector('[name=path]').value`。文件夹树不传 filter 参数（导航时筛选不保留）。
+- **标签列表**：`partials/tag_list.html` 中标签链接带 `filter_tag` 参数，`hx-include` 含 mode/sort/cols。
+- **筛选**：筛选条件与 gallery 的 `filter_*` 参数对应；gallery 顶栏的筛选弹窗通过 JS 读取输入后调用 `window.refreshGallery()`，刷新时把 filter 参数写入 URL。
 - **扫描条**：base 已通过 `/api/scan-status` 轮询实现，新页面无需重复。
+
+## 视图模式
+
+- `folder`：文件夹网格 + 图片网格，Flexbox 列布局。
+- `list`：单列列表，每行缩略图 + 信息。
+- `waterfall`：瀑布流，JS 列布局。
+
+## 常用 window 函数
+
+- 侧栏：`toggleSidebar`、`refreshSidebar`
+- 图库：`refreshGallery`、`rebuildWaterfall`、`syncGalleryGridCols`、`getFilterState`
+- 选择模式：`toggleSelectMode`、`toggleSelectAll`、`exitSelectMode`、`handleItemClick`、`getSelectedFolders`、`confirmDeleteSelected`、`downloadSelected`
+- 对话框：`showCreateFolderDialog`、`showUploadDialog`、`showMoveDialog`、`showRenameFolderDialog`、`showMoveDialogForCurrentImage`
+- 操作：`showOperationLoading`、`hideOperationLoading`、`openModalFromGallery`
 
 ## 示例
 
@@ -40,10 +68,10 @@ alwaysApply: false
 
 ```html
 <!-- 正确：刷新按钮带齐参数 + hx-include -->
-<button hx-get="/gallery?path={{ path|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}"
+<button hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
         hx-target="#gallery-container"
         hx-swap="innerHTML"
-        hx-include="#cols-input, #sort-by-input, #sort-order-input">
+        hx-include="#cols-input, #sort-by-input, #sort-order-input, #mode-input">
     刷新
 </button>
 ```

@@ -63,4 +63,4 @@ docker compose logs -f
 
 - 图片根目录：`photos/`
 - 缩略图缓存：`cache/`
-- 数据库：MariaDB（Docker 卷 `mariadb_data`）
+- 数据库：MariaDB（`data/` 目录）
