@@ -11,6 +11,7 @@ from models import Image, natural_sort_key
 from .path_utils import escape_like, LIKE_ESCAPE
 
 _FOLDER_TREE_BATCH_SIZE = 20000  # 分批加载 relative_path，支持百万级
+_FOLDER_TREE_MAX_DEPTH = 4  # 缓存深度限制，减少百万级时内存；更深层按需加载
 
 
 def _extract_direct_child(path_prefix: str) -> str:
@@ -79,6 +80,11 @@ def invalidate_folder_tree_cache() -> None:
     """创建/删除文件夹后调用，使缓存失效"""
     global _folder_tree_cache
     _folder_tree_cache = None
+    try:
+        from utils.path_count_cache import invalidate_path_count_cache
+        invalidate_path_count_cache()
+    except ImportError:
+        pass
 
 
 async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
@@ -104,14 +110,14 @@ async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
             counts[""] = counts.get("", 0) + 1
             parts = rp.split("/")
             if len(parts) > 1:
-                for i in range(1, len(parts)):
+                for i in range(1, min(len(parts), _FOLDER_TREE_MAX_DEPTH + 1)):
                     prefix = "/".join(parts[:i])
                     folders.add(tuple(parts[:i]))
                     counts[prefix] = counts.get(prefix, 0) + 1
         await asyncio.sleep(0)
 
     def _scan_dirs(base: Path, prefix: tuple[str, ...] = ()):
-        if not base.is_dir():
+        if not base.is_dir() or len(prefix) >= _FOLDER_TREE_MAX_DEPTH:
             return
         for child in sorted(base.iterdir()):
             if child.is_dir() and not child.name.startswith("."):

@@ -13,14 +13,26 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, STATIC_DIR, PER_PAGE, APP_VERSION
-from models import Image, Tag, ImageTag, init_db, get_async_session, async_session_factory
+from models import (
+    Image,
+    Tag,
+    ImageTag,
+    init_db,
+    get_async_session,
+    async_session_factory,
+    sync_engine,
+)
 from scanner import scan_photos, scan_videos, cleanup_database
 from scan_state import begin_scan, end_scan
 from watcher import start_watcher
 from app_common import templates
 from routers import auth, tags, images, folders, settings
 from utils.path_utils import normalize_path, path_filter_for_prefix
-from utils.folder_tree import get_folder_tree_cached, get_subfolders
+from utils.folder_tree import (
+    get_folder_tree_cached,
+    get_subfolders,
+    _FOLDER_TREE_MAX_DEPTH,
+)
 from utils.query_builder import (
     get_sort_column,
     parse_filter_params,
@@ -81,12 +93,14 @@ def _per_page_for_cols(cols: int) -> int:
     return cols * ((PER_PAGE + cols - 1) // cols)
 
 
-# count 短期缓存（无筛选时），减轻切换文件夹时的重复查询
+# count 缓存：内存 TTL 60s，DB 持久化 TTL 5 分钟
 _COUNT_CACHE_TTL = 60.0
+_PATH_COUNT_DB_TTL = 300.0  # 5 分钟
 _count_cache: dict[tuple[str, str], tuple[int, float]] = {}
 
 
 def _get_cached_count(path: str, mode: str) -> int | None:
+    """先查内存缓存"""
     key = (path or "", mode)
     entry = _count_cache.get(key)
     if entry is None:
@@ -101,6 +115,48 @@ def _get_cached_count(path: str, mode: str) -> int | None:
 def _set_cached_count(path: str, mode: str, total: int) -> None:
     key = (path or "", mode)
     _count_cache[key] = (total, time.monotonic())
+
+
+async def _get_path_count_from_db(path: str, mode: str) -> int | None:
+    """从 DB 读取 path count 缓存，过期返回 None"""
+    from sqlalchemy import text
+
+    path_key = path or ""
+    with sync_engine.connect() as conn:
+        r = conn.execute(
+            text(
+                "SELECT total, updated_at FROM path_count_cache "
+                "WHERE path = :p AND mode = :m"
+            ),
+            {"p": path_key, "m": mode},
+        )
+        row = r.fetchone()
+    if row is None:
+        return None
+    total, updated_at = row
+    if time.time() - updated_at > _PATH_COUNT_DB_TTL:
+        return None
+    return total
+
+
+async def _set_path_count_to_db(path: str, mode: str, total: int) -> None:
+    """写入 path count 到 DB"""
+    from sqlalchemy import text
+
+    path_key = path or ""
+    now = time.time()
+    with sync_engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO path_count_cache (path, mode, total, updated_at) "
+                "VALUES (:p, :m, :t, :ts) "
+                "ON DUPLICATE KEY UPDATE total = :t, updated_at = :ts"
+            ),
+            {"p": path_key, "m": mode, "t": total, "ts": now},
+        )
+        conn.commit()
+
+
 
 
 @app.get("/")
@@ -129,6 +185,31 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
             "version": APP_VERSION,
         },
     )
+
+
+@app.get("/api/folder-children")
+async def api_folder_children(
+    path: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """按需加载深层子文件夹（超过 _FOLDER_TREE_MAX_DEPTH 时用）"""
+    from utils.folder_tree import get_subfolders, _FOLDER_TREE_MAX_DEPTH
+    from utils.path_utils import path_filter_for_prefix
+
+    path = normalize_path(path, allow_empty=True) or ""
+    path_depth = len(path.split("/")) if path else 0
+    if path_depth < _FOLDER_TREE_MAX_DEPTH:
+        return {"children": []}
+    pf = path_filter_for_prefix(Image.relative_path, path) if path else None
+    subfolders = await get_subfolders(
+        session, PHOTOS_DIR, path, pf, "filename", "asc"
+    )
+    return {
+        "children": [
+            {"path": s["full_path"], "name": s["name"], "image_count": s["image_count"]}
+            for s in subfolders
+        ],
+    }
 
 
 @app.get("/api/sidebar-folder-tree")
@@ -234,10 +315,16 @@ async def gallery(
         cached = _get_cached_count(path, mode)
         if cached is not None:
             return cached
+        if not search and not has_filters and not parsed["filter_tag"]:
+            db_cached = await _get_path_count_from_db(path, mode)
+            if db_cached is not None:
+                _set_cached_count(path, mode, db_cached)
+                return db_cached
         async with async_session_factory() as s:
             t = (await s.execute(count_stmt)).scalar() or 0
             if not search and not has_filters and not parsed["filter_tag"]:
                 _set_cached_count(path, mode, t)
+                await _set_path_count_to_db(path, mode, t)
             return t
 
     async def _run_subfolders():

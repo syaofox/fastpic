@@ -2,10 +2,19 @@
 from datetime import datetime as _dt
 
 from sqlmodel import select
-from sqlalchemy import case, func
+from sqlalchemy import case, func, text
 
 from models import Image, ImageTag, Tag
 from utils.path_utils import escape_like, LIKE_ESCAPE, path_filter_for_prefix
+
+
+def _fulltext_search_condition(search: str):
+    """FULLTEXT 搜索条件，需 images.filename 有 FULLTEXT 索引。
+    短词（<3 字符）或含通配符时回退到 ilike，因 FULLTEXT 可能不索引短词。"""
+    q = (search or "").strip()
+    if not q or len(q) < 3 or "%" in q or "_" in q:
+        return None
+    return text("MATCH(images.filename) AGAINST(:ft_q IN NATURAL LANGUAGE MODE)").bindparams(ft_q=q)
 
 IMAGE_SORT_COLUMNS = {
     "filename": case(
@@ -80,7 +89,11 @@ def apply_image_filters(
         pf = path_filter_for_prefix(Image.relative_path, path)
         stmt = stmt.where(pf)
     if search:
-        stmt = stmt.where(Image.filename.ilike(f"%{search}%"))
+        ft = _fulltext_search_condition(search)
+        if ft is not None:
+            stmt = stmt.where(ft)
+        else:
+            stmt = stmt.where(Image.filename.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE))
 
     fn = parsed["filter_filename"]
     if fn:
@@ -119,7 +132,13 @@ def apply_image_filters_to_count(count_stmt, path: str, search: str, mode: str, 
     if path and pf is not None:
         count_stmt = count_stmt.where(pf)
     if search:
-        count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
+        ft = _fulltext_search_condition(search)
+        if ft is not None:
+            count_stmt = count_stmt.where(ft)
+        else:
+            count_stmt = count_stmt.where(
+                Image.filename.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE)
+            )
     if parsed["filter_filename"]:
         count_stmt = count_stmt.where(
             Image.filename.ilike(f"%{escape_like(parsed['filter_filename'])}%", escape=LIKE_ESCAPE)

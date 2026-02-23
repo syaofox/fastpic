@@ -20,6 +20,10 @@ _db_pass = _MYSQL_PASSWORD.replace("%", "%%")
 DATABASE_URL = f"mysql+pymysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
 ASYNC_DATABASE_URL = f"mysql+aiomysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
 
+# 连接池：可通过环境变量调优，生产环境建议 pool_size=20, max_overflow=40
+_db_pool_size = int(os.environ.get("DB_POOL_SIZE", "10"))
+_db_max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+
 # 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
 _NATURAL_PAD = 10
 
@@ -58,12 +62,22 @@ class ImageTag(SQLModel, table=True):
     tag_id: int = Field(foreign_key="tags.id", primary_key=True)
 
 
+class PathCountCache(SQLModel, table=True):
+    """path 下图片数量持久化缓存，减轻百万级 COUNT 查询"""
+    __tablename__ = "path_count_cache"
+
+    path: str = Field(primary_key=True)
+    mode: str = Field(primary_key=True)
+    total: int = 0
+    updated_at: float = 0
+
+
 sync_engine = create_engine(DATABASE_URL, echo=False)
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,
     echo=False,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=_db_pool_size,
+    max_overflow=_db_max_overflow,
 )
 async_session_factory = async_sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
@@ -128,6 +142,45 @@ def _run_media_type_migration() -> None:
         conn.commit()
 
 
+def _run_fulltext_migration() -> None:
+    """为 images.filename 添加 FULLTEXT 索引，支持百万级搜索"""
+    from sqlalchemy import text
+
+    with sync_engine.connect() as conn:
+        r = conn.execute(text(
+            "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' "
+            "AND INDEX_TYPE = 'FULLTEXT' AND COLUMN_NAME = 'filename'"
+        ))
+        if r.fetchone() is None:
+            try:
+                conn.execute(text("CREATE FULLTEXT INDEX ft_images_filename ON images(filename)"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+
+def _run_path_count_cache_migration() -> None:
+    """创建 path_count_cache 表（若不存在）"""
+    from sqlalchemy import text
+
+    with sync_engine.connect() as conn:
+        r = conn.execute(text(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'path_count_cache'"
+        ))
+        if r.fetchone() is None:
+            conn.execute(text(
+                "CREATE TABLE path_count_cache ("
+                "path VARCHAR(512) NOT NULL, "
+                "mode VARCHAR(32) NOT NULL, "
+                "total INT NOT NULL DEFAULT 0, "
+                "updated_at DOUBLE NOT NULL DEFAULT 0, "
+                "PRIMARY KEY (path, mode))"
+            ))
+            conn.commit()
+
+
 def _run_tags_migration() -> None:
     """创建 tags 和 image_tags 表（若不存在）"""
     from sqlalchemy import text
@@ -162,6 +215,8 @@ def init_db() -> None:
     _run_natural_sort_migration()
     _run_media_type_migration()
     _run_tags_migration()
+    _run_fulltext_migration()
+    _run_path_count_cache_migration()
 
 
 async def get_async_session():

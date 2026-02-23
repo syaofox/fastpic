@@ -26,6 +26,8 @@ from utils.images import delete_image_files
 
 router = APIRouter(prefix="/api", tags=["images"])
 
+_IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批大小，避免 max_allowed_packet
+
 
 def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
     """同步计算目标目录中已有图片的 MD5 哈希"""
@@ -47,18 +49,20 @@ async def delete_images(
     body: DeleteImagesRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """删除指定 ID 的图片（数据库记录 + 原图 + 缓存）"""
+    """删除指定 ID 的图片（数据库记录 + 原图 + 缓存），分批处理支持大批量"""
     if not body.ids:
         return {"deleted": 0}
-    stmt = select(Image).where(Image.id.in_(body.ids))
-    result = await session.execute(stmt)
-    images = list(result.scalars().all())
     deleted = 0
-    for img in images:
-        delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-        await session.delete(img)
-        deleted += 1
-    await session.commit()
+    for i in range(0, len(body.ids), _IN_CLAUSE_BATCH_SIZE):
+        batch_ids = body.ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+        stmt = select(Image).where(Image.id.in_(batch_ids))
+        result = await session.execute(stmt)
+        images = list(result.scalars().all())
+        for img in images:
+            delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
+            await session.delete(img)
+            deleted += 1
+        await session.commit()
     return {"deleted": deleted}
 
 
@@ -104,9 +108,13 @@ async def download_zip(
     """批量下载：打包为 ZIP"""
     rel_paths: set[str] = set()
     if body.image_ids:
-        result = await session.execute(select(Image.relative_path).where(Image.id.in_(body.image_ids)))
-        for row in result.fetchall():
-            rel_paths.add(row[0])
+        for i in range(0, len(body.image_ids), _IN_CLAUSE_BATCH_SIZE):
+            batch_ids = body.image_ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+            result = await session.execute(
+                select(Image.relative_path).where(Image.id.in_(batch_ids))
+            )
+            for row in result.fetchall():
+                rel_paths.add(row[0])
     for raw_path in body.folder_paths or []:
         path = normalize_path(raw_path, allow_empty=False)
         if path is None:

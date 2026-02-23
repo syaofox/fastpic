@@ -1,5 +1,8 @@
 """API 请求/响应 Pydantic 模型"""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# IN 子句分批上限，避免百万级 id 导致 max_allowed_packet 或查询退化
+MAX_IDS_LENGTH = 2000
 
 
 class AddTagsRequest(BaseModel):
@@ -23,7 +26,7 @@ class ScanDuplicatesRequest(BaseModel):
 
 
 class DeleteImagesRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(max_length=MAX_IDS_LENGTH)
 
 
 class DeleteFoldersRequest(BaseModel):
@@ -37,12 +40,12 @@ class MergeFoldersRequest(BaseModel):
 
 
 class DownloadZipRequest(BaseModel):
-    image_ids: list[int] = []
+    image_ids: list[int] = Field(default_factory=list, max_length=MAX_IDS_LENGTH)
     folder_paths: list[str] = []
 
 
 class MoveImagesRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(max_length=MAX_IDS_LENGTH)
     target_path: str
 
 
@@ -67,7 +70,7 @@ class RenameImageRequest(BaseModel):
 
 
 class BatchRenameInfoRequest(BaseModel):
-    image_ids: list[int] = []
+    image_ids: list[int] = Field(default_factory=list, max_length=MAX_IDS_LENGTH)
     folder_paths: list[str] = []
 
 

@@ -40,6 +40,7 @@ from utils.folder_tree import (
 )
 
 _FOLDER_OP_BATCH_SIZE = 1000  # 文件夹操作分批大小，支持大文件夹
+_IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批大小，避免 max_allowed_packet
 from utils.search import search_match
 from utils.hash_utils import compute_file_md5
 
@@ -59,9 +60,12 @@ async def move_images(
         return {"moved": 0, "errors": ["目标路径不合法"]}
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
-    stmt = select(Image).where(Image.id.in_(body.ids))
-    result = await session.execute(stmt)
-    images = list(result.scalars().all())
+    images: list[Image] = []
+    for i in range(0, len(body.ids), _IN_CLAUSE_BATCH_SIZE):
+        batch_ids = body.ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+        stmt = select(Image).where(Image.id.in_(batch_ids))
+        result = await session.execute(stmt)
+        images.extend(result.scalars().all())
     moved = 0
     errors = []
     for img in images:
@@ -93,7 +97,7 @@ async def move_images(
         img.filename_natural = natural_sort_key(dest_path.name)
         img.relative_path_natural = natural_sort_key(new_rel)
         img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
-        img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
+        img.file_size = await asyncio.to_thread(os.path.getsize, dest_path)
         new_cache = CACHE_DIR / cache_filename(new_rel)
         await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
         session.add(img)
@@ -322,7 +326,7 @@ async def rename_image(
     img.filename_natural = natural_sort_key(dest_path.name)
     img.relative_path_natural = natural_sort_key(new_rel)
     img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
-    img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
+    img.file_size = await asyncio.to_thread(os.path.getsize, dest_path)
     new_cache = CACHE_DIR / cache_filename(new_rel)
     if dest_path.suffix.lower() in VIDEO_EXTENSIONS:
         await asyncio.to_thread(_generate_video_thumbnail, dest_path, new_cache)
@@ -344,15 +348,17 @@ async def batch_rename_info(
     folders: list[dict] = []
 
     if body.image_ids:
-        stmt = select(Image).where(Image.id.in_(body.image_ids))
-        result = await session.execute(stmt)
-        for img in result.scalars().all():
-            images.append({
-                "id": img.id,
-                "filename": img.filename,
-                "relative_path": img.relative_path,
-                "modified_at": img.modified_at,
-            })
+        for i in range(0, len(body.image_ids), _IN_CLAUSE_BATCH_SIZE):
+            batch_ids = body.image_ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+            stmt = select(Image).where(Image.id.in_(batch_ids))
+            result = await session.execute(stmt)
+            for img in result.scalars().all():
+                images.append({
+                    "id": img.id,
+                    "filename": img.filename,
+                    "relative_path": img.relative_path,
+                    "modified_at": img.modified_at,
+                })
 
     for folder_path in body.folder_paths or []:
         folder_path = normalize_path(folder_path, allow_empty=False)
@@ -497,7 +503,7 @@ async def batch_rename(
         img.filename_natural = natural_sort_key(dest_path.name)
         img.relative_path_natural = natural_sort_key(new_rel)
         img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
-        img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
+        img.file_size = await asyncio.to_thread(os.path.getsize, dest_path)
         new_cache = CACHE_DIR / cache_filename(new_rel)
         if dest_path.suffix.lower() in VIDEO_EXTENSIONS:
             await asyncio.to_thread(_generate_video_thumbnail, dest_path, new_cache)

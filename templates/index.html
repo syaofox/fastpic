@@ -42,6 +42,7 @@
             </div>
             <div class="space-y-0" id="folder-tree">
                 {% set current_path = request.query_params.get('path') or '' %}
+                {% set folder_tree_max_depth = 4 %}
                 {% include "partials/folder_tree.html" with context %}
             </div>
             {% include "partials/tag_list.html" with context %}
@@ -315,17 +316,61 @@ function toggleFolder(btn) {
     const children = node.querySelector(':scope > .folder-children');
     if (!children) return;
     const expanded = btn.getAttribute('data-expanded') === 'true';
-        if (expanded) {
-            children.classList.add('hidden');
-            btn.querySelector('.chevron').classList.remove('-rotate-90');
-            btn.setAttribute('data-expanded', 'false');
-            btn.setAttribute('aria-label', '展开');
-        } else {
-            children.classList.remove('hidden');
-            btn.querySelector('.chevron').classList.add('-rotate-90');
-            btn.setAttribute('data-expanded', 'true');
-            btn.setAttribute('aria-label', '折叠');
+    const isLazy = btn.getAttribute('data-lazy') === 'true';
+    const path = btn.getAttribute('data-path') || '';
+    if (expanded) {
+        children.classList.add('hidden');
+        btn.querySelector('.chevron').classList.remove('-rotate-90');
+        btn.setAttribute('data-expanded', 'false');
+        btn.setAttribute('aria-label', '展开');
+    } else {
+        if (isLazy && children.hasAttribute('data-lazy-placeholder')) {
+            fetch('/api/folder-children?path=' + encodeURIComponent(path))
+                .then(r => r.json())
+                .then(function(data) {
+                    if (!data.children || data.children.length === 0) {
+                        children.innerHTML = '';
+                        children.removeAttribute('data-lazy-placeholder');
+                    } else {
+                        var html = '';
+                        var currentPath = (document.querySelector('[name=path]') || {}).value || '';
+                        data.children.forEach(function(c) {
+                            var isCur = c.path === currentPath;
+                            html += '<div class="folder-node" data-path="' + (c.path || '').replace(/"/g, '&quot;') + '">' +
+                                '<div class="flex items-center group" style="padding-left: ' + (12 + 4 * 16) + 'px;">' +
+                                '<span class="w-5 flex-shrink-0"></span>' +
+                                '<a href="?path=' + encodeURIComponent(c.path) + '" data-path="' + (c.path || '').replace(/"/g, '&quot;') + '" ' +
+                                'class="folder-link flex-1 min-w-0 flex items-center px-2 py-1.5 rounded transition-colors ' + (isCur ? 'bg-blue-50 text-blue-600' : 'hover:bg-slate-100 text-slate-700') + '" ' +
+                                'hx-get="/gallery?path=' + encodeURIComponent(c.path) + '&search=&page=1" hx-target="#gallery-container" hx-swap="innerHTML" ' +
+                                'hx-indicator="#gallery-loading-indicator" hx-include="#mode-input,#sort-by-input,#sort-order-input,#cols-input" ' +
+                                'hx-on:click="document.querySelector(\'[name=path]\').value = \'' + (c.path || '').replace(/'/g, "\\'") + '\'">' +
+                                '<span class="truncate">' + (c.name || '').replace(/</g, '&lt;') + '</span>' +
+                                (c.image_count > 0 ? '<span class="ml-auto text-xs ' + (isCur ? 'text-blue-400' : 'text-slate-400') + ' pl-2 flex-shrink-0">' + c.image_count + '</span>' : '') +
+                                '</a></div></div>';
+                        });
+                        children.innerHTML = html;
+                        children.removeAttribute('data-lazy-placeholder');
+                        if (typeof htmx !== 'undefined') htmx.process(children);
+                    }
+                    children.classList.remove('hidden');
+                    btn.querySelector('.chevron').classList.add('-rotate-90');
+                    btn.setAttribute('data-expanded', 'true');
+                    btn.setAttribute('aria-label', '折叠');
+                })
+                .catch(function() {
+                    children.removeAttribute('data-lazy-placeholder');
+                    children.classList.remove('hidden');
+                    btn.querySelector('.chevron').classList.add('-rotate-90');
+                    btn.setAttribute('data-expanded', 'true');
+                    btn.setAttribute('aria-label', '折叠');
+                });
+            return;
         }
+        children.classList.remove('hidden');
+        btn.querySelector('.chevron').classList.add('-rotate-90');
+        btn.setAttribute('data-expanded', 'true');
+        btn.setAttribute('aria-label', '折叠');
+    }
 }
 
 let modalImages = [];
