@@ -3,6 +3,7 @@ import re
 import sys
 
 from sqlmodel import Field, SQLModel, create_engine
+from sqlalchemy import Column, String
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 # 数据库配置：仅支持 MariaDB，需设置 MYSQL_HOST
@@ -27,6 +28,10 @@ _db_max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
 # 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
 _NATURAL_PAD = 10
 
+# natural 列长度：含大量数字的文件名（如 UUID、时间戳）经 natural_sort_key 补零后会显著变长
+_FILENAME_NATURAL_LEN = 512
+_RELATIVE_PATH_NATURAL_LEN = 2048
+
 
 def natural_sort_key(s: str) -> str:
     """将字符串转为自然排序键：数字段左补零，使 1<2<10<100"""
@@ -43,8 +48,14 @@ class Image(SQLModel, table=True):
     file_size: int = Field(default=0, index=True)
     width: int = 0
     height: int = 0
-    filename_natural: str | None = Field(default=None, index=True)
-    relative_path_natural: str | None = Field(default=None, index=True)
+    filename_natural: str | None = Field(
+        default=None,
+        sa_column=Column(String(_FILENAME_NATURAL_LEN), index=True),
+    )
+    relative_path_natural: str | None = Field(
+        default=None,
+        sa_column=Column(String(_RELATIVE_PATH_NATURAL_LEN), index=False),
+    )
     media_type: str = Field(default="image", index=True)  # "image" | "video"
 
 
@@ -84,39 +95,15 @@ async_session_factory = async_sessionmaker(
 )
 
 
-def _run_natural_sort_migration() -> None:
-    """为已有表添加 filename_natural / relative_path_natural 列并回填"""
+def _run_natural_sort_index_migration() -> None:
+    """为 relative_path_natural 创建前缀索引（VARCHAR(2048) 超索引键长，需前缀）"""
     from sqlalchemy import text
 
     with sync_engine.connect() as conn:
-        r = conn.execute(text(
-            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'filename_natural'"
-        ))
-        if r.fetchone() is None:
-            conn.execute(text("ALTER TABLE images ADD COLUMN filename_natural VARCHAR(255)"))
-            conn.execute(text("ALTER TABLE images ADD COLUMN relative_path_natural VARCHAR(512)"))
-            conn.commit()
-        r = conn.execute(
-            text("SELECT id, filename, relative_path FROM images WHERE filename_natural IS NULL")
-        )
-        rows = r.fetchall()
-        if rows:
-            for row in rows:
-                kid, fn, rp = row
-                nfn = natural_sort_key(fn or "")
-                nrp = natural_sort_key(rp or "")
-                conn.execute(
-                    text("UPDATE images SET filename_natural = :nfn, relative_path_natural = :nrp WHERE id = :kid"),
-                    {"nfn": nfn, "nrp": nrp, "kid": kid},
-                )
-            conn.commit()
         try:
-            conn.execute(text("CREATE INDEX ix_images_filename_natural ON images(filename_natural)"))
-        except Exception:
-            pass
-        try:
-            conn.execute(text("CREATE INDEX ix_images_relative_path_natural ON images(relative_path_natural)"))
+            conn.execute(text(
+                "CREATE INDEX ix_images_relative_path_natural ON images(relative_path_natural(512))"
+            ))
         except Exception:
             pass
         conn.commit()
@@ -210,10 +197,13 @@ def _run_tags_migration() -> None:
 
 
 def init_db() -> None:
-    """创建数据库表"""
+    """创建数据库表（仅支持全新部署）"""
     SQLModel.metadata.create_all(sync_engine)
-    _run_natural_sort_migration()
+    _run_natural_sort_index_migration()
     _run_media_type_migration()
+    _run_tags_migration()
+    _run_fulltext_migration()
+    _run_path_count_cache_migration()
     _run_tags_migration()
     _run_fulltext_migration()
     _run_path_count_cache_migration()
