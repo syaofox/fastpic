@@ -231,6 +231,11 @@
                         title="移动到其他文件夹" aria-label="移动到其他文件夹">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
                 </button>
+                <button type="button" id="modal-rename-btn" onclick="window.showRenameDialogForCurrentImage && window.showRenameDialogForCurrentImage(); event.stopPropagation();"
+                        class="p-2 h-8 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all flex items-center justify-center"
+                        title="重命名当前图片" aria-label="重命名当前图片">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </button>
                 <button type="button" id="modal-download-btn" onclick="downloadCurrentImage(); event.stopPropagation();"
                         class="p-2 h-8 rounded-full bg-white/15 hover:bg-white/30 text-white/80 hover:text-white transition-all flex items-center justify-center"
                         title="下载当前图片" aria-label="下载当前图片">
@@ -1783,10 +1788,13 @@ document.addEventListener('keydown', function(e) {
         // 不响应遮罩点击关闭，避免误触（只能通过取消按钮或 Esc 关闭）
     };
 
-    window.showRenameImageDialog = function() {
-        var images = (window.getSelectedImages && window.getSelectedImages()) || [];
-        if (images.length !== 1) return;
-        var imageId = images[0];
+    window.showRenameImageDialog = function(optImageId) {
+        var imageId = optImageId;
+        if (!imageId) {
+            var images = (window.getSelectedImages && window.getSelectedImages()) || [];
+            if (images.length !== 1) return;
+            imageId = images[0];
+        }
         var currentStem = '';
         var currentExt = '';
         var item = document.querySelector('.selectable-item[data-image-id="' + imageId + '"]');
@@ -1864,6 +1872,12 @@ document.addEventListener('keydown', function(e) {
                     if (window.exitSelectMode) window.exitSelectMode();
                     if (typeof refreshGalleryFromModal === 'function') refreshGalleryFromModal();
                     if (window.refreshSidebar) window.refreshSidebar();
+                    if (data.path && typeof modalImageIds !== 'undefined' && modalImageIds[modalIndex] === imageId) {
+                        var newUrl = '/photos/' + (data.path || '').split('/').map(encodeURIComponent).join('/');
+                        modalImages[modalIndex] = newUrl;
+                        if (typeof _showModalContent === 'function') _showModalContent(newUrl, modalMediaTypes[modalIndex]);
+                        if (typeof refreshImageInfoIfVisible === 'function') refreshImageInfoIfVisible();
+                    }
                 } else {
                     errorEl.textContent = (data && (data.error || data.detail)) || '重命名失败';
                     errorEl.classList.remove('hidden');
@@ -3132,6 +3146,13 @@ document.addEventListener('keydown', function(e) {
 
         renderBreadcrumb();
         loadSubfolders();
+    };
+
+    window.showRenameDialogForCurrentImage = function() {
+        if (modalImageIds.length === 0 || modalIndex >= modalImageIds.length) return;
+        var id = modalImageIds[modalIndex];
+        if (!id) return;
+        window.showRenameImageDialog && window.showRenameImageDialog(id);
     };
 
     window.showMoveDialogForCurrentImage = function() {
