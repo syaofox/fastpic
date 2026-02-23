@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from sqlmodel import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR
@@ -102,7 +103,11 @@ async def move_images(
         await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
         session.add(img)
         moved += 1
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        errors.append("路径冲突（可能与已有文件重复），请重试")
     return {"moved": moved, "errors": errors}
 
 
@@ -178,10 +183,20 @@ async def move_folders(
                 session.add(img)
                 moved += 1
                 last_id = img.id or last_id
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                errors.append(f"{folder_path}: 路径冲突，请重试")
+                break
             await asyncio.sleep(0)
         print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        if not any("路径冲突" in e for e in errors):
+            errors.append("路径冲突，请重试")
     return {"moved": moved, "errors": errors}
 
 
@@ -257,7 +272,11 @@ async def rename_folder(
                         await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
                 session.add(img)
                 last_id = img.id or last_id
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return {"ok": False, "error": "路径冲突，请重试"}
             await asyncio.sleep(0)
 
         invalidate_folder_tree_cache()
@@ -333,9 +352,13 @@ async def rename_image(
     else:
         await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
     session.add(img)
-    await session.commit()
-    print(f"[api] 重命名图片: {img.relative_path} → {new_rel}", flush=True)
-    return {"ok": True, "path": new_rel}
+    try:
+        await session.commit()
+        print(f"[api] 重命名图片: {img.relative_path} → {new_rel}", flush=True)
+        return {"ok": True, "path": new_rel}
+    except IntegrityError:
+        await session.rollback()
+        return {"ok": False, "error": "路径冲突（可能与已有文件重复），请重试"}
 
 
 @router.post("/batch-rename-info")
@@ -736,10 +759,14 @@ async def merge_folders(
                 source_path.rmdir()
             except OSError:
                 pass
-    await session.commit()
-    invalidate_folder_tree_cache()
-    print(f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件", flush=True)
-    return {"ok": True, "moved": moved, "deleted": len(to_delete), "target": target_prefix}
+    try:
+        await session.commit()
+        invalidate_folder_tree_cache()
+        print(f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件", flush=True)
+        return {"ok": True, "moved": moved, "deleted": len(to_delete), "target": target_prefix}
+    except IntegrityError:
+        await session.rollback()
+        return {"ok": False, "error": "路径冲突，请重试"}
 
 
 @router.post("/create-folder")

@@ -262,7 +262,20 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
 
         pending: list[Path] = []
         batch_count = 0
+        seen_in_run: set[str] = set()  # 本轮已添加的 relative_path（小写），避免重复插入
         loop = asyncio.get_running_loop()
+
+        def _dedupe_image_results(
+            results: list[tuple[str, str, float, int, int, int, bool]],
+        ) -> list[tuple[str, str, float, int, int, int, bool]]:
+            """按 relative_path 去重（MySQL 默认 collation 大小写不敏感）"""
+            seen: dict[str, tuple] = {}
+            for data in results:
+                _, rel_path, *_ = data
+                key = rel_path.lower()
+                if key not in seen:
+                    seen[key] = data
+            return list(seen.values())
 
         async def _process_batch(paths: list[Path]) -> list[tuple[str, str, float, int, int, int]]:
             """多进程处理一批图片，返回成功的结果列表"""
@@ -297,7 +310,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
             existing = {r[0] for r in result.fetchall()}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if rel_path in existing:
+                if rel_path in existing or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
 
@@ -306,8 +319,13 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                 batch_to_process = pending[: _PROCESS_BATCH_SIZE]
                 pending = pending[_PROCESS_BATCH_SIZE :]
                 results = await _process_batch(batch_to_process)
+                results = _dedupe_image_results(results)
                 for data in results:
                     filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
+                    key = rel_path.lower()
+                    if key in seen_in_run:
+                        continue
+                    seen_in_run.add(key)
                     record = create_image_record(
                         filename=filename,
                         relative_path=rel_path,
@@ -334,8 +352,13 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
         # 处理剩余 pending
         if pending:
             results = await _process_batch(pending)
+            results = _dedupe_image_results(results)
             for data in results:
                 filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
+                key = rel_path.lower()
+                if key in seen_in_run:
+                    continue
+                seen_in_run.add(key)
                 record = create_image_record(
                     filename=filename,
                     relative_path=rel_path,
@@ -382,6 +405,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
     async with async_session_factory() as session:
         pending: list[Path] = []
         batch_count = 0
+        seen_in_run: set[str] = set()  # 本轮已添加的 relative_path（小写），避免重复插入
         loop = asyncio.get_running_loop()
 
         async def _process_video_batch(paths: list[Path]) -> list[tuple[str, str, float, int, int, int]]:
@@ -397,6 +421,18 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
                 ]
                 raw_results = await asyncio.gather(*tasks)
             return [r for r in raw_results if r is not None]
+
+        def _dedupe_results(
+            results: list[tuple[str, str, float, int, int, int]],
+        ) -> list[tuple[str, str, float, int, int, int]]:
+            """按 relative_path 去重（MySQL 默认 collation 大小写不敏感，需统一）"""
+            seen: dict[str, tuple] = {}
+            for data in results:
+                _, rel_path, *_ = data
+                key = rel_path.lower()
+                if key not in seen:
+                    seen[key] = data
+            return list(seen.values())
 
         _EXISTS_CHECK_BATCH = 500
         vi = 0
@@ -415,7 +451,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
             existing = {r[0] for r in result.fetchall()}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if rel_path in existing:
+                if rel_path in existing or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
 
@@ -423,8 +459,13 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
                 batch_to_process = pending[: _video_batch_size]
                 pending = pending[_video_batch_size :]
                 results = await _process_video_batch(batch_to_process)
+                results = _dedupe_results(results)
                 for data in results:
                     filename, rel_path, modified_at, file_size, width, height = data
+                    key = rel_path.lower()
+                    if key in seen_in_run:
+                        continue
+                    seen_in_run.add(key)
                     record = create_image_record(
                         filename=filename,
                         relative_path=rel_path,
@@ -447,8 +488,13 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
 
         if pending:
             results = await _process_video_batch(pending)
+            results = _dedupe_results(results)
             for data in results:
                 filename, rel_path, modified_at, file_size, width, height = data
+                key = rel_path.lower()
+                if key in seen_in_run:
+                    continue
+                seen_in_run.add(key)
                 record = create_image_record(
                     filename=filename,
                     relative_path=rel_path,
