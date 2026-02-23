@@ -175,20 +175,20 @@ def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
             return False
 
 
-def _collect_image_files(photos_dir: Path) -> list[Path]:
-    """在线程中收集所有图片文件路径"""
-    files: list[Path] = []
-    for ext in IMAGE_EXTENSIONS:
-        files.extend(photos_dir.rglob(f"*{ext}"))
-    return files
-
-
-def _collect_video_files(photos_dir: Path) -> list[Path]:
-    """在线程中收集所有视频文件路径"""
-    files: list[Path] = []
-    for ext in VIDEO_EXTENSIONS:
-        files.extend(photos_dir.rglob(f"*{ext}"))
-    return files
+def _collect_media_files(photos_dir: Path) -> tuple[list[Path], list[Path]]:
+    """一次 os.walk 遍历收集图片和视频路径，避免多次 rglob 重复遍历"""
+    images: list[Path] = []
+    videos: list[Path] = []
+    for root, dirs, files in os.walk(photos_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for f in files:
+            p = Path(root) / f
+            ext = p.suffix.lower()
+            if ext in IMAGE_EXTENSIONS:
+                images.append(p)
+            elif ext in VIDEO_EXTENSIONS:
+                videos.append(p)
+    return images, videos
 
 
 def _process_single_image_sync(
@@ -256,8 +256,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
     DB_BATCH_SIZE = 50  # 每 50 张提交一次，边扫边可见
 
     async with async_session_factory() as session:
-        # 在线程中收集所有图片文件，避免阻塞事件循环
-        image_files = await asyncio.to_thread(_collect_image_files, photos_dir)
+        image_files, _ = await asyncio.to_thread(_collect_media_files, photos_dir)
         total_files = len(image_files)
         print(f"[scan] 发现 {total_files} 个图片文件", flush=True)
 
@@ -281,25 +280,32 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
 
         damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME)
 
-        for full_path in image_files:
-            if not full_path.is_file():
+        _EXISTS_CHECK_BATCH = 500  # 批量检查是否已存在，减少 DB 往返
+        i = 0
+        while i < len(image_files):
+            check_batch = [
+                p for p in image_files[i : i + _EXISTS_CHECK_BATCH]
+                if p.is_file()
+            ]
+            i += _EXISTS_CHECK_BATCH
+            if not check_batch:
                 continue
-
-            rel_path = _relative_path(photos_dir, full_path)
-
-            # 检查是否已存在
+            rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
             result = await session.execute(
-                select(Image).where(Image.relative_path == rel_path)
+                select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
             )
-            if result.scalar_one_or_none():
-                continue
-
-            pending.append(full_path)
+            existing = {r[0] for r in result.fetchall()}
+            for full_path in check_batch:
+                rel_path = _relative_path(photos_dir, full_path)
+                if rel_path in existing:
+                    continue
+                pending.append(full_path)
 
             # 攒够一批则多进程处理
-            if len(pending) >= _PROCESS_BATCH_SIZE:
-                results = await _process_batch(pending)
-                pending = []
+            while len(pending) >= _PROCESS_BATCH_SIZE:
+                batch_to_process = pending[: _PROCESS_BATCH_SIZE]
+                pending = pending[_PROCESS_BATCH_SIZE :]
+                results = await _process_batch(batch_to_process)
                 for data in results:
                     filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
                     record = create_image_record(
@@ -364,8 +370,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
     cache_dir = cache_dir.resolve()
     count = 0
 
-    # 在线程中收集视频文件
-    video_files = await asyncio.to_thread(_collect_video_files, photos_dir)
+    _, video_files = await asyncio.to_thread(_collect_media_files, photos_dir)
     if not video_files:
         return 0
 
@@ -393,23 +398,31 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
                 raw_results = await asyncio.gather(*tasks)
             return [r for r in raw_results if r is not None]
 
-        for full_path in video_files:
-            if not full_path.is_file():
+        _EXISTS_CHECK_BATCH = 500
+        vi = 0
+        while vi < len(video_files):
+            check_batch = [
+                p for p in video_files[vi : vi + _EXISTS_CHECK_BATCH]
+                if p.is_file()
+            ]
+            vi += _EXISTS_CHECK_BATCH
+            if not check_batch:
                 continue
-
-            rel_path = _relative_path(photos_dir, full_path)
-
+            rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
             result = await session.execute(
-                select(Image).where(Image.relative_path == rel_path)
+                select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
             )
-            if result.scalar_one_or_none():
-                continue
+            existing = {r[0] for r in result.fetchall()}
+            for full_path in check_batch:
+                rel_path = _relative_path(photos_dir, full_path)
+                if rel_path in existing:
+                    continue
+                pending.append(full_path)
 
-            pending.append(full_path)
-
-            if len(pending) >= _video_batch_size:
-                results = await _process_video_batch(pending)
-                pending = []
+            while len(pending) >= _video_batch_size:
+                batch_to_process = pending[: _video_batch_size]
+                pending = pending[_video_batch_size :]
+                results = await _process_video_batch(batch_to_process)
                 for data in results:
                     filename, rel_path, modified_at, file_size, width, height = data
                     record = create_image_record(
@@ -465,6 +478,9 @@ def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
     return _generate_thumbnail(photo_path, cache_path)
 
 
+_CLEANUP_BATCH_SIZE = 5000  # 分批处理，避免百万级全表加载 OOM
+
+
 async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
     """
     数据库清理同步，处理三种不一致：
@@ -472,6 +488,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
     2. 孤儿缓存：cache 目录中多余的 .webp 文件 → 删除
     3. 缺失缓存：数据库有记录但缩略图丢失 → 重新生成
 
+    使用分批处理，支持百万级规模，避免全表加载 OOM。
     返回 {"stale_removed": int, "orphan_cache_removed": int, "cache_regenerated": int}
     """
     photos_dir = photos_dir.resolve()
@@ -483,92 +500,114 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
     print("[cleanup] 开始数据库清理...", flush=True)
 
-    # ── 第 1 步：清除幽灵记录（原图不存在的数据库记录） ──
+    # ── 第 1 步：清除幽灵记录（分批加载，避免 OOM） ──
+    valid_cache_names: set[str] = set()
     async with async_session_factory() as session:
-        result = await session.execute(select(Image))
-        all_images = list(result.scalars().all())
-        print(f"[cleanup] 数据库共 {len(all_images)} 条记录，开始检查原图是否存在...", flush=True)
+        last_id = 0
+        total_checked = 0
+        while True:
+            stmt = (
+                select(Image)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_CLEANUP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            batch = list(result.scalars().all())
+            if not batch:
+                break
+            total_checked += len(batch)
+            if total_checked == len(batch):
+                print(f"[cleanup] 数据库共约 {len(batch)}+ 条记录，分批检查原图是否存在...", flush=True)
 
-        # 收集有效记录的 cache 文件名，供第 2 步使用
-        valid_cache_names: set[str] = set()
+            batch_count = 0
+            for img in batch:
+                photo_path = photos_dir / img.relative_path
+                if not photo_path.exists():
+                    cache_name = cache_filename(img.relative_path)
+                    cache_path = cache_dir / cache_name
+                    if cache_path.exists():
+                        cache_path.unlink(missing_ok=True)
+                    await session.delete(img)
+                    stale_removed += 1
+                    batch_count += 1
+                    if batch_count >= 100:
+                        await session.commit()
+                        batch_count = 0
+                else:
+                    valid_cache_names.add(cache_filename(img.relative_path))
+                last_id = img.id or last_id
 
-        batch_count = 0
-        checked_since_yield = 0
-        for img in all_images:
-            photo_path = photos_dir / img.relative_path
-            if not photo_path.exists():
-                # 原图已不存在，删除数据库记录和缓存
-                cache_name = cache_filename(img.relative_path)
-                cache_path = cache_dir / cache_name
-                if cache_path.exists():
-                    cache_path.unlink(missing_ok=True)
-                await session.delete(img)
-                stale_removed += 1
-                batch_count += 1
-                if batch_count >= 100:
-                    await session.commit()
-                    batch_count = 0
-            else:
-                valid_cache_names.add(cache_filename(img.relative_path))
-            checked_since_yield += 1
-            if checked_since_yield >= 100:
-                await asyncio.sleep(0)
-                checked_since_yield = 0
-
-        if batch_count > 0:
-            await session.commit()
+            if batch_count > 0:
+                await session.commit()
+            await asyncio.sleep(0)
 
         if stale_removed:
             print(f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
 
-    # ── 第 2 步：清除孤儿缓存文件（rglob 递归遍历分层目录） ──
-    def _list_cache_webp(cache_dir: Path) -> list[Path]:
+    # ── 第 2 步：清除孤儿缓存文件（线程中 rglob 流式处理，不加载全量到内存） ──
+    def _remove_orphan_cache(cache_dir: Path, valid: set[str]) -> int:
+        """在线程中执行，rglob 迭代器逐个处理，不加载全量"""
+        count = 0
         if not cache_dir.exists():
-            return []
-        return list(cache_dir.rglob("*.webp"))
-
-    if cache_dir.exists():
-        cache_files = await asyncio.to_thread(_list_cache_webp, cache_dir)
-        for cache_file in cache_files:
+            return 0
+        for cache_file in cache_dir.rglob("*.webp"):
             rel = str(cache_file.relative_to(cache_dir)).replace("\\", "/")
-            if rel not in valid_cache_names:
+            if rel not in valid:
                 cache_file.unlink(missing_ok=True)
-                orphan_cache_removed += 1
+                count += 1
+        return count
 
-        if orphan_cache_removed:
-            print(f"[cleanup] 清除 {orphan_cache_removed} 个孤儿缓存文件", flush=True)
+    orphan_cache_removed = await asyncio.to_thread(
+        _remove_orphan_cache, cache_dir, valid_cache_names
+    )
+    if orphan_cache_removed:
+        print(f"[cleanup] 清除 {orphan_cache_removed} 个孤儿缓存文件", flush=True)
 
-    # ── 第 3 步：补全缺失的缩略图缓存（多进程并行生成） ──
+    # ── 第 3 步：补全缺失的缩略图缓存（分批加载 + 多进程生成） ──
     async with async_session_factory() as session:
-        result = await session.execute(select(Image))
-        all_images = list(result.scalars().all())
+        last_id = 0
+        loop = asyncio.get_running_loop()
+        while True:
+            stmt = (
+                select(Image)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_CLEANUP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            batch = list(result.scalars().all())
+            if not batch:
+                break
 
-        to_regen: list[tuple[Path, Path, bool]] = []
-        for img in all_images:
-            cache_name = cache_filename(img.relative_path)
-            cache_path = cache_dir / cache_name
-            if not cache_path.exists():
-                photo_path = photos_dir / img.relative_path
-                if photo_path.exists():
-                    is_video = getattr(img, "media_type", "image") == "video"
-                    to_regen.append((photo_path, cache_path, is_video))
+            to_regen: list[tuple[Path, Path, bool]] = []
+            for img in batch:
+                cache_name = cache_filename(img.relative_path)
+                cache_path = cache_dir / cache_name
+                if not cache_path.exists():
+                    photo_path = photos_dir / img.relative_path
+                    if photo_path.exists():
+                        is_video = getattr(img, "media_type", "image") == "video"
+                        to_regen.append((photo_path, cache_path, is_video))
+                last_id = img.id or last_id
 
-        if to_regen:
-            loop = asyncio.get_running_loop()
-            batch_size = min(_PROCESS_BATCH_SIZE, len(to_regen))
-            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-                for i in range(0, len(to_regen), batch_size):
-                    batch = to_regen[i : i + batch_size]
-                    tasks = [
-                        loop.run_in_executor(executor, _regenerate_one, item)
-                        for item in batch
-                    ]
-                    results = await asyncio.gather(*tasks)
-                    cache_regenerated += sum(1 for ok in results if ok)
-                    await asyncio.sleep(0)
+            if to_regen:
+                regen_batch_size = min(_PROCESS_BATCH_SIZE, len(to_regen))
+                with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                    for i in range(0, len(to_regen), regen_batch_size):
+                        regen_batch = to_regen[i : i + regen_batch_size]
+                        tasks = [
+                            loop.run_in_executor(executor, _regenerate_one, item)
+                            for item in regen_batch
+                        ]
+                        results = await asyncio.gather(*tasks)
+                        cache_regenerated += sum(1 for ok in results if ok)
+                        await asyncio.sleep(0)
 
-            if cache_regenerated:
-                print(f"[cleanup] 重新生成 {cache_regenerated} 个缺失缓存", flush=True)
+            await asyncio.sleep(0)
+
+        if cache_regenerated:
+            print(f"[cleanup] 重新生成 {cache_regenerated} 个缺失缓存", flush=True)
 
     summary = {
         "stale_removed": stale_removed,

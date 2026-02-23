@@ -38,6 +38,8 @@ from utils.folder_tree import (
     get_subfolders,
     scan_all_dirs_for_search,
 )
+
+_FOLDER_OP_BATCH_SIZE = 1000  # 文件夹操作分批大小，支持大文件夹
 from utils.search import search_match
 from utils.hash_utils import compute_file_md5
 
@@ -140,27 +142,40 @@ async def move_folders(
             errors.append(f"{folder_path}: {e}")
             continue
         pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        stmt = select(Image).where(pf)
-        result = await session.execute(stmt)
-        images = list(result.scalars().all())
-        for img in images:
-            suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
-            new_rel = new_prefix + suffix
-            old_cache = CACHE_DIR / cache_filename(img.relative_path)
-            if old_cache.exists():
-                old_cache.unlink(missing_ok=True)
-            img.relative_path = new_rel
-            img.filename = Path(new_rel).name
-            img.filename_natural = natural_sort_key(img.filename)
-            img.relative_path_natural = natural_sort_key(new_rel)
-            new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-            if new_full.exists() and new_full.is_file():
-                img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-                img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-                new_cache = CACHE_DIR / cache_filename(new_rel)
-                await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
-            session.add(img)
-            moved += 1
+        last_id = 0
+        while True:
+            stmt = (
+                select(Image)
+                .where(pf)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_FOLDER_OP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            images = list(result.scalars().all())
+            if not images:
+                break
+            for img in images:
+                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                new_rel = new_prefix + suffix
+                old_cache = CACHE_DIR / cache_filename(img.relative_path)
+                if old_cache.exists():
+                    old_cache.unlink(missing_ok=True)
+                img.relative_path = new_rel
+                img.filename = Path(new_rel).name
+                img.filename_natural = natural_sort_key(img.filename)
+                img.relative_path_natural = natural_sort_key(new_rel)
+                new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+                if new_full.exists() and new_full.is_file():
+                    img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+                    img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
+                    new_cache = CACHE_DIR / cache_filename(new_rel)
+                    await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+                session.add(img)
+                moved += 1
+                last_id = img.id or last_id
+            await session.commit()
+            await asyncio.sleep(0)
         print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
     await session.commit()
     return {"moved": moved, "errors": errors}
@@ -204,32 +219,44 @@ async def rename_folder(
 
     try:
         pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        stmt = select(Image).where(pf)
-        result = await session.execute(stmt)
-        images = list(result.scalars().all())
-        for img in images:
-            suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
-            new_rel = new_prefix + suffix
-            old_cache = CACHE_DIR / cache_filename(img.relative_path)
-            if old_cache.exists():
-                old_cache.unlink(missing_ok=True)
-            img.relative_path = new_rel
-            img.filename = Path(new_rel).name
-            img.filename_natural = natural_sort_key(img.filename)
-            img.relative_path_natural = natural_sort_key(new_rel)
-            new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-            if new_full.exists() and new_full.is_file():
-                img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-                img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-                new_cache = CACHE_DIR / cache_filename(new_rel)
-                if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-                    await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
-                else:
-                    await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
-            session.add(img)
+        last_id = 0
+        while True:
+            stmt = (
+                select(Image)
+                .where(pf)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_FOLDER_OP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            images = list(result.scalars().all())
+            if not images:
+                break
+            for img in images:
+                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                new_rel = new_prefix + suffix
+                old_cache = CACHE_DIR / cache_filename(img.relative_path)
+                if old_cache.exists():
+                    old_cache.unlink(missing_ok=True)
+                img.relative_path = new_rel
+                img.filename = Path(new_rel).name
+                img.filename_natural = natural_sort_key(img.filename)
+                img.relative_path_natural = natural_sort_key(new_rel)
+                new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+                if new_full.exists() and new_full.is_file():
+                    img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+                    img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
+                    new_cache = CACHE_DIR / cache_filename(new_rel)
+                    if new_full.suffix.lower() in VIDEO_EXTENSIONS:
+                        await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
+                    else:
+                        await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+                session.add(img)
+                last_id = img.id or last_id
+            await session.commit()
+            await asyncio.sleep(0)
 
         invalidate_folder_tree_cache()
-        await session.commit()
         print(f"[api] 重命名文件夹: {folder_path} → {new_prefix}", flush=True)
         return {"ok": True, "path": new_prefix}
     except Exception as e:
@@ -509,13 +536,26 @@ async def delete_folders(
         if folder_path is None:
             continue
         pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        stmt = select(Image).where(pf)
-        result = await session.execute(stmt)
-        images = list(result.scalars().all())
-        for img in images:
-            delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-            await session.delete(img)
-            total_images += 1
+        last_id = 0
+        while True:
+            stmt = (
+                select(Image)
+                .where(pf)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_FOLDER_OP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            images = list(result.scalars().all())
+            if not images:
+                break
+            for img in images:
+                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
+                await session.delete(img)
+                total_images += 1
+                last_id = img.id or last_id
+            await session.commit()
+            await asyncio.sleep(0)
         folder_fs_path = PHOTOS_DIR / folder_path
         if folder_fs_path.exists() and folder_fs_path.is_dir():
             await asyncio.to_thread(shutil.rmtree, folder_fs_path, ignore_errors=True)
@@ -549,68 +589,95 @@ async def merge_folders(
     photos_dir = PHOTOS_DIR.resolve()
     media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
-    async def _get_images_under(prefix: str) -> list[Image]:
-        pf = path_filter_for_prefix(Image.relative_path, prefix)
-        stmt = select(Image).where(pf)
-        return list((await session.execute(stmt)).scalars().all())
-
-    images_a = await _get_images_under(folder_a)
-    images_b = await _get_images_under(folder_b)
-    count_a, count_b = len(images_a), len(images_b)
-    if body.target == "folder_b":
-        target_prefix, source_prefix = folder_b, folder_a
-        source_images, target_images = images_a, images_b
-        source_path, target_path = path_a, path_b
-    else:
-        target_prefix, source_prefix = folder_a, folder_b
-        source_images, target_images = images_b, images_a
-        source_path, target_path = path_b, path_a
-    if body.target == "auto" and count_b > count_a:
-        target_prefix, source_prefix = folder_b, folder_a
-        source_images, target_images = images_a, images_b
-        source_path, target_path = path_a, path_b
-
     def _belongs_to(rel: str, prefix: str) -> bool:
         return rel == prefix or rel.startswith(prefix + "/")
 
-    all_images = [*[(img, "a") for img in images_a], *[(img, "b") for img in images_b]]
+    async def _collect_items(prefix: str, src: str) -> list[tuple[int, str, str]]:
+        """分批加载，返回 [(id, relative_path, src), ...]"""
+        pf = path_filter_for_prefix(Image.relative_path, prefix)
+        items: list[tuple[int, str, str]] = []
+        last_id = 0
+        while True:
+            stmt = (
+                select(Image.id, Image.relative_path)
+                .where(pf)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_FOLDER_OP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            rows = result.fetchall()
+            if not rows:
+                break
+            for rid, rp in rows:
+                items.append((rid, rp, src))
+                last_id = rid or last_id
+            await asyncio.sleep(0)
+        return items
+
+    items_a = await _collect_items(folder_a, "a")
+    items_b = await _collect_items(folder_b, "b")
+    count_a, count_b = len(items_a), len(items_b)
+    if body.target == "folder_b":
+        target_prefix, source_prefix = folder_b, folder_a
+        source_letter, target_letter = "a", "b"
+        source_items, target_items = items_a, items_b
+        source_path, target_path = path_a, path_b
+    else:
+        target_prefix, source_prefix = folder_a, folder_b
+        source_letter, target_letter = "b", "a"
+        source_items, target_items = items_b, items_a
+        source_path, target_path = path_b, path_a
+    if body.target == "auto" and count_b > count_a:
+        target_prefix, source_prefix = folder_b, folder_a
+        source_letter, target_letter = "a", "b"
+        source_items, target_items = items_a, items_b
+        source_path, target_path = path_a, path_b
+
     preferred = "a" if count_a >= count_b else "b"
-    by_hash: dict[str, list[tuple[Image, str]]] = defaultdict(list)
-    for img, src in all_images:
-        full = photos_dir / img.relative_path
+    by_hash: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    for item in items_a + items_b:
+        img_id, rel_path, src = item
+        full = photos_dir / rel_path
         if not full.is_file() or full.suffix.lower() not in media_extensions:
             continue
-        h = await asyncio.to_thread(compute_file_md5, photos_dir, img.relative_path)
+        h = await asyncio.to_thread(compute_file_md5, photos_dir, rel_path)
         if h is None:
             continue
-        by_hash[h].append((img, src))
-    to_keep: dict[str, Image] = {}
+        by_hash[h].append(item)
+    to_keep: dict[str, tuple[int, str, str]] = {}
     to_delete: set[int] = set()
     for h, items in by_hash.items():
-        from_preferred = [(img, src) for img, src in items if src == preferred]
-        from_other = [(img, src) for img, src in items if src != preferred]
+        from_preferred = [x for x in items if x[2] == preferred]
+        from_other = [x for x in items if x[2] != preferred]
         if from_preferred:
-            keeper = min(from_preferred, key=lambda x: x[0].relative_path)[0]
+            keeper = min(from_preferred, key=lambda x: x[1])
             to_keep[h] = keeper
-            for img, _ in from_preferred:
-                if img.id != keeper.id:
-                    to_delete.add(img.id)
-            for img, _ in from_other:
-                to_delete.add(img.id)
+            for x in from_preferred:
+                if x[0] != keeper[0]:
+                    to_delete.add(x[0])
+            for x in from_other:
+                to_delete.add(x[0])
         else:
-            keeper = min(from_other, key=lambda x: x[0].relative_path)[0]
+            keeper = min(from_other, key=lambda x: x[1])
             to_keep[h] = keeper
-            for img, _ in from_other:
-                if img.id != keeper.id:
-                    to_delete.add(img.id)
-    target_hashes: set[str] = set()
-    for img, src in all_images:
-        if img.id in to_delete:
-            continue
-        if _belongs_to(img.relative_path, target_prefix):
-            h = await asyncio.to_thread(compute_file_md5, photos_dir, img.relative_path)
-            if h:
-                target_hashes.add(h)
+            for x in from_other:
+                if x[0] != keeper[0]:
+                    to_delete.add(x[0])
+    target_hashes = {
+        h for h, k in to_keep.items()
+        if _belongs_to(k[1], target_prefix)
+    }
+    to_move: list[tuple[int, str]] = []
+    for h, items in by_hash.items():
+        for img_id, rel_path, src in items:
+            if img_id in to_delete or src != source_letter:
+                continue
+            if h not in target_hashes:
+                to_move.append((img_id, rel_path))
+            elif h in target_hashes:
+                delete_image_files(rel_path, PHOTOS_DIR, CACHE_DIR)
+                to_delete.add(img_id)
     for img_id in to_delete:
         result = await session.execute(select(Image).where(Image.id == img_id))
         img = result.scalar_one_or_none()
@@ -618,18 +685,12 @@ async def merge_folders(
             delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
             await session.delete(img)
     moved = 0
-    for img, src in all_images:
-        if img.id in to_delete:
+    for img_id, rel_path in to_move:
+        result = await session.execute(select(Image).where(Image.id == img_id))
+        img = result.scalar_one_or_none()
+        if not img:
             continue
-        if not _belongs_to(img.relative_path, source_prefix):
-            continue
-        h = await asyncio.to_thread(compute_file_md5, photos_dir, img.relative_path)
-        if not h or h in target_hashes:
-            if h in target_hashes:
-                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-                await session.delete(img)
-            continue
-        suffix = img.relative_path[len(source_prefix):].lstrip("/")
+        suffix = rel_path[len(source_prefix):].lstrip("/")
         new_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
         new_full = target_path / suffix if suffix else target_path
         new_full.parent.mkdir(parents=True, exist_ok=True)
@@ -637,11 +698,11 @@ async def merge_folders(
             new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
             new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
         try:
-            await asyncio.to_thread(shutil.move, str(photos_dir / img.relative_path), str(new_full))
+            await asyncio.to_thread(shutil.move, str(photos_dir / rel_path), str(new_full))
         except OSError as e:
             await session.rollback()
-            return {"ok": False, "error": f"移动文件失败 {img.relative_path}: {e}"}
-        old_cache = CACHE_DIR / cache_filename(img.relative_path)
+            return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
+        old_cache = CACHE_DIR / cache_filename(rel_path)
         if old_cache.exists():
             old_cache.unlink(missing_ok=True)
         img.relative_path = new_rel
@@ -656,7 +717,6 @@ async def merge_folders(
         else:
             await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
         session.add(img)
-        target_hashes.add(h)
         moved += 1
     if source_path.exists():
         for d in sorted(source_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
@@ -715,23 +775,39 @@ async def get_subfolders_api(
     }
 
 
+_SEARCH_DIRS_BATCH_SIZE = 20000
+
+
 @router.get("/search-dirs")
 async def search_dirs(
     q: str = "",
     limit: int = 20,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """全局目录搜索"""
+    """全局目录搜索（分批加载，支持百万级）"""
     q = (q or "").strip()
     if not q:
         return {"dirs": []}
-    result = await session.execute(select(Image.relative_path))
-    all_paths = [r[0] for r in result.fetchall()]
     dir_counts: dict[str, int] = {}
-    for rp in all_paths:
-        parts = rp.rsplit("/", 1)
-        dir_path = parts[0] if len(parts) == 2 else ""
-        dir_counts[dir_path] = dir_counts.get(dir_path, 0) + 1
+    last_id = 0
+    while True:
+        stmt = (
+            select(Image.id, Image.relative_path)
+            .where(Image.id > last_id)
+            .order_by(Image.id)
+            .limit(_SEARCH_DIRS_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        rows = result.fetchall()
+        if not rows:
+            break
+        for row in rows:
+            rid, rp = row
+            last_id = rid
+            parts = rp.rsplit("/", 1)
+            dir_path = parts[0] if len(parts) == 2 else ""
+            dir_counts[dir_path] = dir_counts.get(dir_path, 0) + 1
+        await asyncio.sleep(0)
     full_dir_counts: dict[str, int] = {}
     for dir_path, count in dir_counts.items():
         if not dir_path:
@@ -758,9 +834,9 @@ async def list_subdirs(
     """列出指定路径下的直接子文件夹"""
     path = normalize_path(path, allow_empty=True) or ""
     path_parts = path.split("/") if path else []
-    result = await session.execute(select(Image.relative_path))
-    rel_paths = [r[0] for r in result.fetchall()]
-    folder_tree, _, folder_counts = await get_folder_tree_cached(PHOTOS_DIR, rel_paths)
+    folder_tree, _, folder_counts = await get_folder_tree_cached(
+        PHOTOS_DIR, session=session
+    )
     depth = len(path_parts) + 1
     subdirs: list[dict] = []
     seen: set[str] = set()

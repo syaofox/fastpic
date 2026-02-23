@@ -82,7 +82,7 @@ def _per_page_for_cols(cols: int) -> int:
 
 
 # count 短期缓存（无筛选时），减轻切换文件夹时的重复查询
-_COUNT_CACHE_TTL = 30.0
+_COUNT_CACHE_TTL = 60.0
 _count_cache: dict[tuple[str, str], tuple[int, float]] = {}
 
 
@@ -106,9 +106,9 @@ def _set_cached_count(path: str, mode: str, total: int) -> None:
 @app.get("/")
 async def index(request: Request, session: AsyncSession = Depends(get_async_session)):
     """返回主页框架"""
-    result = await session.execute(select(Image.relative_path))
-    rel_paths = [r[0] for r in result.fetchall()]
-    folder_tree, nested_tree, folder_counts = await get_folder_tree_cached(PHOTOS_DIR, rel_paths)
+    folder_tree, nested_tree, folder_counts = await get_folder_tree_cached(
+        PHOTOS_DIR, session=session
+    )
     tag_stmt = (
         select(Tag.name, func.count(ImageTag.image_id).label("count"))
         .outerjoin(ImageTag, ImageTag.tag_id == Tag.id)
@@ -135,13 +135,30 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
 async def sidebar_folder_tree(request: Request, session: AsyncSession = Depends(get_async_session)):
     """返回侧栏文件夹树 HTML 片段"""
     path = request.query_params.get("path", "")
-    result = await session.execute(select(Image.relative_path))
-    rel_paths = [r[0] for r in result.fetchall()]
-    folder_tree, nested_tree, folder_counts = await get_folder_tree_cached(PHOTOS_DIR, rel_paths)
+    folder_tree, nested_tree, folder_counts = await get_folder_tree_cached(
+        PHOTOS_DIR, session=session
+    )
     return templates.TemplateResponse(
         "partials/folder_tree.html",
         {"request": request, "nested_tree": nested_tree, "folder_counts": folder_counts, "current_path": path},
     )
+
+
+def _parse_cursor(cursor: str, sort_by: str) -> tuple[float | str | None, int | None]:
+    """解析 keyset 游标，返回 (sort_value, id)。支持 modified_at/file_size 数值或字符串。"""
+    if not cursor or "_" not in cursor:
+        return None, None
+    try:
+        parts = cursor.rsplit("_", 1)
+        if len(parts) != 2:
+            return None, None
+        val_str, id_str = parts
+        row_id = int(id_str)
+        if sort_by in ("modified_at", "file_size"):
+            return float(val_str), row_id
+        return val_str, row_id
+    except (ValueError, TypeError):
+        return None, None
 
 
 @app.get("/gallery")
@@ -154,6 +171,7 @@ async def gallery(
     sort_order: str = "desc",
     page: int = 1,
     cols: int = 4,
+    cursor: str = "",
     filter_filename: str = "",
     filter_size_min: str = "",
     filter_size_max: str = "",
@@ -162,7 +180,7 @@ async def gallery(
     filter_tag: str = "",
     session: AsyncSession = Depends(get_async_session),
 ):
-    """返回图片网格 HTML 片段（供 HTMX 调用）"""
+    """返回图片网格 HTML 片段（供 HTMX 调用）。支持 cursor 游标分页，百万级时避免 offset 性能问题。"""
     path = normalize_path(path, allow_empty=True) or ""
     valid_modes = ("folder", "list", "waterfall")
     mode = mode if mode in valid_modes else "folder"
@@ -170,7 +188,7 @@ async def gallery(
     sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
-    stmt = select(Image).order_by(order_clause)
+    stmt = select(Image).order_by(order_clause, Image.id.asc() if sort_order == "asc" else Image.id.desc())
     parsed = parse_filter_params(
         filter_filename, filter_size_min, filter_size_max,
         filter_date_from, filter_date_to, filter_tag,
@@ -180,9 +198,29 @@ async def gallery(
         select(func.count(Image.id)), path, search, mode, parsed, pf
     )
 
-    # 并行执行 count、subfolders、images，减少总耗时
-    offset = (page - 1) * per_page
-    stmt_paged = stmt.offset(offset).limit(per_page + 1)
+    use_keyset = bool(cursor) and page > 1 and sort_by in ("modified_at", "file_size")
+    cursor_val, cursor_id = _parse_cursor(cursor, sort_by) if cursor else (None, None)
+    if use_keyset and cursor_val is not None and cursor_id is not None:
+        from sqlalchemy import or_
+        sort_col_raw = Image.modified_at if sort_by == "modified_at" else Image.file_size
+        if sort_order == "desc":
+            stmt = stmt.where(
+                or_(
+                    sort_col_raw < cursor_val,
+                    (sort_col_raw == cursor_val) & (Image.id < cursor_id),
+                )
+            )
+        else:
+            stmt = stmt.where(
+                or_(
+                    sort_col_raw > cursor_val,
+                    (sort_col_raw == cursor_val) & (Image.id > cursor_id),
+                )
+            )
+    if not use_keyset:
+        offset = (page - 1) * per_page
+        stmt = stmt.offset(offset)
+    stmt_paged = stmt.limit(per_page + 1)
     need_count = search or has_filters or parsed["filter_tag"] or _get_cached_count(path, mode) is None
     need_subfolders = (
         mode in ("folder", "list")
@@ -230,6 +268,11 @@ async def gallery(
     has_next = len(images_list) > per_page
     if has_next:
         images_list = images_list[:per_page]
+    next_cursor = ""
+    if images_list and has_next and sort_by in ("modified_at", "file_size"):
+        last_img = images_list[-1]
+        val = last_img.modified_at if sort_by == "modified_at" else (last_img.file_size or 0)
+        next_cursor = f"{val}_{last_img.id}"
     image_tags_map: dict[int, list[str]] = {}
     if images_list:
         image_ids = [img.id for img in images_list if img.id]
@@ -272,6 +315,7 @@ async def gallery(
             "has_filters": has_filters,
             "cols": cols,
             "image_tags_map": image_tags_map,
+            "next_cursor": next_cursor,
         },
     )
 

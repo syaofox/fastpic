@@ -3,11 +3,14 @@ import asyncio
 import time
 from pathlib import Path
 
+from sqlmodel import select
 from sqlalchemy import text
 
 from models import Image, natural_sort_key
 
 from .path_utils import escape_like, LIKE_ESCAPE
+
+_FOLDER_TREE_BATCH_SIZE = 20000  # 分批加载 relative_path，支持百万级
 
 
 def _extract_direct_child(path_prefix: str) -> str:
@@ -78,10 +81,57 @@ def invalidate_folder_tree_cache() -> None:
     _folder_tree_cache = None
 
 
+async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
+    """从数据库分批加载 relative_path，构建 folder_tree 和 folder_counts，支持百万级"""
+    folders: set[tuple[str, ...]] = set()
+    counts: dict[str, int] = {"": 0}
+    last_id = 0
+
+    while True:
+        stmt = (
+            select(Image.id, Image.relative_path)
+            .where(Image.id > last_id)
+            .order_by(Image.id)
+            .limit(_FOLDER_TREE_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        rows = result.fetchall()
+        if not rows:
+            break
+        for row in rows:
+            rid, rp = row
+            last_id = rid
+            counts[""] = counts.get("", 0) + 1
+            parts = rp.split("/")
+            if len(parts) > 1:
+                for i in range(1, len(parts)):
+                    prefix = "/".join(parts[:i])
+                    folders.add(tuple(parts[:i]))
+                    counts[prefix] = counts.get(prefix, 0) + 1
+        await asyncio.sleep(0)
+
+    def _scan_dirs(base: Path, prefix: tuple[str, ...] = ()):
+        if not base.is_dir():
+            return
+        for child in sorted(base.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                path_tuple = prefix + (child.name,)
+                folders.add(path_tuple)
+                _scan_dirs(child, path_tuple)
+
+    await asyncio.to_thread(_scan_dirs, photos_dir)
+    folder_tree = [list(f) for f in sorted(folders) if f]
+    nested_tree = build_nested_tree(folder_tree)
+    return folder_tree, nested_tree, counts
+
+
 async def get_folder_tree_cached(
-    photos_dir: Path, rel_paths: list[str]
+    photos_dir: Path,
+    rel_paths: list[str] | None = None,
+    session=None,
 ) -> tuple[list[list[str]], dict, dict[str, int]]:
-    """获取 folder_tree、nested_tree、folder_counts，带 60 秒缓存"""
+    """获取 folder_tree、nested_tree、folder_counts，带 60 秒缓存。
+    若提供 session 则从数据库分批加载（支持百万级）；否则使用传入的 rel_paths。"""
     global _folder_tree_cache
     async with _folder_tree_cache_lock:
         now = time.monotonic()
@@ -93,9 +143,16 @@ async def get_folder_tree_cached(
                     _folder_tree_cache["nested_tree"],
                     _folder_tree_cache["folder_counts"],
                 )
-        folder_tree = await asyncio.to_thread(get_folder_tree, photos_dir, rel_paths)
-        nested_tree = build_nested_tree(folder_tree)
-        folder_counts = compute_folder_counts(rel_paths)
+        if session is not None:
+            folder_tree, nested_tree, folder_counts = await _get_folder_tree_from_db_batched(
+                session, photos_dir
+            )
+        else:
+            folder_tree = await asyncio.to_thread(
+                get_folder_tree, photos_dir, rel_paths or []
+            )
+            nested_tree = build_nested_tree(folder_tree)
+            folder_counts = compute_folder_counts(rel_paths or [])
         _folder_tree_cache = {
             "ts": now,
             "folder_tree": folder_tree,
