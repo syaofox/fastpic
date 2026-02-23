@@ -76,7 +76,7 @@ async def move_images(
             dest_path = unique_path(target_dir, img.filename, suffix_style="underscore")
             new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
         try:
-            shutil.move(str(src_path), str(dest_path))
+            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
         except OSError as e:
             errors.append(f"{img.filename}: {e}")
             continue
@@ -87,10 +87,10 @@ async def move_images(
         img.filename = dest_path.name
         img.filename_natural = natural_sort_key(dest_path.name)
         img.relative_path_natural = natural_sort_key(new_rel)
-        img.modified_at = os.path.getmtime(dest_path)
-        img.file_size = dest_path.stat().st_size
+        img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
+        img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
         new_cache = CACHE_DIR / _cache_filename(new_rel)
-        _generate_thumbnail(dest_path, new_cache)
+        await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
         session.add(img)
         moved += 1
     await session.commit()
@@ -132,7 +132,7 @@ async def move_folders(
         if src_path.resolve() == dest_path.resolve():
             continue
         try:
-            shutil.move(str(src_path), str(dest_path))
+            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
         except OSError as e:
             errors.append(f"{folder_path}: {e}")
             continue
@@ -152,10 +152,10 @@ async def move_folders(
             img.relative_path_natural = natural_sort_key(new_rel)
             new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
             if new_full.exists() and new_full.is_file():
-                img.modified_at = os.path.getmtime(new_full)
-                img.file_size = os.path.getsize(new_full)
+                img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+                img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
                 new_cache = CACHE_DIR / _cache_filename(new_rel)
-                _generate_thumbnail(new_full, new_cache)
+                await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
             session.add(img)
             moved += 1
         print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
@@ -197,7 +197,7 @@ async def rename_folder(
         return {"ok": False, "error": "目标文件夹已存在"}
 
     try:
-        shutil.move(str(src_path), str(dest_path))
+        await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
     except OSError as e:
         return {"ok": False, "error": f"重命名失败: {e}"}
 
@@ -217,13 +217,13 @@ async def rename_folder(
         img.relative_path_natural = natural_sort_key(new_rel)
         new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
         if new_full.exists() and new_full.is_file():
-            img.modified_at = os.path.getmtime(new_full)
-            img.file_size = os.path.getsize(new_full)
+            img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+            img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
             new_cache = CACHE_DIR / _cache_filename(new_rel)
             if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-                _generate_video_thumbnail(new_full, new_cache)
+                await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
             else:
-                _generate_thumbnail(new_full, new_cache)
+                await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
         session.add(img)
 
     invalidate_folder_tree_cache()
@@ -256,7 +256,7 @@ async def delete_folders(
             total_images += 1
         folder_fs_path = PHOTOS_DIR / folder_path
         if folder_fs_path.exists() and folder_fs_path.is_dir():
-            shutil.rmtree(folder_fs_path, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, folder_fs_path, ignore_errors=True)
             total_folders += 1
     await session.commit()
     if total_folders > 0:
@@ -377,7 +377,7 @@ async def merge_folders(
             new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
             new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
         try:
-            shutil.move(str(photos_dir / img.relative_path), str(new_full))
+            await asyncio.to_thread(shutil.move, str(photos_dir / img.relative_path), str(new_full))
         except OSError as e:
             await session.rollback()
             return {"ok": False, "error": f"移动文件失败 {img.relative_path}: {e}"}
@@ -388,13 +388,13 @@ async def merge_folders(
         img.filename = Path(new_rel).name
         img.filename_natural = natural_sort_key(img.filename)
         img.relative_path_natural = natural_sort_key(new_rel)
-        img.modified_at = os.path.getmtime(new_full)
-        img.file_size = os.path.getsize(new_full)
+        img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
+        img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
         new_cache = CACHE_DIR / _cache_filename(new_rel)
         if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-            _generate_video_thumbnail(new_full, new_cache)
+            await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
         else:
-            _generate_thumbnail(new_full, new_cache)
+            await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
         session.add(img)
         target_hashes.add(h)
         moved += 1

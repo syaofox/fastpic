@@ -1,5 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
+<!-- 刷新后提示：上次操作可能仍在进行 -->
+<div id="operation-recovery-hint" class="hidden px-4 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-sm flex items-center justify-center gap-3 flex-wrap">
+    <span>上次操作可能仍在进行，请稍候再试。若已完成可忽略。</span>
+    <button type="button" id="operation-recovery-dismiss" class="px-3 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-800 text-sm font-medium transition-colors">我知道了</button>
+</div>
+<script>
+(function() {
+    try {
+        var raw = localStorage.getItem('fastpic_operation');
+        if (!raw) return;
+        var data = JSON.parse(raw);
+        var age = Date.now() - (data.ts || 0);
+        if (age > 5 * 60 * 1000) {
+            localStorage.removeItem('fastpic_operation');
+            return;
+        }
+        var hint = document.getElementById('operation-recovery-hint');
+        var dismiss = document.getElementById('operation-recovery-dismiss');
+        if (hint) hint.classList.remove('hidden');
+        if (dismiss) {
+            dismiss.addEventListener('click', function() {
+                localStorage.removeItem('fastpic_operation');
+                if (hint) hint.classList.add('hidden');
+            });
+        }
+    } catch (e) {}
+})();
+</script>
 <!-- 移动端侧边栏遮罩（点击关闭，sm 及以上不显示） -->
 <div id="sidebar-overlay" class="hidden fixed inset-0 z-40 bg-black/40 md:hidden" onclick="toggleSidebar()" aria-hidden="true"></div>
 <div class="flex h-screen" id="layout">
@@ -1681,6 +1709,7 @@ document.addEventListener('keydown', function(e) {
             var confirmBtn = overlay.querySelector('.rename-confirm-btn');
             confirmBtn.disabled = true;
             confirmBtn.textContent = '重命名中...';
+            if (window.showOperationLoading) window.showOperationLoading('正在重命名，请稍候...');
 
             fetch('/api/rename-folder', {
                 method: 'POST',
@@ -1703,6 +1732,8 @@ document.addEventListener('keydown', function(e) {
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
                 confirmBtn.textContent = '重命名';
+            }).finally(function() {
+                if (window.hideOperationLoading) window.hideOperationLoading();
             });
         }
 
@@ -2151,15 +2182,31 @@ document.addEventListener('keydown', function(e) {
         });
     };
 
+    var _beforeUnloadHandler = function(e) {
+        e.preventDefault();
+        e.returnValue = '';
+    };
+    var OPERATION_STORAGE_KEY = 'fastpic_operation';
+    var OPERATION_MAX_AGE_MS = 5 * 60 * 1000; // 5 分钟
+
     window.showOperationLoading = function(message) {
+        var msg = message || '请稍候...';
         var el = document.getElementById('operation-loading-overlay');
         var msgEl = document.getElementById('operation-loading-message');
-        if (msgEl) msgEl.textContent = message || '请稍候...';
+        if (msgEl) msgEl.textContent = msg;
         if (el) el.classList.remove('hidden');
+        window.addEventListener('beforeunload', _beforeUnloadHandler);
+        try {
+            localStorage.setItem(OPERATION_STORAGE_KEY, JSON.stringify({ type: msg, ts: Date.now() }));
+        } catch (err) {}
     };
     window.hideOperationLoading = function() {
         var el = document.getElementById('operation-loading-overlay');
         if (el) el.classList.add('hidden');
+        window.removeEventListener('beforeunload', _beforeUnloadHandler);
+        try {
+            localStorage.removeItem(OPERATION_STORAGE_KEY);
+        } catch (err) {}
     };
 
     window.downloadSelected = function() {
