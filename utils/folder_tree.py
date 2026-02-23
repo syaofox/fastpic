@@ -6,11 +6,10 @@ from pathlib import Path
 from sqlmodel import select
 from sqlalchemy import text
 
-from models import Image, FolderThumbnail, natural_sort_key
+from models import FolderThumbnail, natural_sort_key
 
 from .path_utils import escape_like, LIKE_ESCAPE
 
-_FOLDER_TREE_BATCH_SIZE = 20000  # 分批加载 relative_path，支持百万级
 _FOLDER_TREE_MAX_DEPTH = 4  # 缓存深度限制，减少百万级时内存；更深层按需加载
 
 
@@ -181,34 +180,42 @@ def invalidate_folder_tree_cache() -> None:
         pass
 
 
-async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
-    """从数据库分批加载 relative_path，构建 folder_tree 和 folder_counts，支持百万级"""
-    folders: set[tuple[str, ...]] = set()
+async def _get_folder_counts_from_sql(session) -> dict[str, int]:
+    """用单条 SQL 聚合查询获取各文件夹路径的图片数量，替代分批加载 + Python 累加。"""
+    sql = text("""
+        SELECT prefix, COUNT(*) AS cnt FROM (
+            SELECT '' AS prefix FROM images
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 1) FROM images WHERE relative_path LIKE '%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 2) FROM images WHERE relative_path LIKE '%/%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 3) FROM images WHERE relative_path LIKE '%/%/%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 4) FROM images WHERE relative_path LIKE '%/%/%/%/%'
+        ) t
+        GROUP BY prefix
+    """)
+    result = await session.execute(sql)
+    rows = result.fetchall()
     counts: dict[str, int] = {"": 0}
-    last_id = 0
+    for row in rows:
+        prefix, cnt = row[0], row[1]
+        counts[prefix] = int(cnt)
+    return counts
 
-    while True:
-        stmt = (
-            select(Image.id, Image.relative_path)
-            .where(Image.id > last_id)
-            .order_by(Image.id)
-            .limit(_FOLDER_TREE_BATCH_SIZE)
-        )
-        result = await session.execute(stmt)
-        rows = result.fetchall()
-        if not rows:
-            break
-        for row in rows:
-            rid, rp = row
-            last_id = rid
-            counts[""] = counts.get("", 0) + 1
-            parts = rp.split("/")
-            if len(parts) > 1:
-                for i in range(1, min(len(parts), _FOLDER_TREE_MAX_DEPTH + 1)):
-                    prefix = "/".join(parts[:i])
-                    folders.add(tuple(parts[:i]))
-                    counts[prefix] = counts.get(prefix, 0) + 1
-        await asyncio.sleep(0)
+
+async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
+    """从数据库 SQL 聚合获取 folder_counts，再构建 folder_tree 和 nested_tree。"""
+    folder_counts = await _get_folder_counts_from_sql(session)
+
+    folders: set[tuple[str, ...]] = set()
+    for path_key in folder_counts.keys():
+        if path_key == "":
+            continue
+        parts = path_key.split("/")
+        for i in range(1, len(parts) + 1):
+            folders.add(tuple(parts[:i]))
 
     def _scan_dirs(base: Path, prefix: tuple[str, ...] = ()):
         if not base.is_dir() or len(prefix) >= _FOLDER_TREE_MAX_DEPTH:
@@ -222,7 +229,7 @@ async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
     await asyncio.to_thread(_scan_dirs, photos_dir)
     folder_tree = [list(f) for f in sorted(folders) if f]
     nested_tree = build_nested_tree(folder_tree)
-    return folder_tree, nested_tree, counts
+    return folder_tree, nested_tree, folder_counts
 
 
 async def get_folder_tree_cached(
