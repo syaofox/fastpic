@@ -1,7 +1,11 @@
 """图片相关工具"""
+import hashlib
 from pathlib import Path
 
-from scanner import _cache_filename
+
+def cache_filename(relative_path: str) -> str:
+    """根据相对路径生成缩略图缓存文件名"""
+    return hashlib.md5(relative_path.encode()).hexdigest() + ".webp"
 
 
 def delete_image_files(relative_path: str, photos_dir: Path, cache_dir: Path) -> None:
@@ -9,7 +13,7 @@ def delete_image_files(relative_path: str, photos_dir: Path, cache_dir: Path) ->
     photo_path = photos_dir / relative_path
     if photo_path.exists():
         photo_path.unlink(missing_ok=True)
-    cache_name = _cache_filename(relative_path)
+    cache_name = cache_filename(relative_path)
     cache_path = cache_dir / cache_name
     if cache_path.exists():
         cache_path.unlink(missing_ok=True)

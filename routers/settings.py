@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR
 from models import Image, get_async_session
-from scanner import scan_photos, scan_videos, cleanup_database, _cache_filename
+from scanner import scan_photos, scan_videos, cleanup_database
+from utils.images import cache_filename
 from scan_state import begin_scan, end_scan
 from schemas import ScanDuplicatesRequest
 from app_common import templates
-from utils.path_utils import path_filter_for_prefix
+from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.hash_utils import compute_file_md5
 from utils.stats import stats_folder_and_cache
 
@@ -61,8 +62,7 @@ async def scan_duplicates(
     session: AsyncSession = Depends(get_async_session),
 ):
     """扫描重复文件"""
-    folder_path = (body.folder_path if body else None) or ""
-    folder_path = folder_path.strip().strip("/")
+    folder_path = normalize_path((body.folder_path if body else None) or "", allow_empty=True)
     if folder_path:
         pf = path_filter_for_prefix(Image.relative_path, folder_path)
         result = await session.execute(select(Image).where(pf))
@@ -88,7 +88,7 @@ async def scan_duplicates(
                 "filename": img.filename,
                 "file_size": img.file_size,
                 "modified_at": img.modified_at,
-                "cache_key": _cache_filename(img.relative_path),
+                "cache_key": cache_filename(img.relative_path),
             })
     groups = []
     for content_hash, items in by_hash.items():

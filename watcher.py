@@ -23,11 +23,12 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileDelete
 from scanner import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
-    _cache_filename,
     _relative_path,
     get_media_metadata_and_thumbnail,
 )
-from models import Image, async_session_factory, natural_sort_key
+from utils.images import cache_filename
+from models import Image, async_session_factory
+from utils.image_records import create_image_record
 from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 from scan_state import begin_scan, end_scan
 
@@ -89,7 +90,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
 
         try:
             is_vid = _is_video(str(full_path))
-            cache_name = _cache_filename(rel_path)
+            cache_name = cache_filename(rel_path)
             cache_path = cache_dir / cache_name
 
             # 在线程中执行 PIL/ffmpeg 等阻塞操作
@@ -105,15 +106,13 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
 
             damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME) if is_corrupted else None
 
-            record = Image(
+            record = create_image_record(
                 filename=full_path.name,
                 relative_path=rel_path,
                 modified_at=modified_at,
                 file_size=file_size,
                 width=width,
                 height=height,
-                filename_natural=natural_sort_key(full_path.name),
-                relative_path_natural=natural_sort_key(rel_path),
                 media_type=media_type,
             )
             session.add(record)
@@ -142,7 +141,7 @@ async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
             return
 
         # 删除缓存
-        cache_name = _cache_filename(rel_path)
+        cache_name = cache_filename(rel_path)
         cache_path = cache_dir / cache_name
         if cache_path.exists():
             cache_path.unlink(missing_ok=True)
@@ -165,7 +164,7 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
 
         if img:
             # 删除旧缓存
-            old_cache = cache_dir / _cache_filename(src_rel)
+            old_cache = cache_dir / cache_filename(src_rel)
             if old_cache.exists():
                 old_cache.unlink(missing_ok=True)
 
@@ -183,7 +182,7 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
             img.filename_natural = natural_sort_key(dst_path.name)
             img.relative_path_natural = natural_sort_key(dst_rel)
             if dst_path.exists():
-                new_cache = cache_dir / _cache_filename(dst_rel)
+                new_cache = cache_dir / cache_filename(dst_rel)
                 is_video = getattr(img, "media_type", "image") == "video"
                 data = await asyncio.to_thread(
                     get_media_metadata_and_thumbnail,

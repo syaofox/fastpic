@@ -3,25 +3,30 @@ import asyncio
 import mimetypes
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime as _dt
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Depends
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import select
-from sqlalchemy import case, func
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, STATIC_DIR, PER_PAGE, APP_VERSION
 from models import Image, Tag, ImageTag, init_db, get_async_session, async_session_factory
-from scanner import scan_photos, scan_videos, cleanup_database, _cache_filename
+from scanner import scan_photos, scan_videos, cleanup_database
 from scan_state import begin_scan, end_scan
 from watcher import start_watcher
 from app_common import templates
 from routers import auth, tags, images, folders, settings
-from utils.path_utils import escape_like, path_filter_for_prefix, LIKE_ESCAPE
+from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.folder_tree import get_folder_tree_cached, get_subfolders
+from utils.query_builder import (
+    get_sort_column,
+    parse_filter_params,
+    apply_image_filters,
+    apply_image_filters_to_count,
+)
 
 
 async def _background_scan():
@@ -158,113 +163,33 @@ async def gallery(
     session: AsyncSession = Depends(get_async_session),
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）"""
-    path = (path or "").strip().strip("/")
+    path = normalize_path(path, allow_empty=True) or ""
     valid_modes = ("folder", "list", "waterfall")
     mode = mode if mode in valid_modes else "folder"
     per_page = _per_page_for_cols(cols)
-    sort_columns = {
-        "filename": case(
-            (Image.filename_natural.is_(None), Image.filename),
-            else_=Image.filename_natural,
-        ),
-        "folder_filename": case(
-            (Image.relative_path_natural.is_(None), Image.relative_path),
-            else_=Image.relative_path_natural,
-        ),
-        "modified_at": Image.modified_at,
-        "file_size": Image.file_size,
-    }
-    sort_col = sort_columns.get(sort_by, Image.modified_at)
+    sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
     stmt = select(Image).order_by(order_clause)
-    if path:
-        pf = path_filter_for_prefix(Image.relative_path, path)
-        stmt = stmt.where(pf)
-    else:
-        pf = None
-    if search:
-        stmt = stmt.where(Image.filename.ilike(f"%{search}%"))
-    filter_filename = (filter_filename or "").strip()
-    has_filters = False
-    if filter_filename:
-        escaped_fn = escape_like(filter_filename)
-        stmt = stmt.where(Image.filename.ilike(f"%{escaped_fn}%", escape=LIKE_ESCAPE))
-        has_filters = True
-    _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
-    _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
-    if _size_min is not None:
-        stmt = stmt.where(Image.file_size >= _size_min)
-        has_filters = True
-    if _size_max is not None:
-        stmt = stmt.where(Image.file_size <= _size_max)
-        has_filters = True
-    _date_from_ts = None
-    _date_to_ts = None
-    if filter_date_from:
-        try:
-            _date_from_ts = _dt.strptime(filter_date_from, "%Y-%m-%d").timestamp()
-        except ValueError:
-            pass
-    if filter_date_to:
-        try:
-            _date_to_ts = _dt.strptime(filter_date_to, "%Y-%m-%d").timestamp() + 86399
-        except ValueError:
-            pass
-    if _date_from_ts is not None:
-        stmt = stmt.where(Image.modified_at >= _date_from_ts)
-        has_filters = True
-    if _date_to_ts is not None:
-        stmt = stmt.where(Image.modified_at <= _date_to_ts)
-        has_filters = True
-    filter_tag = (filter_tag or "").strip()
-    if filter_tag:
-        stmt = stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
-            Tag, Tag.id == ImageTag.tag_id
-        ).where(Tag.name == filter_tag)
-        has_filters = True
-    if mode in ("folder", "list"):
-        if path:
-            escaped = escape_like(path)
-            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
-        elif not filter_tag:
-            stmt = stmt.where(~Image.relative_path.like("%/%"))
-    count_stmt = select(func.count(Image.id))
-    if path:
-        count_stmt = count_stmt.where(pf)
-    if search:
-        count_stmt = count_stmt.where(Image.filename.ilike(f"%{search}%"))
-    if filter_filename:
-        count_stmt = count_stmt.where(Image.filename.ilike(f"%{escape_like(filter_filename)}%", escape=LIKE_ESCAPE))
-    if _size_min is not None:
-        count_stmt = count_stmt.where(Image.file_size >= _size_min)
-    if _size_max is not None:
-        count_stmt = count_stmt.where(Image.file_size <= _size_max)
-    if _date_from_ts is not None:
-        count_stmt = count_stmt.where(Image.modified_at >= _date_from_ts)
-    if _date_to_ts is not None:
-        count_stmt = count_stmt.where(Image.modified_at <= _date_to_ts)
-    if filter_tag:
-        count_stmt = count_stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
-            Tag, Tag.id == ImageTag.tag_id
-        ).where(Tag.name == filter_tag)
-    if mode in ("folder", "list"):
-        if path:
-            escaped = escape_like(path)
-            count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
-        elif not filter_tag:
-            count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
+    parsed = parse_filter_params(
+        filter_filename, filter_size_min, filter_size_max,
+        filter_date_from, filter_date_to, filter_tag,
+    )
+    stmt, pf, has_filters = apply_image_filters(stmt, path, search, mode, parsed)
+    count_stmt = apply_image_filters_to_count(
+        select(func.count(Image.id)), path, search, mode, parsed, pf
+    )
 
     # 并行执行 count、subfolders、images，减少总耗时
     offset = (page - 1) * per_page
     stmt_paged = stmt.offset(offset).limit(per_page + 1)
-    need_count = search or has_filters or filter_tag or _get_cached_count(path, mode) is None
+    need_count = search or has_filters or parsed["filter_tag"] or _get_cached_count(path, mode) is None
     need_subfolders = (
         mode in ("folder", "list")
         and page == 1
         and not search
         and not has_filters
-        and not filter_tag
+        and not parsed["filter_tag"]
     )
 
     async def _run_count():
@@ -273,7 +198,7 @@ async def gallery(
             return cached
         async with async_session_factory() as s:
             t = (await s.execute(count_stmt)).scalar() or 0
-            if not search and not has_filters and not filter_tag:
+            if not search and not has_filters and not parsed["filter_tag"]:
                 _set_cached_count(path, mode, t)
             return t
 
@@ -366,64 +291,18 @@ async def api_folder_images(
     session: AsyncSession = Depends(get_async_session),
 ):
     """获取当前文件夹/模式下的全部图片（用于大图浏览模式）"""
-    path = (path or "").strip().strip("/")
+    path = normalize_path(path, allow_empty=True) or ""
     valid_modes = ("folder", "list", "waterfall")
     mode = mode if mode in valid_modes else "folder"
-    sort_columns = {
-        "filename": case(
-            (Image.filename_natural.is_(None), Image.filename),
-            else_=Image.filename_natural,
-        ),
-        "folder_filename": case(
-            (Image.relative_path_natural.is_(None), Image.relative_path),
-            else_=Image.relative_path_natural,
-        ),
-        "modified_at": Image.modified_at,
-        "file_size": Image.file_size,
-    }
-    sort_col = sort_columns.get(sort_by, Image.modified_at)
+    sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
     stmt = select(Image).order_by(order_clause)
-    if path:
-        pf = path_filter_for_prefix(Image.relative_path, path)
-        stmt = stmt.where(pf)
-    if mode in ("folder", "list"):
-        if path:
-            escaped = escape_like(path)
-            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
-        else:
-            stmt = stmt.where(~Image.relative_path.like("%/%"))
-    filter_filename = (filter_filename or "").strip()
-    if filter_filename:
-        stmt = stmt.where(Image.filename.ilike(f"%{escape_like(filter_filename)}%", escape=LIKE_ESCAPE))
-    _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
-    _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
-    if _size_min is not None:
-        stmt = stmt.where(Image.file_size >= _size_min)
-    if _size_max is not None:
-        stmt = stmt.where(Image.file_size <= _size_max)
-    _date_from_ts = None
-    _date_to_ts = None
-    if filter_date_from:
-        try:
-            _date_from_ts = _dt.strptime(filter_date_from, "%Y-%m-%d").timestamp()
-        except ValueError:
-            pass
-    if filter_date_to:
-        try:
-            _date_to_ts = _dt.strptime(filter_date_to, "%Y-%m-%d").timestamp() + 86399
-        except ValueError:
-            pass
-    if _date_from_ts is not None:
-        stmt = stmt.where(Image.modified_at >= _date_from_ts)
-    if _date_to_ts is not None:
-        stmt = stmt.where(Image.modified_at <= _date_to_ts)
-    filter_tag = (filter_tag or "").strip()
-    if filter_tag:
-        stmt = stmt.join(ImageTag, ImageTag.image_id == Image.id).join(
-            Tag, Tag.id == ImageTag.tag_id
-        ).where(Tag.name == filter_tag)
+    parsed = parse_filter_params(
+        filter_filename, filter_size_min, filter_size_max,
+        filter_date_from, filter_date_to, filter_tag,
+    )
+    stmt, _, _ = apply_image_filters(stmt, path, search, mode, parsed)
     result = await session.execute(stmt)
     images_list = list(result.scalars().all())
     return {
@@ -439,7 +318,7 @@ async def debug_path_count(
     session: AsyncSession = Depends(get_async_session),
 ):
     """调试：查看指定路径下的图片数量"""
-    path = (path or "").strip().strip("/")
+    path = normalize_path(path, allow_empty=True) or ""
     if not path:
         total = (await session.execute(select(func.count(Image.id)))).scalar() or 0
         return {"path": "", "total": total, "note": "path 为空时返回全部"}

@@ -14,10 +14,10 @@ from models import Image, get_async_session, natural_sort_key
 from scanner import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
-    _cache_filename,
     _generate_thumbnail,
     _generate_video_thumbnail,
 )
+from utils.images import cache_filename
 from schemas import (
     MoveImagesRequest,
     MoveFoldersRequest,
@@ -26,7 +26,7 @@ from schemas import (
     CreateFolderRequest,
     RenameFolderRequest,
 )
-from utils.path_utils import path_filter_for_prefix
+from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.unique_path import unique_path
 from utils.images import delete_image_files
 from utils.folder_tree import (
@@ -49,8 +49,8 @@ async def move_images(
     """将指定图片移动到目标文件夹"""
     if not body.ids:
         return {"moved": 0, "errors": []}
-    target_path = (body.target_path or "").strip().strip("/")
-    if ".." in target_path or target_path.startswith("/"):
+    target_path = normalize_path(body.target_path, allow_empty=True)
+    if target_path is None:
         return {"moved": 0, "errors": ["目标路径不合法"]}
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ async def move_images(
         except OSError as e:
             errors.append(f"{img.filename}: {e}")
             continue
-        old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+        old_cache = CACHE_DIR / cache_filename(img.relative_path)
         if old_cache.exists():
             old_cache.unlink(missing_ok=True)
         img.relative_path = new_rel
@@ -89,7 +89,7 @@ async def move_images(
         img.relative_path_natural = natural_sort_key(new_rel)
         img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
         img.file_size = (await asyncio.to_thread(dest_path.stat)).st_size
-        new_cache = CACHE_DIR / _cache_filename(new_rel)
+        new_cache = CACHE_DIR / cache_filename(new_rel)
         await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
         session.add(img)
         moved += 1
@@ -105,16 +105,16 @@ async def move_folders(
     """将指定文件夹（含子文件夹和图片）移动到目标父目录"""
     if not body.paths:
         return {"moved": 0, "errors": []}
-    target_path = (body.target_path or "").strip().strip("/")
-    if ".." in target_path or target_path.startswith("/"):
+    target_path = normalize_path(body.target_path, allow_empty=True)
+    if target_path is None:
         return {"moved": 0, "errors": ["目标路径不合法"]}
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     moved = 0
     errors = []
     for folder_path in body.paths:
-        folder_path = folder_path.strip().strip("/")
-        if not folder_path:
+        folder_path = normalize_path(folder_path, allow_empty=False)
+        if folder_path is None:
             continue
         if target_path == folder_path or target_path.startswith(folder_path + "/"):
             errors.append(f"{folder_path}: 不能移动到自身或子文件夹内")
@@ -143,7 +143,7 @@ async def move_folders(
         for img in images:
             suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
             new_rel = new_prefix + suffix
-            old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+            old_cache = CACHE_DIR / cache_filename(img.relative_path)
             if old_cache.exists():
                 old_cache.unlink(missing_ok=True)
             img.relative_path = new_rel
@@ -154,7 +154,7 @@ async def move_folders(
             if new_full.exists() and new_full.is_file():
                 img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
                 img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-                new_cache = CACHE_DIR / _cache_filename(new_rel)
+                new_cache = CACHE_DIR / cache_filename(new_rel)
                 await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
             session.add(img)
             moved += 1
@@ -169,16 +169,14 @@ async def rename_folder(
     session: AsyncSession = Depends(get_async_session),
 ):
     """重命名文件夹（移动到同一父目录下的新名称）"""
-    folder_path = (body.path or "").strip().strip("/")
+    folder_path = normalize_path(body.path, allow_empty=False)
+    if folder_path is None:
+        return {"ok": False, "error": "路径不合法"}
     new_name = (body.new_name or "").strip().strip("/")
-    if not folder_path:
-        return {"ok": False, "error": "文件夹路径不能为空"}
     if not new_name:
         return {"ok": False, "error": "新名称不能为空"}
     if ".." in new_name or "/" in new_name or "\\" in new_name:
         return {"ok": False, "error": "新名称不合法"}
-    if ".." in folder_path or folder_path.startswith("/"):
-        return {"ok": False, "error": "路径不合法"}
 
     parts = folder_path.rsplit("/", 1)
     parent = parts[0] if len(parts) == 2 else ""
@@ -208,7 +206,7 @@ async def rename_folder(
     for img in images:
         suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
         new_rel = new_prefix + suffix
-        old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+        old_cache = CACHE_DIR / cache_filename(img.relative_path)
         if old_cache.exists():
             old_cache.unlink(missing_ok=True)
         img.relative_path = new_rel
@@ -219,7 +217,7 @@ async def rename_folder(
         if new_full.exists() and new_full.is_file():
             img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
             img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-            new_cache = CACHE_DIR / _cache_filename(new_rel)
+            new_cache = CACHE_DIR / cache_filename(new_rel)
             if new_full.suffix.lower() in VIDEO_EXTENSIONS:
                 await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
             else:
@@ -243,8 +241,8 @@ async def delete_folders(
     total_images = 0
     total_folders = 0
     for folder_path in body.paths:
-        folder_path = folder_path.strip().strip("/")
-        if not folder_path:
+        folder_path = normalize_path(folder_path, allow_empty=False)
+        if folder_path is None:
             continue
         pf = path_filter_for_prefix(Image.relative_path, folder_path)
         stmt = select(Image).where(pf)
@@ -270,11 +268,9 @@ async def merge_folders(
     session: AsyncSession = Depends(get_async_session),
 ):
     """合并两个文件夹：通过 MD5 去重"""
-    folder_a = (body.folder_a or "").strip().strip("/")
-    folder_b = (body.folder_b or "").strip().strip("/")
-    if not folder_a or not folder_b:
-        return {"ok": False, "error": "请指定两个文件夹路径"}
-    if ".." in folder_a or folder_a.startswith("/") or ".." in folder_b or folder_b.startswith("/"):
+    folder_a = normalize_path(body.folder_a, allow_empty=False)
+    folder_b = normalize_path(body.folder_b, allow_empty=False)
+    if folder_a is None or folder_b is None:
         return {"ok": False, "error": "路径不合法"}
     if folder_a == folder_b:
         return {"ok": False, "error": "不能选择相同的文件夹"}
@@ -381,7 +377,7 @@ async def merge_folders(
         except OSError as e:
             await session.rollback()
             return {"ok": False, "error": f"移动文件失败 {img.relative_path}: {e}"}
-        old_cache = CACHE_DIR / _cache_filename(img.relative_path)
+        old_cache = CACHE_DIR / cache_filename(img.relative_path)
         if old_cache.exists():
             old_cache.unlink(missing_ok=True)
         img.relative_path = new_rel
@@ -390,7 +386,7 @@ async def merge_folders(
         img.relative_path_natural = natural_sort_key(new_rel)
         img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
         img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-        new_cache = CACHE_DIR / _cache_filename(new_rel)
+        new_cache = CACHE_DIR / cache_filename(new_rel)
         if new_full.suffix.lower() in VIDEO_EXTENSIONS:
             await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
         else:
@@ -419,7 +415,7 @@ async def merge_folders(
 @router.post("/create-folder")
 async def create_folder(body: CreateFolderRequest):
     """在指定路径下创建子文件夹"""
-    parent = (body.path or "").strip().strip("/")
+    parent = normalize_path(body.path, allow_empty=True) or ""
     name = body.name.strip().strip("/")
     if not name:
         return {"error": "文件夹名不能为空", "ok": False}
@@ -441,9 +437,10 @@ async def get_subfolders_api(
     session: AsyncSession = Depends(get_async_session),
 ):
     """获取指定路径下的直接子文件夹"""
-    path = (path or "").strip().strip("/")
-    if ".." in path or path.startswith("/"):
+    path = normalize_path(path, allow_empty=True)
+    if path is None:
         return {"subfolders": []}
+    path = path or ""
     pf = path_filter_for_prefix(Image.relative_path, path) if path else None
     subfolders = await get_subfolders(session, PHOTOS_DIR, path, pf)
     return {
@@ -495,7 +492,7 @@ async def list_subdirs(
     session: AsyncSession = Depends(get_async_session),
 ):
     """列出指定路径下的直接子文件夹"""
-    path = (path or "").strip().strip("/")
+    path = normalize_path(path, allow_empty=True) or ""
     path_parts = path.split("/") if path else []
     result = await session.execute(select(Image.relative_path))
     rel_paths = [r[0] for r in result.fetchall()]

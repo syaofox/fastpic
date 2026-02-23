@@ -40,6 +40,8 @@ services:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - ACCESS_PASSWORD=${ACCESS_PASSWORD:-0928}
+      - MAX_UPLOAD_FILE_SIZE=${MAX_UPLOAD_FILE_SIZE:-1000M}
+      - MAX_UPLOAD_TOTAL_SIZE=${MAX_UPLOAD_TOTAL_SIZE:-5000M}
       - MYSQL_HOST=mariadb
       - MYSQL_USER=${MYSQL_USER:-fastpic}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-fastpic}

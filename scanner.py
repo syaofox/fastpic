@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import os
 import subprocess
 from concurrent.futures import ProcessPoolExecutor
@@ -9,7 +8,9 @@ from PIL import Image as PILImage, ImageFile
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Image, async_session_factory, natural_sort_key
+from models import Image, async_session_factory
+from utils.images import cache_filename
+from utils.image_records import create_image_record
 from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
@@ -18,11 +19,6 @@ THUMBNAIL_WIDTH = 300
 # 多进程缩略图：并行度与批大小
 _MAX_WORKERS = min(32, (os.cpu_count() or 4) + 4)
 _PROCESS_BATCH_SIZE = min(16, _MAX_WORKERS * 2)
-
-
-def _cache_filename(relative_path: str) -> str:
-    """根据相对路径生成缩略图缓存文件名"""
-    return hashlib.md5(relative_path.encode()).hexdigest() + ".webp"
 
 
 def _relative_path(photos_dir: Path, full_path: Path) -> str:
@@ -211,7 +207,7 @@ def _process_single_image_sync(
                 thumb = img.copy()
             if thumb.mode in ("RGBA", "P"):
                 thumb = thumb.convert("RGB")
-            cache_name = _cache_filename(rel_path)
+            cache_name = cache_filename(rel_path)
             cache_path = cache_dir / cache_name
             thumb.save(cache_path, "WEBP", quality=85)
             return (full_path.name, rel_path, modified_at, file_size, width, height, is_corrupted)
@@ -231,7 +227,7 @@ def _process_single_video_sync(
         modified_at = os.path.getmtime(full_path)
         file_size = os.path.getsize(full_path)
         width, height = _get_video_dimensions(full_path)
-        cache_name = _cache_filename(rel_path)
+        cache_name = cache_filename(rel_path)
         cache_path = cache_dir / cache_name
         if not _generate_video_thumbnail(full_path, cache_path):
             return None
@@ -302,15 +298,13 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
                 pending = []
                 for data in results:
                     filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
-                    record = Image(
+                    record = create_image_record(
                         filename=filename,
                         relative_path=rel_path,
                         modified_at=modified_at,
                         file_size=file_size,
                         width=width,
                         height=height,
-                        filename_natural=natural_sort_key(filename),
-                        relative_path_natural=natural_sort_key(rel_path),
                         media_type="image",
                     )
                     session.add(record)
@@ -332,15 +326,13 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
             results = await _process_batch(pending)
             for data in results:
                 filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
-                record = Image(
+                record = create_image_record(
                     filename=filename,
                     relative_path=rel_path,
                     modified_at=modified_at,
                     file_size=file_size,
                     width=width,
                     height=height,
-                    filename_natural=natural_sort_key(filename),
-                    relative_path_natural=natural_sort_key(rel_path),
                     media_type="image",
                 )
                 session.add(record)
@@ -416,15 +408,13 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
                 pending = []
                 for data in results:
                     filename, rel_path, modified_at, file_size, width, height = data
-                    record = Image(
+                    record = create_image_record(
                         filename=filename,
                         relative_path=rel_path,
                         modified_at=modified_at,
                         file_size=file_size,
                         width=width,
                         height=height,
-                        filename_natural=natural_sort_key(filename),
-                        relative_path_natural=natural_sort_key(rel_path),
                         media_type="video",
                     )
                     session.add(record)
@@ -442,15 +432,13 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
             results = await _process_video_batch(pending)
             for data in results:
                 filename, rel_path, modified_at, file_size, width, height = data
-                record = Image(
+                record = create_image_record(
                     filename=filename,
                     relative_path=rel_path,
                     modified_at=modified_at,
                     file_size=file_size,
                     width=width,
                     height=height,
-                    filename_natural=natural_sort_key(filename),
-                    relative_path_natural=natural_sort_key(rel_path),
                     media_type="video",
                 )
                 session.add(record)
@@ -506,7 +494,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
             photo_path = photos_dir / img.relative_path
             if not photo_path.exists():
                 # 原图已不存在，删除数据库记录和缓存
-                cache_name = _cache_filename(img.relative_path)
+                cache_name = cache_filename(img.relative_path)
                 cache_path = cache_dir / cache_name
                 if cache_path.exists():
                     cache_path.unlink(missing_ok=True)
@@ -517,7 +505,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
                     await session.commit()
                     batch_count = 0
             else:
-                valid_cache_names.add(_cache_filename(img.relative_path))
+                valid_cache_names.add(cache_filename(img.relative_path))
             checked_since_yield += 1
             if checked_since_yield >= 100:
                 await asyncio.sleep(0)
@@ -552,7 +540,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
         to_regen: list[tuple[Path, Path, bool]] = []
         for img in all_images:
-            cache_name = _cache_filename(img.relative_path)
+            cache_name = cache_filename(img.relative_path)
             cache_path = cache_dir / cache_name
             if not cache_path.exists():
                 photo_path = photos_dir / img.relative_path

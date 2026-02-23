@@ -10,6 +10,35 @@ CACHE_DIR = ROOT / "cache"
 STATIC_DIR = ROOT / "static"
 PER_PAGE = 24
 
+
+def _parse_size(value: str | None, default_bytes: int) -> int:
+    """解析大小字符串为字节数。支持纯数字或带单位：K/KB、M/MB、G/GB（不区分大小写）"""
+    if not value or not str(value).strip():
+        return default_bytes
+    s = str(value).strip().upper()
+    m = re.match(r"^(\d+)\s*(K|KB|M|MB|G|GB)?$", s)
+    if not m:
+        try:
+            return int(s)
+        except ValueError:
+            return default_bytes
+    num = int(m.group(1))
+    unit = (m.group(2) or "").rstrip("B") or "B"
+    if unit in ("K", ""):
+        return num * 1024
+    if unit == "M":
+        return num * 1024 * 1024
+    if unit == "G":
+        return num * 1024 * 1024 * 1024
+    return num
+
+
+# 上传限制（字节），可通过环境变量覆盖，支持 1000M、5000M 等格式
+_MAX_FILE = os.environ.get("MAX_UPLOAD_FILE_SIZE", "100M")
+_MAX_TOTAL = os.environ.get("MAX_UPLOAD_TOTAL_SIZE", "500M")
+MAX_UPLOAD_FILE_SIZE = _parse_size(_MAX_FILE, 100 * 1024 * 1024)
+MAX_UPLOAD_TOTAL_SIZE = _parse_size(_MAX_TOTAL, 500 * 1024 * 1024)
+
 ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "").strip()
 SESSION_TOKEN = secrets.token_hex(32) if ACCESS_PASSWORD else ""
 

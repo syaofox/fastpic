@@ -13,11 +13,13 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR
+from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL_SIZE
 from models import Image, Tag, ImageTag, get_async_session, natural_sort_key
-from scanner import _cache_filename, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from utils.images import cache_filename
 from schemas import DeleteImagesRequest, DownloadZipRequest
-from utils.path_utils import escape_like, path_filter_for_prefix, resolve_and_validate_relative_path
+from utils.path_utils import escape_like, normalize_path, path_filter_for_prefix, resolve_and_validate_relative_path
+from utils.image_records import create_image_record
 from utils.unique_path import unique_path
 from utils.format import format_file_size
 from utils.images import delete_image_files
@@ -106,8 +108,8 @@ async def download_zip(
         for row in result.fetchall():
             rel_paths.add(row[0])
     for raw_path in body.folder_paths or []:
-        path = (raw_path or "").strip().strip("/")
-        if not path or ".." in path or path.startswith("/"):
+        path = normalize_path(raw_path, allow_empty=False)
+        if path is None:
             continue
         pf = path_filter_for_prefix(Image.relative_path, path)
         result = await session.execute(select(Image.relative_path).where(pf))
@@ -184,7 +186,7 @@ async def upload_images(
     from scanner import get_media_metadata_and_thumbnail
     from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
-    target_path = (path or "").strip().strip("/")
+    target_path = normalize_path(path, allow_empty=True) or ""
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     existing_hashes = await asyncio.to_thread(
@@ -193,6 +195,7 @@ async def upload_images(
     uploaded = 0
     skipped = 0
     errors = []
+    total_uploaded_bytes = 0
     for f in files:
         if not f.filename:
             continue
@@ -200,12 +203,22 @@ async def upload_images(
         if ext not in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
             errors.append(f"{f.filename}: 不支持的格式 {ext}")
             continue
+        if total_uploaded_bytes >= MAX_UPLOAD_TOTAL_SIZE:
+            errors.append(f"{f.filename}: 本次上传总大小已达限制 ({MAX_UPLOAD_TOTAL_SIZE // (1024*1024)}MB)")
+            continue
         is_video = ext in VIDEO_EXTENSIONS
         try:
-            content = await f.read()
+            content = await f.read(MAX_UPLOAD_FILE_SIZE + 1)
+            if len(content) > MAX_UPLOAD_FILE_SIZE:
+                errors.append(f"{f.filename}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024*1024)}MB)")
+                continue
+            if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
+                errors.append(f"{f.filename}: 本次上传总大小将超限")
+                continue
         except Exception as e:
             errors.append(f"{f.filename}: 读取失败 {e}")
             continue
+        total_uploaded_bytes += len(content)
         content_hash = hashlib.md5(content).hexdigest()
         is_overwrite = False
         if content_hash in existing_hashes:
@@ -235,7 +248,7 @@ async def upload_images(
             existing_record = (
                 await session.execute(select(Image).where(Image.relative_path == rel_path))
             ).scalar_one_or_none()
-            cache_name = _cache_filename(rel_path)
+            cache_name = cache_filename(rel_path)
             cache_path = CACHE_DIR / cache_name
             data = await asyncio.to_thread(
                 get_media_metadata_and_thumbnail, dest, cache_path, is_video
@@ -256,15 +269,13 @@ async def upload_images(
                 session.add(existing_record)
                 record = existing_record
             else:
-                record = Image(
+                record = create_image_record(
                     filename=dest.name,
                     relative_path=rel_path,
                     modified_at=modified_at,
                     file_size=file_size,
                     width=width,
                     height=height,
-                    filename_natural=natural_sort_key(dest.name),
-                    relative_path_natural=natural_sort_key(rel_path),
                     media_type="video" if is_video else "image",
                 )
                 session.add(record)

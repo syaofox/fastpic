@@ -10,6 +10,21 @@ def escape_like(value: str) -> str:
     return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
+def normalize_path(path: str | None, allow_empty: bool = True) -> str | None:
+    """规范化相对路径，非法返回 None。
+
+    - strip 空白和首尾斜杠
+    - 含 .. 或以 / 开头视为非法
+    - allow_empty=False 时空路径返回 None
+    """
+    p = (path or "").strip().strip("/")
+    if not p and not allow_empty:
+        return None
+    if ".." in p or p.startswith("/"):
+        return None
+    return p
+
+
 def resolve_and_validate_relative_path(
     relative_path: str, photos_dir: Path
 ) -> Path | None:
