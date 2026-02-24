@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Image, async_session_factory
 from utils.images import cache_filename
+from utils.path_count_cache import cleanup_expired_path_count_cache
 from utils.image_records import create_image_record
 from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
@@ -75,11 +76,23 @@ def get_media_metadata_and_thumbnail(
     full_path: Path, cache_path: Path, is_video: bool
 ) -> tuple[int, int, float, int, bool] | None:
     """同步获取媒体元数据并生成缩略图，返回 (width, height, modified_at, file_size, is_corrupted)，失败返回 None。
-    供 watcher、上传等场景复用。视频的 is_corrupted 恒为 False。"""
+    供 watcher、上传等场景复用。视频的 is_corrupted 恒为 False。
+    若缓存已存在且原图未更新（mtime 未变），则跳过缩略图生成以节省 I/O。"""
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         modified_at = os.path.getmtime(full_path)
         file_size = os.path.getsize(full_path)
+        cache_fresh = cache_path.exists() and modified_at <= cache_path.stat().st_mtime
+        if cache_fresh:
+            if is_video:
+                width, height = _get_video_dimensions(full_path)
+                return (width, height, modified_at, file_size, False)
+            img, is_corrupted = _load_image_maybe_truncated(full_path)
+            try:
+                width, height = img.size
+                return (width, height, modified_at, file_size, is_corrupted)
+            finally:
+                img.close()
         if is_video:
             width, height = _get_video_dimensions(full_path)
             _generate_video_thumbnail(full_path, cache_path)
@@ -612,22 +625,29 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
         if stale_removed:
             print(f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
 
-    # ── 第 2 步：清除孤儿缓存文件（线程中 rglob 流式处理，不加载全量到内存） ──
-    def _remove_orphan_cache(cache_dir: Path, valid: set[str]) -> int:
-        """在线程中执行，rglob 迭代器逐个处理，不加载全量"""
+    # ── 第 2 步：清除孤儿缓存文件（按 cache/ab/cd/ 三层结构遍历，分批 yield 避免长时间阻塞） ──
+    async def _remove_orphan_cache(cache_dir: Path, valid: set[str]) -> int:
         count = 0
         if not cache_dir.exists():
             return 0
-        for cache_file in cache_dir.rglob("*.webp"):
-            rel = str(cache_file.relative_to(cache_dir)).replace("\\", "/")
-            if rel not in valid:
-                cache_file.unlink(missing_ok=True)
-                count += 1
+        for p1 in sorted(cache_dir.iterdir()):
+            if not p1.is_dir() or len(p1.name) != 2:
+                continue
+            for p2 in sorted(p1.iterdir()):
+                if not p2.is_dir() or len(p2.name) != 2:
+                    continue
+                for f in p2.iterdir():
+                    if f.suffix.lower() != ".webp":
+                        continue
+                    rel = str(f.relative_to(cache_dir)).replace("\\", "/")
+                    if rel not in valid:
+                        f.unlink(missing_ok=True)
+                        count += 1
+                await asyncio.sleep(0)
+            await asyncio.sleep(0)
         return count
 
-    orphan_cache_removed = await asyncio.to_thread(
-        _remove_orphan_cache, cache_dir, valid_cache_names
-    )
+    orphan_cache_removed = await _remove_orphan_cache(cache_dir, valid_cache_names)
     if orphan_cache_removed:
         print(f"[cleanup] 清除 {orphan_cache_removed} 个孤儿缓存文件", flush=True)
 
@@ -651,11 +671,15 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
             for img in batch:
                 cache_name = cache_filename(img.relative_path)
                 cache_path = cache_dir / cache_name
+                photo_path = photos_dir / img.relative_path
+                need_regen = False
                 if not cache_path.exists():
-                    photo_path = photos_dir / img.relative_path
-                    if photo_path.exists():
-                        is_video = getattr(img, "media_type", "image") == "video"
-                        to_regen.append((photo_path, cache_path, is_video))
+                    need_regen = photo_path.exists()
+                elif photo_path.exists():
+                    need_regen = photo_path.stat().st_mtime > cache_path.stat().st_mtime
+                if need_regen:
+                    is_video = getattr(img, "media_type", "image") == "video"
+                    to_regen.append((photo_path, cache_path, is_video))
                 last_id = img.id or last_id
 
             if to_regen:
@@ -675,6 +699,10 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
         if cache_regenerated:
             print(f"[cleanup] 重新生成 {cache_regenerated} 个缺失缓存", flush=True)
+
+    path_count_expired = cleanup_expired_path_count_cache()
+    if path_count_expired:
+        print(f"[cleanup] 清理 {path_count_expired} 条过期 path_count_cache", flush=True)
 
     summary = {
         "stale_removed": stale_removed,

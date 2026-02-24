@@ -17,6 +17,7 @@ from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL
 from models import Image, Tag, ImageTag, get_async_session, natural_sort_key
 from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.images import cache_filename
+from utils.folder_tree import invalidate_folder_tree_cache
 from schemas import DeleteImagesRequest, DownloadZipRequest
 from utils.path_utils import escape_like, normalize_path, path_filter_for_prefix, resolve_and_validate_relative_path
 from utils.image_records import create_image_record
@@ -63,6 +64,8 @@ async def delete_images(
             await session.delete(img)
             deleted += 1
         await session.commit()
+    if deleted > 0:
+        invalidate_folder_tree_cache()
     return {"deleted": deleted}
 
 
@@ -301,4 +304,6 @@ async def upload_images(
                 uploaded += 1
         except Exception as e:
             errors.append(f"{f.filename}: {str(e)}")
+    if uploaded > 0:
+        invalidate_folder_tree_cache()
     return {"uploaded": uploaded, "skipped": skipped, "errors": errors}

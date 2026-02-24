@@ -16,7 +16,8 @@ from schemas import ScanDuplicatesRequest
 from app_common import templates
 from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.hash_utils import compute_file_md5
-from utils.stats import stats_folder_count_from_db, stats_cache_only
+from utils.stats import stats_folder_count_from_db, stats_cache_only, invalidate_stats_cache
+from utils.folder_tree import invalidate_folder_tree_cache
 
 router = APIRouter(tags=["settings"])
 
@@ -47,6 +48,8 @@ async def trigger_scan():
         return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
     finally:
         end_scan()
+        invalidate_folder_tree_cache()
+        invalidate_stats_cache()
 
 
 @router.post("/api/cleanup")
@@ -58,6 +61,8 @@ async def trigger_cleanup():
         return result
     finally:
         end_scan()
+        invalidate_folder_tree_cache()
+        invalidate_stats_cache()
 
 
 _SCAN_DUPLICATES_BATCH_SIZE = 5000

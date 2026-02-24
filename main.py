@@ -103,7 +103,19 @@ def _per_page_for_cols(cols: int) -> int:
 # count 缓存：内存 TTL 60s，DB 持久化 TTL 5 分钟
 _COUNT_CACHE_TTL = 60.0
 _PATH_COUNT_DB_TTL = 300.0  # 5 分钟
+_COUNT_CACHE_MAX_SIZE = 1000  # 内存缓存上限，防止无限增长
 _count_cache: dict[tuple[str, str], tuple[int, float]] = {}
+
+
+def _prune_count_cache() -> None:
+    """移除过期条目，超限时移除最久未访问的"""
+    now = time.monotonic()
+    expired = [k for k, (_, ts) in _count_cache.items() if now - ts > _COUNT_CACHE_TTL]
+    for k in expired:
+        del _count_cache[k]
+    while len(_count_cache) > _COUNT_CACHE_MAX_SIZE:
+        oldest_key = min(_count_cache.keys(), key=lambda k: _count_cache[k][1])
+        del _count_cache[oldest_key]
 
 
 def _get_cached_count(path: str, mode: str) -> int | None:
@@ -122,6 +134,8 @@ def _get_cached_count(path: str, mode: str) -> int | None:
 def _set_cached_count(path: str, mode: str, total: int) -> None:
     key = (path or "", mode)
     _count_cache[key] = (total, time.monotonic())
+    if len(_count_cache) >= _COUNT_CACHE_MAX_SIZE:
+        _prune_count_cache()
 
 
 async def _get_path_count_from_db(path: str, mode: str) -> int | None:
