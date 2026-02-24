@@ -185,6 +185,27 @@
         /* 大图切换时淡入，避免白屏 */
         #modal-img { transition: opacity 0.15s ease; }
         #modal-img.modal-img-loading { opacity: 0.4; }
+
+        /* 上传处理中：indeterminate 动画，避免用户误以为卡死 */
+        @keyframes upload-indeterminate {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        #upload-progress-bar.upload-progress-indeterminate {
+            position: relative;
+            width: 100% !important;
+            overflow: hidden;
+        }
+        #upload-progress-bar.upload-progress-indeterminate::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+            animation: upload-indeterminate 1.2s ease-in-out infinite;
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">

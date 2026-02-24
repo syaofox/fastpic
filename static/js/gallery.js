@@ -2292,11 +2292,15 @@ document.addEventListener('keydown', function(e) {
                     var pct = Math.round((e.loaded / e.total) * 100);
                     progressBar.style.width = pct + '%';
                     progressCount.textContent = pct + '%';
-                    if (pct >= 100) progressText.textContent = '处理中...';
+                    if (pct >= 100) {
+                        progressText.textContent = '处理中...';
+                        progressBar.classList.add('upload-progress-indeterminate');
+                    }
                 }
             });
 
             xhr.addEventListener('load', function() {
+                progressBar.classList.remove('upload-progress-indeterminate');
                 if (xhr.status === 200) {
                     var data;
                     try {
@@ -2324,6 +2328,7 @@ document.addEventListener('keydown', function(e) {
                     }, delay);
                 } else {
                     progressText.textContent = '上传失败';
+                    progressBar.style.width = '100%';
                     var errMsg = '服务器返回 ' + xhr.status;
                     if (xhr.status === 413) errMsg = '文件过大，请减少数量或分批上传';
                     else if (xhr.responseText) errMsg += ': ' + String(xhr.responseText).substring(0, 100);
@@ -2334,14 +2339,18 @@ document.addEventListener('keydown', function(e) {
             });
 
             xhr.addEventListener('error', function() {
+                progressBar.classList.remove('upload-progress-indeterminate');
                 progressText.textContent = '上传失败';
+                progressBar.style.width = '100%';
                 errorEl.textContent = '网络错误';
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
             });
 
             xhr.addEventListener('timeout', function() {
+                progressBar.classList.remove('upload-progress-indeterminate');
                 progressText.textContent = '上传超时';
+                progressBar.style.width = '100%';
                 errorEl.textContent = '服务器处理时间过长，请尝试减少文件数量或分批上传';
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
