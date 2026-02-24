@@ -1,3 +1,4 @@
+{% from "macros/gallery_macros.html" import gallery_url_params, render_image_tags %}
 {% if not append %}
 <div id="current-path-marker" data-path="{{ path }}" data-search="{{ search|default('') }}" data-mode="{{ mode }}" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}" data-cols="{{ cols }}" data-total="{{ total }}" data-filter-filename="{{ filter_filename or '' }}" data-filter-size-min="{{ filter_size_min or '' }}" data-filter-size-max="{{ filter_size_max or '' }}" data-filter-date-from="{{ filter_date_from or '' }}" data-filter-date-to="{{ filter_date_to or '' }}" data-filter-tag="{{ filter_tag or '' }}" class="hidden"></div>
 <!-- 顶栏：面包屑 + 操作按钮 -->
@@ -6,7 +7,7 @@
     <nav class="text-sm text-slate-600 flex items-center flex-shrink-0">
         <a href="/"
            class="hover:text-blue-600 transition-colors"
-           hx-get="/gallery?path=&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
+           hx-get="/gallery?{{ gallery_url_params('', search, mode, sort_by, sort_order, 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag) }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
            hx-indicator="#gallery-loading-indicator"
@@ -19,7 +20,7 @@
         {% else %}
         <a href="?path={{ seg_path|urlencode_path }}"
            class="hover:text-blue-600 transition-colors"
-           hx-get="/gallery?path={{ seg_path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
+           hx-get="/gallery?{{ gallery_url_params(seg_path, search, mode, sort_by, sort_order, 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag) }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
            hx-indicator="#gallery-loading-indicator"
@@ -45,7 +46,7 @@
         </div>
     </div>
     <button type="button" id="view-mode-btn" class="p-2 rounded transition-colors {{ 'bg-blue-100 text-blue-600' if mode in ('folder', 'list', 'waterfall') else 'bg-slate-100 text-slate-700 hover:bg-slate-100' }}" title="{{ '切换到列表' if mode == 'folder' else '切换到瀑布流' if mode == 'list' else '切换到文件夹' }}"
-            hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ 'list' if mode == 'folder' else 'waterfall' if mode == 'list' else 'folder' }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
+            hx-get="/gallery?{{ gallery_url_params(path, search, 'list' if mode == 'folder' else 'waterfall' if mode == 'list' else 'folder', sort_by, sort_order, 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag) }}"
             hx-target="#gallery-container"
             hx-swap="innerHTML"
             hx-on:click="document.querySelector('[name=mode]').value = '{{ 'list' if mode == 'folder' else 'waterfall' if mode == 'list' else 'folder' }}'">
@@ -206,7 +207,7 @@
         <div class="select-overlay hidden absolute inset-0 bg-blue-500/10 z-[5] pointer-events-none rounded-lg ring-2 ring-blue-500"></div>
         <a href="?path={{ sub.full_path|urlencode_path }}"
            class="{{ 'flex flex-row items-center gap-3 p-2' if mode == 'list' else 'block' }} folder-nav-link"
-           hx-get="/gallery?path={{ sub.full_path|urlencode_path }}&search=&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page=1&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
+           hx-get="/gallery?{{ gallery_url_params(sub.full_path, '', mode, sort_by, sort_order, 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag) }}"
            hx-target="#gallery-container"
            hx-swap="innerHTML"
            hx-indicator="#gallery-loading-indicator"
@@ -298,46 +299,13 @@
                 <div class="text-sm font-medium text-slate-800 truncate">{{ img.filename }}</div>
                 <div class="text-xs text-slate-500 truncate">{{ img.relative_path }}</div>
                 <div class="text-xs text-slate-400">{{ img.modified_at|format_date }} · {{ img.file_size|format_filesize }}</div>
-                {% set all_img_tags = (image_tags_map|default({})).get(img.id, []) %}
-                {% set img_tags = all_img_tags[:3] %}
-                {% if img_tags %}
-                <div class="flex flex-wrap gap-1 text-xs mt-0.5">
-                    {% for t in img_tags %}
-                    <span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">#{{ t }}</span>
-                    {% endfor %}
-                    {% if all_img_tags|length > 3 %}
-                    <span class="text-slate-400">+{{ (all_img_tags|length) - 3 }}</span>
-                    {% endif %}
-                </div>
-                {% endif %}
+                {{ render_image_tags(img, image_tags_map, true) }}
             </div>
             {% elif mode == 'folder' %}
             <div class="px-2 py-1 text-xs text-slate-600 truncate">{{ img.filename }}</div>
-            {% set all_img_tags = (image_tags_map|default({})).get(img.id, []) %}
-            {% set img_tags = all_img_tags[:3] %}
-            {% if img_tags %}
-            <div class="px-2 pb-1 flex flex-wrap gap-1 text-xs">
-                {% for t in img_tags %}
-                <span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">#{{ t }}</span>
-                {% endfor %}
-                {% if all_img_tags|length > 3 %}
-                <span class="text-slate-400">+{{ (all_img_tags|length) - 3 }}</span>
-                {% endif %}
-            </div>
-            {% endif %}
+            {{ render_image_tags(img, image_tags_map) }}
             {% else %}
-            {% set all_img_tags = (image_tags_map|default({})).get(img.id, []) %}
-            {% set img_tags = all_img_tags[:3] %}
-            {% if img_tags %}
-            <div class="px-2 pb-1 flex flex-wrap gap-1 text-xs">
-                {% for t in img_tags %}
-                <span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">#{{ t }}</span>
-                {% endfor %}
-                {% if all_img_tags|length > 3 %}
-                <span class="text-slate-400">+{{ (all_img_tags|length) - 3 }}</span>
-                {% endif %}
-            </div>
-            {% endif %}
+            {{ render_image_tags(img, image_tags_map) }}
             {% endif %}
         </a>
     </div>
@@ -356,7 +324,7 @@
 {% endif %}
 <div class="scroll-sentinel"
      style="height: 4px;"
-     hx-get="/gallery?path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page={{ page + 1 }}{% if next_cursor %}&cursor={{ next_cursor|urlencode }}{% endif %}&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}"
+     hx-get="/gallery?{{ gallery_url_params(path, search, mode, sort_by, sort_order, page + 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag, next_cursor) }}"
      hx-trigger="intersect once root:#scroll-container threshold:0"
      hx-swap="beforeend"
      hx-target="#gallery-grid"

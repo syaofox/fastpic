@@ -307,40 +307,33 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds, pageMediaTypes
 }
 window.openModalFromGallery = openModalFromGallery;
 
-function closeModal(e) {
-    if (e.target.id === 'modal' || e.target.id === 'modal-overlay') {
-        stopSlideshow();
-        _destroyMpegtsPlayer();
-        var vid = document.getElementById('modal-video');
-        if (vid) { vid.pause(); vid.removeAttribute('src'); }
-        if (document.fullscreenElement) document.exitFullscreen();
-        var modal = document.getElementById('modal');
-        modal.classList.remove('modal-open');
-        modal.setAttribute('aria-hidden', 'true');
-        var panel = document.getElementById('modal-image-info-panel');
-        if (panel) panel.classList.add('hidden');
-        _updateImageInfoBtnState(false);
-        if (_lastFocusedBeforeModal && typeof _lastFocusedBeforeModal.focus === 'function') {
-            _lastFocusedBeforeModal.focus();
-        }
-    }
-}
-
-function closeModalAndStopSlideshow() {
+function _doCloseModal() {
     stopSlideshow();
     _destroyMpegtsPlayer();
     var vid = document.getElementById('modal-video');
     if (vid) { vid.pause(); vid.removeAttribute('src'); }
     if (document.fullscreenElement) document.exitFullscreen();
     var modal = document.getElementById('modal');
-    modal.classList.remove('modal-open');
-    modal.setAttribute('aria-hidden', 'true');
+    if (modal) {
+        modal.classList.remove('modal-open');
+        modal.setAttribute('aria-hidden', 'true');
+    }
     var panel = document.getElementById('modal-image-info-panel');
     if (panel) panel.classList.add('hidden');
     _updateImageInfoBtnState(false);
     if (_lastFocusedBeforeModal && typeof _lastFocusedBeforeModal.focus === 'function') {
         _lastFocusedBeforeModal.focus();
     }
+}
+
+function closeModal(e) {
+    if (e && (e.target.id === 'modal' || e.target.id === 'modal-overlay')) {
+        _doCloseModal();
+    }
+}
+
+function closeModalAndStopSlideshow() {
+    _doCloseModal();
 }
 
 function handleModalContentClick(e) {
@@ -598,7 +591,7 @@ function nextImage(fromSlideshow) {
         modalIndex = nextIdx;
     } else {
         if (modalIndex === modalImages.length - 1) {
-            showCustomConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
+            showConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
                 modalIndex = 0;
                 _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
                     _updateModalImageCounter();
@@ -616,40 +609,6 @@ function nextImage(fromSlideshow) {
         preloadModalImages(modalIndex);
     });
     return true;
-}
-
-function showCustomConfirm(message, confirmText, onConfirm, onCancel) {
-    var old = document.getElementById('custom-confirm-dialog');
-    if (old) old.remove();
-
-    var overlay = document.createElement('div');
-    overlay.id = 'custom-confirm-dialog';
-    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40';
-    overlay.innerHTML =
-        '<div class="bg-white rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6" onclick="event.stopPropagation()">' +
-            '<p class="text-slate-700 mb-6 text-center">' + escapeHtml(message) + '</p>' +
-            '<div class="flex justify-center gap-3">' +
-                '<button type="button" class="custom-confirm-cancel px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
-                '<button type="button" class="custom-confirm-ok px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">' + escapeHtml(confirmText || '确定') + '</button>' +
-            '</div>' +
-        '</div>';
-
-    document.body.appendChild(overlay);
-
-    overlay.querySelector('.custom-confirm-ok').addEventListener('click', function() {
-        overlay.remove();
-        if (onConfirm) onConfirm();
-    });
-    overlay.querySelector('.custom-confirm-cancel').addEventListener('click', function() {
-        overlay.remove();
-        if (onCancel) onCancel();
-    });
-    overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) {
-            overlay.remove();
-            if (onCancel) onCancel();
-        }
-    });
 }
 
 function refreshImageInfoIfVisible() {
@@ -850,7 +809,7 @@ function deleteCurrentImage() {
     var imageId = modalImageIds[modalIndex];
     if (!imageId) return;
 
-    showCustomConfirm('确定要删除这张图片吗？此操作不可恢复。', '删除', function() {
+    showConfirm('确定要删除这张图片吗？此操作不可恢复。', '删除', function() {
         var btn = document.getElementById('modal-delete-btn');
         if (btn) btn.disabled = true;
 
@@ -886,7 +845,7 @@ function deleteCurrentImage() {
             if (typeof showToast === 'function') showToast('删除失败', 'error');
             if (btn) btn.disabled = false;
         });
-    });
+    }, null, { variant: 'danger' });
 }
 
 function downloadCurrentImage() {
@@ -1003,65 +962,21 @@ function showSetThumbnailFolderDialog() {
 
     document.body.appendChild(overlay);
 
-    var currentPath = initialPath;
     var breadcrumbEl = overlay.querySelector('#set-thumb-breadcrumb');
     var listEl = overlay.querySelector('#set-thumb-folder-list');
     var confirmBtn = overlay.querySelector('.set-thumb-confirm-btn');
     var errorEl = overlay.querySelector('#set-thumb-error');
 
-    function renderBreadcrumb() {
-        var parts = currentPath ? currentPath.split('/') : [];
-        var html = '<a href="#" class="set-thumb-nav-link" data-path="">全部文件夹</a>';
-        for (var i = 0; i < parts.length; i++) {
-            var path = parts.slice(0, i + 1).join('/');
-            html += '<span class="text-slate-400"> › </span>';
-            html += '<a href="#" class="set-thumb-nav-link" data-path="' + path.replace(/"/g, '&quot;') + '">' + parts[i] + '</a>';
-        }
-        breadcrumbEl.innerHTML = html;
-        breadcrumbEl.querySelectorAll('.set-thumb-nav-link').forEach(function(a) {
-            a.addEventListener('click', function(e) {
-                e.preventDefault();
-                currentPath = a.getAttribute('data-path') || '';
-                renderBreadcrumb();
-                loadSubfolders();
-            });
-        });
-    }
-
-    function loadSubfolders() {
-        listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">加载中...</div>';
-        fetch('/api/subfolders?path=' + encodeURIComponent(currentPath))
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                var subs = data.subfolders || [];
-                var content = '';
-                if (subs.length === 0) {
-                    content = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
-                } else {
-                    content = subs.map(function(s) {
-                        return '<div class="set-thumb-folder-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
-                            '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
-                            '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
-                            (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
-                            '</div>';
-                    }).join('');
-                }
-                listEl.innerHTML = content;
-                listEl.querySelectorAll('.set-thumb-folder-item').forEach(function(el) {
-                    el.addEventListener('click', function() {
-                        currentPath = el.getAttribute('data-path') || '';
-                        renderBreadcrumb();
-                        loadSubfolders();
-                    });
-                });
-            })
-            .catch(function(err) {
-                listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
-            });
-    }
+    var browser = createFolderBrowser(breadcrumbEl, listEl, {
+        initialPath: initialPath,
+        itemClass: 'set-thumb-folder-item',
+        navClass: 'set-thumb-nav-link'
+    });
+    browser.init();
 
     function doSetThumbnail() {
         errorEl.classList.add('hidden');
+        var currentPath = browser.getPath();
         if (!currentPath) {
             if (typeof showToast === 'function') showToast('请选择具体文件夹', 'error');
             return;
@@ -1096,9 +1011,6 @@ function showSetThumbnailFolderDialog() {
     overlay.querySelector('.set-thumb-cancel-btn').addEventListener('click', function() { overlay.remove(); });
     confirmBtn.addEventListener('click', doSetThumbnail);
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-
-    renderBreadcrumb();
-    loadSubfolders();
 }
 window.showSetThumbnailFolderDialog = showSetThumbnailFolderDialog;
 
@@ -1116,7 +1028,7 @@ function refreshGalleryFromModal() {
 
 document.addEventListener('keydown', function(e) {
     const modal = document.getElementById('modal');
-    if (!modal.classList.contains('modal-open')) return;
+    if (!modal || !modal.classList.contains('modal-open')) return;
     var active = document.activeElement;
     var isEditable = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
     if (e.key === 'Escape') {
@@ -3080,130 +2992,89 @@ document.addEventListener('keydown', function(e) {
 
         document.body.appendChild(overlay);
 
-        var currentPath = (options && options.initialPath !== undefined) ? options.initialPath : getCurrentPathForMove();
         var breadcrumbEl = overlay.querySelector('#move-breadcrumb');
         var listEl = overlay.querySelector('#move-folder-list');
         var confirmBtn = overlay.querySelector('.move-confirm-btn');
         var errorEl = overlay.querySelector('#move-error');
 
-        function renderBreadcrumb() {
-            var parts = currentPath ? currentPath.split('/') : [];
-            var html = '<a href="#" class="move-nav-link" data-path="">全部文件夹</a>';
-            for (var i = 0; i < parts.length; i++) {
-                var path = parts.slice(0, i + 1).join('/');
-                html += '<span class="text-slate-400"> › </span>';
-                html += '<a href="#" class="move-nav-link" data-path="' + path.replace(/"/g, '&quot;') + '">' + parts[i] + '</a>';
-            }
-            breadcrumbEl.innerHTML = html;
-            breadcrumbEl.querySelectorAll('.move-nav-link').forEach(function(a) {
-                a.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    currentPath = a.getAttribute('data-path') || '';
-                    renderBreadcrumb();
-                    loadSubfolders();
-                });
-            });
-        }
+        var newFolderRowHtml = '<div id="move-new-folder-row" class="mb-3 flex-shrink-0">' +
+            '<div id="move-new-folder-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors text-blue-600">' +
+            '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>' +
+            '<span class="text-sm font-medium">新建文件夹</span>' +
+            '</div>' +
+            '<div id="move-new-folder-input-row" class="hidden flex items-center gap-2 mt-2">' +
+            '<input type="text" id="move-new-folder-input" placeholder="输入文件夹名称" class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">' +
+            '<button type="button" class="move-new-folder-confirm px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">创建</button>' +
+            '<button type="button" class="move-new-folder-cancel px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+            '</div>' +
+            '<div id="move-new-folder-error" class="hidden mt-1 text-sm text-red-500"></div>' +
+            '</div>';
 
-        function loadSubfolders() {
-            listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">加载中...</div>';
-            fetch('/api/subfolders?path=' + encodeURIComponent(currentPath))
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var subs = data.subfolders || [];
-                    var newFolderRow = '<div id="move-new-folder-row" class="mb-3 flex-shrink-0">' +
-                        '<div id="move-new-folder-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors text-blue-600">' +
-                        '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>' +
-                        '<span class="text-sm font-medium">新建文件夹</span>' +
-                        '</div>' +
-                        '<div id="move-new-folder-input-row" class="hidden flex items-center gap-2 mt-2">' +
-                        '<input type="text" id="move-new-folder-input" placeholder="输入文件夹名称" class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">' +
-                        '<button type="button" class="move-new-folder-confirm px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">创建</button>' +
-                        '<button type="button" class="move-new-folder-cancel px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
-                        '</div>' +
-                        '<div id="move-new-folder-error" class="hidden mt-1 text-sm text-red-500"></div>' +
-                        '</div>';
-                    var content = '';
-                    if (subs.length === 0) {
-                        content = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
-                    } else {
-                        content = subs.map(function(s) {
-                            return '<div class="move-folder-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
-                                '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
-                                '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
-                                (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
-                                '</div>';
-                        }).join('');
-                    }
-                    listEl.innerHTML = newFolderRow + content;
-                    var newFolderBtn = listEl.querySelector('#move-new-folder-btn');
-                    var inputRow = listEl.querySelector('#move-new-folder-input-row');
-                    var newFolderInput = listEl.querySelector('#move-new-folder-input');
-                    var newFolderConfirm = listEl.querySelector('.move-new-folder-confirm');
-                    var newFolderCancel = listEl.querySelector('.move-new-folder-cancel');
-                    var newFolderError = listEl.querySelector('#move-new-folder-error');
-                    if (newFolderBtn) {
-                        newFolderBtn.addEventListener('click', function() {
-                            newFolderBtn.classList.add('hidden');
-                            inputRow.classList.remove('hidden');
-                            inputRow.classList.add('flex');
-                            if (newFolderError) newFolderError.classList.add('hidden');
-                            if (newFolderInput) { newFolderInput.value = ''; setTimeout(function() { newFolderInput.focus(); }, 50); }
-                        });
-                    }
-                    if (newFolderCancel) {
-                        newFolderCancel.addEventListener('click', function() {
-                            inputRow.classList.add('hidden');
-                            inputRow.classList.remove('flex');
+        var browser = createFolderBrowser(breadcrumbEl, listEl, {
+            initialPath: (options && options.initialPath !== undefined) ? options.initialPath : getCurrentPathForMove(),
+            itemClass: 'move-folder-item',
+            navClass: 'move-nav-link',
+            prependHtml: newFolderRowHtml,
+            afterRender: function(b) {
+                var newFolderBtn = listEl.querySelector('#move-new-folder-btn');
+                var inputRow = listEl.querySelector('#move-new-folder-input-row');
+                var newFolderInput = listEl.querySelector('#move-new-folder-input');
+                var newFolderConfirm = listEl.querySelector('.move-new-folder-confirm');
+                var newFolderCancel = listEl.querySelector('.move-new-folder-cancel');
+                var newFolderError = listEl.querySelector('#move-new-folder-error');
+                if (newFolderBtn) {
+                    newFolderBtn.onclick = function() {
+                        newFolderBtn.classList.add('hidden');
+                        inputRow.classList.remove('hidden');
+                        inputRow.classList.add('flex');
+                        if (newFolderError) newFolderError.classList.add('hidden');
+                        if (newFolderInput) { newFolderInput.value = ''; setTimeout(function() { newFolderInput.focus(); }, 50); }
+                    };
+                }
+                if (newFolderCancel) {
+                    newFolderCancel.onclick = function() {
+                        inputRow.classList.add('hidden');
+                        inputRow.classList.remove('flex');
+                        if (newFolderBtn) newFolderBtn.classList.remove('hidden');
+                        if (newFolderError) newFolderError.classList.add('hidden');
+                    };
+                }
+                function doCreateNewFolder() {
+                    var name = newFolderInput ? newFolderInput.value.trim() : '';
+                    if (!name) { if (newFolderError) { newFolderError.textContent = '名称不能为空'; newFolderError.classList.remove('hidden'); } return; }
+                    if (/[\/\\]/.test(name) || name.includes('..')) { if (newFolderError) { newFolderError.textContent = '名称不能包含 / \\ 或 ..'; newFolderError.classList.remove('hidden'); } return; }
+                    if (newFolderConfirm) newFolderConfirm.disabled = true;
+                    if (newFolderConfirm) newFolderConfirm.textContent = '创建中...';
+                    fetch('/api/create-folder', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({path: b.getPath(), name: name})
+                    }).then(function(r) { return r.json(); }).then(function(data) {
+                        if (data.ok) {
+                            if (inputRow) { inputRow.classList.add('hidden'); inputRow.classList.remove('flex'); }
                             if (newFolderBtn) newFolderBtn.classList.remove('hidden');
                             if (newFolderError) newFolderError.classList.add('hidden');
-                        });
-                    }
-                    function doCreateNewFolder() {
-                        var name = newFolderInput ? newFolderInput.value.trim() : '';
-                        if (!name) { if (newFolderError) { newFolderError.textContent = '名称不能为空'; newFolderError.classList.remove('hidden'); } return; }
-                        if (/[\/\\]/.test(name) || name.includes('..')) { if (newFolderError) { newFolderError.textContent = '名称不能包含 / \\ 或 ..'; newFolderError.classList.remove('hidden'); } return; }
-                        if (newFolderConfirm) newFolderConfirm.disabled = true;
-                        if (newFolderConfirm) newFolderConfirm.textContent = '创建中...';
-                        fetch('/api/create-folder', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({path: currentPath, name: name})
-                        }).then(function(r) { return r.json(); }).then(function(data) {
-                            if (data.ok) {
-                                if (inputRow) { inputRow.classList.add('hidden'); inputRow.classList.remove('flex'); }
-                                if (newFolderBtn) newFolderBtn.classList.remove('hidden');
-                                if (newFolderError) newFolderError.classList.add('hidden');
-                                if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
-                                loadSubfolders();
-                            } else {
-                                if (newFolderError) { newFolderError.textContent = data.error || '创建失败'; newFolderError.classList.remove('hidden'); }
-                                if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
-                            }
-                        }).catch(function(err) {
-                            if (newFolderError) { newFolderError.textContent = '请求失败: ' + err; newFolderError.classList.remove('hidden'); }
                             if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
-                        });
-                    }
-                    if (newFolderConfirm) newFolderConfirm.addEventListener('click', doCreateNewFolder);
-                    if (newFolderInput) {
-                        newFolderInput.addEventListener('keydown', function(e) {
-                            if (e.key === 'Enter') { e.preventDefault(); doCreateNewFolder(); }
-                            if (e.key === 'Escape') { if (newFolderCancel) newFolderCancel.click(); }
-                        });
-                    }
-                    listEl.querySelectorAll('.move-folder-item').forEach(function(el) {
-                        el.addEventListener('click', function() {
-                            currentPath = el.getAttribute('data-path') || '';
-                            renderBreadcrumb();
-                            loadSubfolders();
-                        });
+                            b.refresh();
+                        } else {
+                            if (newFolderError) { newFolderError.textContent = data.error || '创建失败'; newFolderError.classList.remove('hidden'); }
+                            if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
+                        }
+                    }).catch(function() {
+                        if (newFolderError) { newFolderError.textContent = '请求失败'; newFolderError.classList.remove('hidden'); }
+                        if (newFolderConfirm) { newFolderConfirm.disabled = false; newFolderConfirm.textContent = '创建'; }
                     });
-                })
-                .catch(function(err) {
-                    listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
-                });
-        }
+                }
+                if (newFolderConfirm) newFolderConfirm.onclick = doCreateNewFolder;
+                if (newFolderInput) {
+                    newFolderInput.onkeydown = function(e) {
+                        if (e.key === 'Enter') { e.preventDefault(); doCreateNewFolder(); }
+                        if (e.key === 'Escape') { if (newFolderCancel) newFolderCancel.click(); }
+                    };
+                }
+            }
+        });
+        browser.init();
 
         function doMove() {
             errorEl.classList.add('hidden');
@@ -3211,6 +3082,7 @@ document.addEventListener('keydown', function(e) {
             confirmBtn.textContent = '移动中...';
             if (window.showOperationLoading) window.showOperationLoading('正在移动，请稍候...');
 
+            var currentPath = browser.getPath();
             var promises = [];
             if (imgIds.length > 0) {
                 promises.push(
@@ -3282,9 +3154,6 @@ document.addEventListener('keydown', function(e) {
         overlay.querySelector('.move-cancel-btn').addEventListener('click', function() { overlay.remove(); });
         confirmBtn.addEventListener('click', doMove);
         overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-
-        renderBreadcrumb();
-        loadSubfolders();
     };
 
     window.showRenameDialogForCurrentImage = function() {

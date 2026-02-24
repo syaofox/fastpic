@@ -1,5 +1,35 @@
 /**
  * FastPic 前端工具函数
+ */
+
+/** 转义 HTML 文本内容，防止 XSS */
+function escapeHtml(s) {
+    if (s == null) return '';
+    var div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+}
+
+/** 转义 HTML 属性值，防止 XSS */
+function escapeAttr(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/** 格式化文件大小（字节 -> 可读字符串） */
+function formatSize(bytes) {
+    if (bytes === 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+}
+
+/**
  * 构建 gallery 请求 URL；opts 可覆盖 mode/sortBy/sortOrder/cols/filters（用于 marker 状态等）
  */
 function buildGalleryUrl(path, opts) {

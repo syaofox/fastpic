@@ -1,0 +1,20 @@
+{# Gallery URL 参数宏：集中管理 hx-get 等链接的 query 参数，减少重复与错误 #}
+{% macro gallery_url_params(path, search, mode, sort_by, sort_order, page, cols, filter_filename='', filter_size_min='', filter_size_max='', filter_date_from='', filter_date_to='', filter_tag='', cursor=none) %}
+path={{ path|urlencode_path }}&search={{ search|urlencode_path }}&mode={{ mode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}&page={{ page }}&cols={{ cols }}&filter_filename={{ (filter_filename or '')|urlencode_path }}&filter_size_min={{ filter_size_min or '' }}&filter_size_max={{ filter_size_max or '' }}&filter_date_from={{ filter_date_from or '' }}&filter_date_to={{ filter_date_to or '' }}&filter_tag={{ (filter_tag or '')|urlencode_path }}{% if cursor %}&cursor={{ cursor|urlencode }}{% endif %}
+{% endmacro %}
+
+{# 图片标签展示：list/folder/waterfall 三种模式复用 #}
+{% macro render_image_tags(img, image_tags_map, list_mode=false) %}
+{% set all_img_tags = (image_tags_map|default({})).get(img.id, []) %}
+{% set img_tags = all_img_tags[:3] %}
+{% if img_tags %}
+<div class="{{ 'flex flex-wrap gap-1 text-xs mt-0.5' if list_mode else 'px-2 pb-1 flex flex-wrap gap-1 text-xs' }}">
+    {% for t in img_tags %}
+    <span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">#{{ t }}</span>
+    {% endfor %}
+    {% if all_img_tags|length > 3 %}
+    <span class="text-slate-400">+{{ (all_img_tags|length) - 3 }}</span>
+    {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

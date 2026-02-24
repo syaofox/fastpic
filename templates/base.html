@@ -10,23 +10,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/mpegts.js@1.8.0/dist/mpegts.js"></script>
-    <script>
-    function escapeHtml(s) {
-        if (s == null) return '';
-        var div = document.createElement('div');
-        div.textContent = s;
-        return div.innerHTML;
-    }
-    function escapeAttr(s) {
-        if (s == null) return '';
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-    }
-    </script>
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/folder-browser.js"></script>
     <style>
         /* 侧边栏：细窄滚动条，浅色主题 */
         #sidebar {
@@ -218,6 +203,16 @@
         <span>正在扫描图片库，新图片将陆续显示…</span>
     </div>
     {% block content %}{% endblock %}
+    <!-- 通用确认弹窗（主站与设置页复用） -->
+    <div id="global-confirm-overlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4 bg-black/40" onclick="if(event.target===this)closeGlobalConfirm()">
+        <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6" onclick="event.stopPropagation()">
+            <p id="global-confirm-message" class="text-slate-700 mb-6 text-center"></p>
+            <div class="flex justify-center gap-3">
+                <button type="button" id="global-confirm-cancel" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>
+                <button type="button" id="global-confirm-ok" class="px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors">确定</button>
+            </div>
+        </div>
+    </div>
     <!-- 页面内提示（替代 alert） -->
     <div id="toast-container" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
     <script>
@@ -235,6 +230,38 @@
             el.style.transition = 'opacity 0.2s';
             setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 200);
         }, 4000);
+    }
+
+    /** 通用确认弹窗：message 文案，confirmText 确认按钮文字，onConfirm/onCancel 回调，opts.variant='danger' 时确认按钮为红色 */
+    function showConfirm(message, confirmText, onConfirm, onCancel, opts) {
+        opts = opts || {};
+        var overlay = document.getElementById('global-confirm-overlay');
+        var msgEl = document.getElementById('global-confirm-message');
+        var cancelBtn = document.getElementById('global-confirm-cancel');
+        var okBtn = document.getElementById('global-confirm-ok');
+        if (!overlay || !msgEl || !okBtn) return;
+        msgEl.textContent = message || '';
+        okBtn.textContent = confirmText || '确定';
+        okBtn.className = 'px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors ' +
+            (opts.variant === 'danger' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600');
+        function close() {
+            overlay.classList.add('hidden');
+            okBtn.onclick = null;
+            cancelBtn.onclick = null;
+        }
+        okBtn.onclick = function() {
+            close();
+            if (onConfirm) onConfirm();
+        };
+        cancelBtn.onclick = function() {
+            close();
+            if (onCancel) onCancel();
+        };
+        overlay.classList.remove('hidden');
+    }
+    function closeGlobalConfirm() {
+        var overlay = document.getElementById('global-confirm-overlay');
+        if (overlay) overlay.classList.add('hidden');
     }
     </script>
     <script>

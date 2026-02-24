@@ -586,38 +586,7 @@ document.addEventListener('click', function(e) {
     }
 });
 
-function showSettingsPrompt(title, defaultValue, onConfirm) {
-    var overlay = document.getElementById('settings-modal-overlay');
-    var modal = document.getElementById('settings-modal-prompt');
-    var input = document.getElementById('settings-prompt-input');
-    var errorEl = document.getElementById('settings-prompt-error');
-    document.getElementById('settings-prompt-title').textContent = title;
-    input.value = defaultValue || '';
-    errorEl.classList.add('hidden');
-    modal.classList.remove('hidden');
-    overlay.classList.remove('hidden');
-    input.focus();
-
-    function close() {
-        overlay.classList.add('hidden');
-        modal.classList.add('hidden');
-    }
-
-    function done() {
-        var val = input.value.trim();
-        close();
-        if (onConfirm) onConfirm(val);
-    }
-
-    document.getElementById('settings-prompt-cancel').onclick = function() { close(); };
-    document.getElementById('settings-prompt-confirm').onclick = function() { done(); };
-    input.onkeydown = function(e) {
-        if (e.key === 'Enter') done();
-        if (e.key === 'Escape') close();
-    };
-}
-
-function showSettingsPromptWithValidation(title, defaultValue, onConfirm, validate) {
+function showSettingsPrompt(title, defaultValue, onConfirm, validate) {
     var overlay = document.getElementById('settings-modal-overlay');
     var modal = document.getElementById('settings-modal-prompt');
     var input = document.getElementById('settings-prompt-input');
@@ -652,7 +621,7 @@ function showSettingsPromptWithValidation(title, defaultValue, onConfirm, valida
         if (e.key === 'Enter') tryConfirm();
         if (e.key === 'Escape') close();
     };
-    input.oninput = function() { errorEl.classList.add('hidden'); };
+    if (validate) input.oninput = function() { errorEl.classList.add('hidden'); };
 }
 
 function showSettingsConfirm(title, message, onConfirm) {
@@ -708,14 +677,6 @@ function switchTab(tabName) {
     if (target) target.classList.remove('hidden');
     if (tabName === 'tags') loadTags();
     if (tabName === 'duplicates' && dupGroupsCache.length > 0) renderDuplicateGroups(dupGroupsCache);
-}
-
-// 格式化文件大小
-function formatSize(bytes) {
-    if (bytes === 0) return '0 B';
-    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
 }
 
 // 加载统计信息
@@ -1205,7 +1166,7 @@ function batchDeleteSelectedTags() {
 }
 
 function renameTag(oldName) {
-    showSettingsPromptWithValidation('重命名标签', oldName, function(newName) {
+    showSettingsPrompt('重命名标签', oldName, function(newName) {
         if (newName === oldName) return;
         fetch('/api/tags/' + encodeURIComponent(oldName), {
             method: 'PUT',
@@ -1265,72 +1226,26 @@ function showMergeFolderBrowser(inputId) {
 
     document.body.appendChild(overlay);
 
-    var currentPath = initialPath;
     var breadcrumbEl = overlay.querySelector('#merge-browse-breadcrumb');
     var listEl = overlay.querySelector('#merge-browse-list');
-
-    function renderBreadcrumb() {
-        var parts = currentPath ? currentPath.split('/') : [];
-        var html = '<a href="#" class="merge-browse-nav text-blue-600 hover:underline" data-path="">全部文件夹</a>';
-        for (var i = 0; i < parts.length; i++) {
-            var path = parts.slice(0, i + 1).join('/');
-            html += '<span class="text-slate-400"> › </span>';
-            html += '<a href="#" class="merge-browse-nav text-blue-600 hover:underline" data-path="' + path.replace(/"/g, '&quot;') + '">' + parts[i].replace(/</g, '&lt;') + '</a>';
-        }
-        breadcrumbEl.innerHTML = html;
-        breadcrumbEl.querySelectorAll('.merge-browse-nav').forEach(function(a) {
-            a.addEventListener('click', function(e) {
-                e.preventDefault();
-                currentPath = a.getAttribute('data-path') || '';
-                renderBreadcrumb();
-                loadSubfolders();
-            });
-        });
-    }
-
-    function loadSubfolders() {
-        listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">加载中...</div>';
-        fetch('/api/subfolders?path=' + encodeURIComponent(currentPath))
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                var subs = data.subfolders || [];
-                if (subs.length === 0) {
-                    listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
-                } else {
-                    listEl.innerHTML = subs.map(function(s) {
-                        return '<div class="merge-browse-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
-                            '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
-                            '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
-                            (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
-                            '</div>';
-                    }).join('');
-                    listEl.querySelectorAll('.merge-browse-item').forEach(function(el) {
-                        el.addEventListener('click', function() {
-                            currentPath = el.getAttribute('data-path') || '';
-                            renderBreadcrumb();
-                            loadSubfolders();
-                        });
-                    });
-                }
-            })
-            .catch(function() {
-                listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
-            });
-    }
+    var browser = createFolderBrowser(breadcrumbEl, listEl, {
+        initialPath: initialPath,
+        itemClass: 'merge-browse-item',
+        navClass: 'merge-browse-nav',
+        rootLabel: '全部文件夹'
+    });
+    browser.init();
 
     overlay.querySelector('.merge-browse-cancel').addEventListener('click', function() {
         overlay.remove();
     });
     overlay.querySelector('.merge-browse-select').addEventListener('click', function() {
-        input.value = currentPath;
+        input.value = browser.getPath();
         overlay.remove();
     });
     overlay.addEventListener('click', function(e) {
         if (e.target === overlay) overlay.remove();
     });
-
-    renderBreadcrumb();
-    loadSubfolders();
 }
 
 // 通用目录搜索下拉（合并文件夹、重复文件等复用）
@@ -1379,70 +1294,33 @@ function initDirSearchDropdown(inputId, dropdownId, itemClass, hoverClass) {
     });
 }
 
-var dupBrowseCurrentPath = '';
+var dupBrowseBrowser = null;
 function openDupFolderBrowse() {
-    dupBrowseCurrentPath = (document.getElementById('dup-folder-input').value || '').trim();
+    var initialPath = (document.getElementById('dup-folder-input').value || '').trim();
     document.getElementById('dup-folder-browse-modal').classList.remove('hidden');
-    dupBrowseLoadSubdirs();
+    var breadcrumbEl = document.getElementById('dup-browse-breadcrumb');
+    var listEl = document.getElementById('dup-browse-list');
+    if (!dupBrowseBrowser) {
+        dupBrowseBrowser = createFolderBrowser(breadcrumbEl, listEl, {
+            initialPath: initialPath,
+            itemClass: 'dup-browse-dir-item',
+            navClass: 'dup-bc-item',
+            rootLabel: '根'
+        });
+    } else {
+        dupBrowseBrowser.setPath(initialPath);
+    }
+    dupBrowseBrowser.init();
 }
 
 function closeDupFolderBrowse() {
     document.getElementById('dup-folder-browse-modal').classList.add('hidden');
 }
 
-function dupBrowseLoadSubdirs() {
-    var listEl = document.getElementById('dup-browse-list');
-    var breadcrumbEl = document.getElementById('dup-browse-breadcrumb');
-    listEl.innerHTML = '<div class="p-4 text-center text-slate-500 text-sm">加载中...</div>';
-    var path = dupBrowseCurrentPath;
-    var parts = path ? path.split('/') : [];
-    var bcHtml = '<span class="dup-bc-item cursor-pointer hover:text-violet-600" data-path="">根</span>';
-    for (var i = 0; i < parts.length; i++) {
-        var p = parts.slice(0, i + 1).join('/');
-        var esc = (parts[i] || '').replace(/</g, '&lt;').replace(/&/g, '&amp;');
-        bcHtml += ' <span class="text-slate-400">/</span> <span class="dup-bc-item cursor-pointer hover:text-violet-600 truncate" data-path="' + p.replace(/"/g, '&quot;') + '">' + esc + '</span>';
-    }
-    breadcrumbEl.innerHTML = bcHtml;
-    breadcrumbEl.querySelectorAll('.dup-bc-item').forEach(function(el) {
-        el.onclick = function() {
-            dupBrowseCurrentPath = el.getAttribute('data-path') || '';
-            dupBrowseLoadSubdirs();
-        };
-    });
-    fetch('/api/list-subdirs?path=' + encodeURIComponent(path))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var dirs = data.dirs || [];
-            if (dirs.length === 0) {
-                listEl.innerHTML = '<div class="p-4 text-center text-slate-500 text-sm">此目录下无子文件夹</div>';
-                return;
-            }
-            var html = '';
-            dirs.forEach(function(d) {
-                var pathEsc = (d.path || '').replace(/"/g, '&quot;');
-                var nameEsc = (d.name || d.path || '').replace(/</g, '&lt;').replace(/&/g, '&amp;');
-                html += '<button type="button" class="dup-browse-dir-item w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-violet-50 rounded-lg flex items-center gap-2" data-path="' + pathEsc + '">' +
-                    '<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
-                    '<span class="flex-1 truncate">' + nameEsc + '</span>' +
-                    (d.image_count != null ? '<span class="text-slate-400 text-xs flex-shrink-0">' + d.image_count + ' 张</span>' : '') +
-                    '<svg class="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>' +
-                    '</button>';
-            });
-            listEl.innerHTML = html;
-            listEl.querySelectorAll('.dup-browse-dir-item').forEach(function(btn) {
-                btn.onclick = function() {
-                    dupBrowseCurrentPath = btn.getAttribute('data-path');
-                    dupBrowseLoadSubdirs();
-                };
-            });
-        })
-        .catch(function() {
-            listEl.innerHTML = '<div class="p-4 text-center text-red-500 text-sm">加载失败</div>';
-        });
-}
-
 function dupBrowseSelectCurrent() {
-    document.getElementById('dup-folder-input').value = dupBrowseCurrentPath;
+    if (dupBrowseBrowser) {
+        document.getElementById('dup-folder-input').value = dupBrowseBrowser.getPath();
+    }
     closeDupFolderBrowse();
 }
 
