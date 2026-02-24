@@ -796,7 +796,7 @@ async def add_folder_thumbnail(
     body: AddFolderThumbnailRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """将指定图片设为文件夹缩略图（图片需在该文件夹下含子目录）。最多 4 张，后添加的排在后面。"""
+    """将指定图片设为文件夹缩略图（图片需在该文件夹下含子目录）。最多 4 张，FIFO：后设置的插在最前面，超出 4 张时移除末尾最旧的。"""
     folder_path = normalize_path(folder_path, allow_empty=False)
     if folder_path is None:
         raise HTTPException(status_code=400, detail="文件夹路径不合法")
@@ -813,12 +813,20 @@ async def add_folder_thumbnail(
         select(FolderThumbnail).where(FolderThumbnail.folder_path == folder_path)
     )
     existing_list = list(existing.scalars().all())
-    if len(existing_list) >= 4:
-        raise HTTPException(status_code=400, detail="该文件夹缩略图已达上限（4 张）")
-    if any(ft.image_relative_path == rel_path for ft in existing_list):
-        raise HTTPException(status_code=400, detail="该图片已是缩略图")
-    display_order = max((ft.display_order for ft in existing_list), default=-1) + 1
-    session.add(FolderThumbnail(folder_path=folder_path, image_relative_path=rel_path, display_order=display_order))
+    # 若该图片已是缩略图，先删除旧记录（相当于刷新到最前）
+    for ft in existing_list[:]:
+        if ft.image_relative_path == rel_path:
+            await session.delete(ft)
+            existing_list.remove(ft)
+            break
+    # 新封面插在最前：现有记录 display_order += 1，新记录 display_order=0
+    for ft in existing_list:
+        ft.display_order += 1
+        if ft.display_order >= 4:
+            await session.delete(ft)  # 超出 4 张，移除末尾最旧的
+        else:
+            session.add(ft)
+    session.add(FolderThumbnail(folder_path=folder_path, image_relative_path=rel_path, display_order=0))
     await session.commit()
     return {"ok": True, "folder_path": folder_path, "relative_path": rel_path}
 
