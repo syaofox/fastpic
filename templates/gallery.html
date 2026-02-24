@@ -28,8 +28,8 @@
         {% endfor %}
     </nav>
 
-    <!-- 工具栏（小屏可横向滚动） -->
-    <div class="flex items-center gap-2 text-slate-500 relative flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap [&>*]:flex-shrink-0" style="-webkit-overflow-scrolling: touch;">
+    <!-- 工具栏（小屏可横向滚动，右对齐） -->
+    <div class="flex items-center justify-end gap-2 text-slate-500 relative flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap [&>*]:flex-shrink-0" style="-webkit-overflow-scrolling: touch;">
     <div class="relative" id="thumbnail-size-wrapper">
         <button type="button" id="thumbnail-size-btn" class="p-2 rounded hover:bg-slate-100 hover:text-slate-700 transition-colors" title="更改缩略图大小">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
