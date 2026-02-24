@@ -826,6 +826,25 @@ document.addEventListener('click', function(e) {
     }
 });
 
+function handleSetThumbnailOption(action) {
+    closeSetThumbnailPopover();
+    if (action === 'parent') {
+        if (window.setAsFolderThumbnail) window.setAsFolderThumbnail();
+    } else if (action === 'browse') {
+        if (window.showSetThumbnailFolderDialog) window.showSetThumbnailFolderDialog();
+    }
+}
+window.handleSetThumbnailOption = handleSetThumbnailOption;
+
+// 设为缩略图选单：点击外部关闭
+document.addEventListener('click', function(e) {
+    var setThumbPopover = document.getElementById('set-thumbnail-popover');
+    var setThumbWrapper = document.getElementById('modal-set-folder-thumb-wrapper');
+    if (setThumbPopover && !setThumbPopover.classList.contains('hidden') && setThumbWrapper && !setThumbWrapper.contains(e.target)) {
+        closeSetThumbnailPopover();
+    }
+});
+
 function deleteCurrentImage() {
     if (modalImages.length === 0 || modalImageIds.length === 0) return;
     var imageId = modalImageIds[modalIndex];
@@ -917,6 +936,171 @@ function setAsFolderThumbnail() {
     });
 }
 window.setAsFolderThumbnail = setAsFolderThumbnail;
+
+function toggleSetThumbnailPopover() {
+    var popover = document.getElementById('set-thumbnail-popover');
+    var btn = document.getElementById('modal-set-folder-thumb-btn');
+    if (!popover || !btn) return;
+    if (popover.classList.contains('hidden')) {
+        var rect = btn.getBoundingClientRect();
+        var popH = popover.scrollHeight || 80;
+        var gap = 8;
+        if (rect.bottom + gap + popH <= window.innerHeight - 8) {
+            popover.style.top = (rect.bottom + gap) + 'px';
+        } else {
+            popover.style.top = (rect.top - popH - gap) + 'px';
+        }
+        popover.style.left = '';
+        popover.style.right = (window.innerWidth - rect.right) + 'px';
+    }
+    popover.classList.toggle('hidden');
+}
+
+function closeSetThumbnailPopover() {
+    var popover = document.getElementById('set-thumbnail-popover');
+    if (popover) popover.classList.add('hidden');
+}
+
+window.toggleSetThumbnailPopover = toggleSetThumbnailPopover;
+
+function showSetThumbnailFolderDialog() {
+    if (modalImages.length === 0) return;
+    var url = modalImages[modalIndex];
+    if (!url || url.indexOf('/photos/') !== 0) return;
+    var relPath = decodeURIComponent(url.slice('/photos/'.length).split('?')[0]);
+    var lastSlash = relPath.lastIndexOf('/');
+    if (lastSlash < 0) {
+        if (typeof showToast === 'function') showToast('根目录图片无法设为文件夹缩略图', 'error');
+        return;
+    }
+    var initialPath = relPath.slice(0, lastSlash);
+
+    var old = document.getElementById('set-thumbnail-dialog');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'set-thumbnail-dialog';
+    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/40';
+    overlay.innerHTML =
+        '<div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 max-h-[85vh] flex flex-col">' +
+            '<div class="p-4 border-b border-slate-200 flex-shrink-0">' +
+                '<div class="flex items-center gap-3 mb-2">' +
+                    '<div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">' +
+                        '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' +
+                    '</div>' +
+                    '<h3 class="text-lg font-semibold text-slate-800">设为文件夹缩略图</h3>' +
+                '</div>' +
+                '<div class="text-sm text-slate-500">选择要设置缩略图的文件夹</div>' +
+                '<nav id="set-thumb-breadcrumb" class="mt-2 flex items-center gap-1 text-sm text-slate-600 flex-wrap"></nav>' +
+            '</div>' +
+            '<div id="set-thumb-folder-list" class="flex-1 overflow-y-auto p-4 min-h-0"></div>' +
+            '<div class="p-4 border-t border-slate-200 flex-shrink-0 flex justify-end gap-2">' +
+                '<button type="button" class="set-thumb-cancel-btn px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors">取消</button>' +
+                '<button type="button" class="set-thumb-confirm-btn px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors">设为该文件夹缩略图</button>' +
+            '</div>' +
+            '<div id="set-thumb-error" class="hidden px-4 pb-4 text-sm text-red-500"></div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+
+    var currentPath = initialPath;
+    var breadcrumbEl = overlay.querySelector('#set-thumb-breadcrumb');
+    var listEl = overlay.querySelector('#set-thumb-folder-list');
+    var confirmBtn = overlay.querySelector('.set-thumb-confirm-btn');
+    var errorEl = overlay.querySelector('#set-thumb-error');
+
+    function renderBreadcrumb() {
+        var parts = currentPath ? currentPath.split('/') : [];
+        var html = '<a href="#" class="set-thumb-nav-link" data-path="">全部文件夹</a>';
+        for (var i = 0; i < parts.length; i++) {
+            var path = parts.slice(0, i + 1).join('/');
+            html += '<span class="text-slate-400"> › </span>';
+            html += '<a href="#" class="set-thumb-nav-link" data-path="' + path.replace(/"/g, '&quot;') + '">' + parts[i] + '</a>';
+        }
+        breadcrumbEl.innerHTML = html;
+        breadcrumbEl.querySelectorAll('.set-thumb-nav-link').forEach(function(a) {
+            a.addEventListener('click', function(e) {
+                e.preventDefault();
+                currentPath = a.getAttribute('data-path') || '';
+                renderBreadcrumb();
+                loadSubfolders();
+            });
+        });
+    }
+
+    function loadSubfolders() {
+        listEl.innerHTML = '<div class="text-slate-400 text-sm py-4">加载中...</div>';
+        fetch('/api/subfolders?path=' + encodeURIComponent(currentPath))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var subs = data.subfolders || [];
+                var content = '';
+                if (subs.length === 0) {
+                    content = '<div class="text-slate-400 text-sm py-4">' + (currentPath ? '此文件夹下没有子文件夹' : '暂无文件夹') + '</div>';
+                } else {
+                    content = subs.map(function(s) {
+                        return '<div class="set-thumb-folder-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors" data-path="' + (s.full_path || '').replace(/"/g, '&quot;') + '">' +
+                            '<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' +
+                            '<span class="font-medium text-slate-700">' + (s.name || '').replace(/</g, '&lt;') + '</span>' +
+                            (s.image_count > 0 ? '<span class="text-xs text-slate-400 ml-auto">' + s.image_count + ' 张</span>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                listEl.innerHTML = content;
+                listEl.querySelectorAll('.set-thumb-folder-item').forEach(function(el) {
+                    el.addEventListener('click', function() {
+                        currentPath = el.getAttribute('data-path') || '';
+                        renderBreadcrumb();
+                        loadSubfolders();
+                    });
+                });
+            })
+            .catch(function(err) {
+                listEl.innerHTML = '<div class="text-red-500 text-sm py-4">加载失败</div>';
+            });
+    }
+
+    function doSetThumbnail() {
+        errorEl.classList.add('hidden');
+        if (!currentPath) {
+            if (typeof showToast === 'function') showToast('请选择具体文件夹', 'error');
+            return;
+        }
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '设置中...';
+        var apiUrl = '/api/folders/' + currentPath.split('/').map(encodeURIComponent).join('/') + '/thumbnails';
+        fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ relative_path: relPath })
+        }).then(function(r) {
+            overlay.remove();
+            if (r.ok) {
+                if (typeof showToast === 'function') showToast('已设为文件夹缩略图');
+                if (typeof refreshGalleryFromModal === 'function') refreshGalleryFromModal();
+            } else {
+                return r.json().then(function(d) {
+                    var msg = (d && d.detail) ? (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail)) : '请求失败';
+                    if (typeof showToast === 'function') showToast(msg, 'error');
+                }).catch(function() {
+                    if (typeof showToast === 'function') showToast('请求失败', 'error');
+                });
+            }
+        }).catch(function(err) {
+            if (typeof showToast === 'function') showToast('请求失败', 'error');
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '设为该文件夹缩略图';
+        });
+    }
+
+    overlay.querySelector('.set-thumb-cancel-btn').addEventListener('click', function() { overlay.remove(); });
+    confirmBtn.addEventListener('click', doSetThumbnail);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+    renderBreadcrumb();
+    loadSubfolders();
+}
+window.showSetThumbnailFolderDialog = showSetThumbnailFolderDialog;
 
 function refreshGalleryFromModal() {
     var marker = document.getElementById('current-path-marker');
