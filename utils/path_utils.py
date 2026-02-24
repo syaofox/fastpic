@@ -40,6 +40,16 @@ def resolve_and_validate_relative_path(
     return full if full.is_file() else None
 
 
+def invalid_filename(name: str) -> bool:
+    """检查文件名是否包含非法字符（供 rename/create 等复用）"""
+    if not name or ".." in name:
+        return True
+    for c in "/\\:*?\"<>|":
+        if c in name:
+            return True
+    return False
+
+
 def path_filter_for_prefix(relative_path_column, prefix: str, include_children: bool = True):
     """生成 SQLAlchemy 路径过滤条件：匹配 prefix 及其子路径下的图片。
 

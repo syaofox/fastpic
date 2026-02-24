@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL_SIZE
+from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL_SIZE, IN_CLAUSE_BATCH_SIZE
 from models import Image, Tag, ImageTag, async_session_factory, get_async_session, natural_sort_key
 from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.images import cache_filename
@@ -27,8 +27,6 @@ from utils.format import format_file_size
 from utils.images import delete_image_files
 
 router = APIRouter(prefix="/api", tags=["images"])
-
-_IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批大小，避免 max_allowed_packet
 
 
 def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
@@ -116,8 +114,8 @@ async def delete_images(
     if not body.ids:
         return {"deleted": 0}
     deleted = 0
-    for i in range(0, len(body.ids), _IN_CLAUSE_BATCH_SIZE):
-        batch_ids = body.ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+    for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
+        batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
         stmt = select(Image).where(Image.id.in_(batch_ids))
         result = await session.execute(stmt)
         images = list(result.scalars().all())
@@ -173,8 +171,8 @@ async def download_zip(
     """批量下载：打包为 ZIP"""
     rel_paths: set[str] = set()
     if body.image_ids:
-        for i in range(0, len(body.image_ids), _IN_CLAUSE_BATCH_SIZE):
-            batch_ids = body.image_ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+        for i in range(0, len(body.image_ids), IN_CLAUSE_BATCH_SIZE):
+            batch_ids = body.image_ids[i : i + IN_CLAUSE_BATCH_SIZE]
             result = await session.execute(
                 select(Image.relative_path).where(Image.id.in_(batch_ids))
             )
@@ -306,7 +304,7 @@ async def upload_images(request: Request):
         )
     else:
         existing_hashes = await asyncio.to_thread(
-            _compute_existing_hashes, target_dir, IMAGE_EXTENSIONS
+            _compute_existing_hashes, target_dir, media_extensions
         )
 
     _UPLOAD_PARALLEL = 4

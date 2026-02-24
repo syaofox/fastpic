@@ -10,6 +10,11 @@ CACHE_DIR = ROOT / "cache"
 STATIC_DIR = ROOT / "static"
 PER_PAGE = 24
 
+# 数据库批量操作
+IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批，避免 max_allowed_packet
+FOLDER_OP_BATCH_SIZE = 1000  # 按路径前缀分批加载
+SCAN_DUPLICATES_BATCH_SIZE = 5000
+
 
 def _parse_size(value: str | None, default_bytes: int) -> int:
     """解析大小字符串为字节数。支持纯数字或带单位：K/KB、M/MB、G/GB（不区分大小写）"""

@@ -7,7 +7,7 @@ from sqlmodel import select
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR
+from config import PHOTOS_DIR, CACHE_DIR, SCAN_DUPLICATES_BATCH_SIZE
 from models import Image, get_async_session
 from scanner import scan_photos, scan_videos, cleanup_database
 from utils.images import cache_filename
@@ -65,9 +65,6 @@ async def trigger_cleanup():
         invalidate_stats_cache()
 
 
-_SCAN_DUPLICATES_BATCH_SIZE = 5000
-
-
 @router.post("/api/scan-duplicates")
 async def scan_duplicates(
     body: ScanDuplicatesRequest | None = None,
@@ -88,7 +85,7 @@ async def scan_duplicates(
         stmt = (
             base_stmt.where(Image.id > last_id)
             .order_by(Image.id)
-            .limit(_SCAN_DUPLICATES_BATCH_SIZE)
+            .limit(SCAN_DUPLICATES_BATCH_SIZE)
         )
         result = await session.execute(stmt)
         rows = result.fetchall()

@@ -10,15 +10,12 @@ from sqlmodel import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR
-from models import Image, FolderThumbnail, get_async_session, natural_sort_key
-from scanner import (
-    IMAGE_EXTENSIONS,
-    VIDEO_EXTENSIONS,
-    _generate_thumbnail,
-    _generate_video_thumbnail,
-)
+from config import PHOTOS_DIR, CACHE_DIR, IN_CLAUSE_BATCH_SIZE, FOLDER_OP_BATCH_SIZE
+from models import Image, FolderThumbnail, get_async_session
+from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.images import cache_filename
+from utils.image_path_update import update_image_path_and_regenerate_thumbnail
+from utils.image_batch import iter_images_by_path_prefix, collect_image_items_by_prefix
 from schemas import (
     MoveImagesRequest,
     MoveFoldersRequest,
@@ -31,7 +28,7 @@ from schemas import (
     BatchRenameRequest,
     AddFolderThumbnailRequest,
 )
-from utils.path_utils import normalize_path, path_filter_for_prefix
+from utils.path_utils import normalize_path, path_filter_for_prefix, invalid_filename
 from utils.unique_path import unique_path
 from utils.images import delete_image_files
 from utils.folder_tree import (
@@ -41,9 +38,6 @@ from utils.folder_tree import (
     get_subfolders,
     scan_all_dirs_for_search,
 )
-
-_FOLDER_OP_BATCH_SIZE = 1000  # 文件夹操作分批大小，支持大文件夹
-_IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批大小，避免 max_allowed_packet
 from utils.search import search_match
 from utils.hash_utils import compute_file_md5
 
@@ -64,8 +58,8 @@ async def move_images(
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     images: list[Image] = []
-    for i in range(0, len(body.ids), _IN_CLAUSE_BATCH_SIZE):
-        batch_ids = body.ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+    for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
+        batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
         stmt = select(Image).where(Image.id.in_(batch_ids))
         result = await session.execute(stmt)
         images.extend(result.scalars().all())
@@ -77,7 +71,7 @@ async def move_images(
             errors.append(f"{img.filename}: 文件不存在")
             continue
         ext = Path(img.filename).suffix.lower()
-        if ext not in IMAGE_EXTENSIONS:
+        if ext not in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
             errors.append(f"{img.filename}: 不支持的格式")
             continue
         new_rel = f"{target_path}/{img.filename}" if target_path else img.filename
@@ -92,17 +86,9 @@ async def move_images(
         except OSError as e:
             errors.append(f"{img.filename}: {e}")
             continue
-        old_cache = CACHE_DIR / cache_filename(img.relative_path)
-        if old_cache.exists():
-            old_cache.unlink(missing_ok=True)
-        img.relative_path = new_rel
-        img.filename = dest_path.name
-        img.filename_natural = natural_sort_key(dest_path.name)
-        img.relative_path_natural = natural_sort_key(new_rel)
-        img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
-        img.file_size = await asyncio.to_thread(os.path.getsize, dest_path)
-        new_cache = CACHE_DIR / cache_filename(new_rel)
-        await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
+        await update_image_path_and_regenerate_thumbnail(
+            img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+        )
         session.add(img)
         moved += 1
     try:
@@ -152,39 +138,16 @@ async def move_folders(
         except OSError as e:
             errors.append(f"{folder_path}: {e}")
             continue
-        pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        last_id = 0
-        while True:
-            stmt = (
-                select(Image)
-                .where(pf)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_FOLDER_OP_BATCH_SIZE)
-            )
-            result = await session.execute(stmt)
-            images = list(result.scalars().all())
-            if not images:
-                break
+        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
             for img in images:
                 suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
                 new_rel = new_prefix + suffix
-                old_cache = CACHE_DIR / cache_filename(img.relative_path)
-                if old_cache.exists():
-                    old_cache.unlink(missing_ok=True)
-                img.relative_path = new_rel
-                img.filename = Path(new_rel).name
-                img.filename_natural = natural_sort_key(img.filename)
-                img.relative_path_natural = natural_sort_key(new_rel)
                 new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-                if new_full.exists() and new_full.is_file():
-                    img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-                    img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-                    new_cache = CACHE_DIR / cache_filename(new_rel)
-                    await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+                await update_image_path_and_regenerate_thumbnail(
+                    img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+                )
                 session.add(img)
                 moved += 1
-                last_id = img.id or last_id
             try:
                 await session.commit()
             except IntegrityError:
@@ -239,41 +202,15 @@ async def rename_folder(
         return {"ok": False, "error": f"重命名失败: {e}"}
 
     try:
-        pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        last_id = 0
-        while True:
-            stmt = (
-                select(Image)
-                .where(pf)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_FOLDER_OP_BATCH_SIZE)
-            )
-            result = await session.execute(stmt)
-            images = list(result.scalars().all())
-            if not images:
-                break
+        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
             for img in images:
                 suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
                 new_rel = new_prefix + suffix
-                old_cache = CACHE_DIR / cache_filename(img.relative_path)
-                if old_cache.exists():
-                    old_cache.unlink(missing_ok=True)
-                img.relative_path = new_rel
-                img.filename = Path(new_rel).name
-                img.filename_natural = natural_sort_key(img.filename)
-                img.relative_path_natural = natural_sort_key(new_rel)
                 new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-                if new_full.exists() and new_full.is_file():
-                    img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-                    img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-                    new_cache = CACHE_DIR / cache_filename(new_rel)
-                    if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-                        await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
-                    else:
-                        await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+                await update_image_path_and_regenerate_thumbnail(
+                    img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+                )
                 session.add(img)
-                last_id = img.id or last_id
             try:
                 await session.commit()
             except IntegrityError:
@@ -289,16 +226,6 @@ async def rename_folder(
         return {"ok": False, "error": f"更新数据库失败: {e}"}
 
 
-def _invalid_filename(name: str) -> bool:
-    """检查文件名是否包含非法字符"""
-    if not name or ".." in name:
-        return True
-    for c in "/\\:*?\"<>|":
-        if c in name:
-            return True
-    return False
-
-
 @router.post("/rename-image")
 async def rename_image(
     body: RenameImageRequest,
@@ -308,7 +235,7 @@ async def rename_image(
     new_filename = (body.new_filename or "").strip()
     if not new_filename:
         return {"ok": False, "error": "新文件名不能为空"}
-    if _invalid_filename(new_filename):
+    if invalid_filename(new_filename):
         return {"ok": False, "error": "文件名包含非法字符"}
 
     media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
@@ -339,20 +266,9 @@ async def rename_image(
     except OSError as e:
         return {"ok": False, "error": f"重命名失败: {e}"}
 
-    old_cache = CACHE_DIR / cache_filename(img.relative_path)
-    if old_cache.exists():
-        old_cache.unlink(missing_ok=True)
-    img.relative_path = new_rel
-    img.filename = dest_path.name
-    img.filename_natural = natural_sort_key(dest_path.name)
-    img.relative_path_natural = natural_sort_key(new_rel)
-    img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
-    img.file_size = await asyncio.to_thread(os.path.getsize, dest_path)
-    new_cache = CACHE_DIR / cache_filename(new_rel)
-    if dest_path.suffix.lower() in VIDEO_EXTENSIONS:
-        await asyncio.to_thread(_generate_video_thumbnail, dest_path, new_cache)
-    else:
-        await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
+    await update_image_path_and_regenerate_thumbnail(
+        img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+    )
     session.add(img)
     try:
         await session.commit()
@@ -373,8 +289,8 @@ async def batch_rename_info(
     folders: list[dict] = []
 
     if body.image_ids:
-        for i in range(0, len(body.image_ids), _IN_CLAUSE_BATCH_SIZE):
-            batch_ids = body.image_ids[i : i + _IN_CLAUSE_BATCH_SIZE]
+        for i in range(0, len(body.image_ids), IN_CLAUSE_BATCH_SIZE):
+            batch_ids = body.image_ids[i : i + IN_CLAUSE_BATCH_SIZE]
             stmt = select(Image).where(Image.id.in_(batch_ids))
             result = await session.execute(stmt)
             for img in result.scalars().all():
@@ -450,29 +366,15 @@ async def batch_rename(
             continue
 
         try:
-            pf = path_filter_for_prefix(Image.relative_path, folder_path)
-            stmt = select(Image).where(pf)
-            result = await session.execute(stmt)
-            for img in result.scalars().all():
-                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
-                new_rel = new_prefix + suffix
-                old_cache = CACHE_DIR / cache_filename(img.relative_path)
-                if old_cache.exists():
-                    old_cache.unlink(missing_ok=True)
-                img.relative_path = new_rel
-                img.filename = Path(new_rel).name
-                img.filename_natural = natural_sort_key(img.filename)
-                img.relative_path_natural = natural_sort_key(new_rel)
-                new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-                if new_full.exists() and new_full.is_file():
-                    img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-                    img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-                    new_cache = CACHE_DIR / cache_filename(new_rel)
-                    if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-                        await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
-                    else:
-                        await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
-                session.add(img)
+            async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+                for img in images:
+                    suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                    new_rel = new_prefix + suffix
+                    new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+                    await update_image_path_and_regenerate_thumbnail(
+                        img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+                    )
+                    session.add(img)
             invalidate_folder_tree_cache()
             folder_count += 1
             print(f"[api] 批量重命名文件夹: {folder_path} → {new_prefix}", flush=True)
@@ -491,7 +393,7 @@ async def batch_rename(
         if not new_filename:
             errors.append(f"{img.filename}: 新文件名不能为空")
             continue
-        if _invalid_filename(new_filename):
+        if invalid_filename(new_filename):
             errors.append(f"{img.filename}: 文件名包含非法字符")
             continue
         if Path(new_filename).suffix.lower() not in media_extensions:
@@ -520,20 +422,9 @@ async def batch_rename(
             errors.append(f"{img.filename}: {e}")
             continue
 
-        old_cache = CACHE_DIR / cache_filename(img.relative_path)
-        if old_cache.exists():
-            old_cache.unlink(missing_ok=True)
-        img.relative_path = new_rel
-        img.filename = dest_path.name
-        img.filename_natural = natural_sort_key(dest_path.name)
-        img.relative_path_natural = natural_sort_key(new_rel)
-        img.modified_at = await asyncio.to_thread(os.path.getmtime, dest_path)
-        img.file_size = await asyncio.to_thread(os.path.getsize, dest_path)
-        new_cache = CACHE_DIR / cache_filename(new_rel)
-        if dest_path.suffix.lower() in VIDEO_EXTENSIONS:
-            await asyncio.to_thread(_generate_video_thumbnail, dest_path, new_cache)
-        else:
-            await asyncio.to_thread(_generate_thumbnail, dest_path, new_cache)
+        await update_image_path_and_regenerate_thumbnail(
+            img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+        )
         session.add(img)
         image_count += 1
         print(f"[api] 批量重命名图片: {img.relative_path} → {new_rel}", flush=True)
@@ -566,25 +457,11 @@ async def delete_folders(
         folder_path = normalize_path(folder_path, allow_empty=False)
         if folder_path is None:
             continue
-        pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        last_id = 0
-        while True:
-            stmt = (
-                select(Image)
-                .where(pf)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_FOLDER_OP_BATCH_SIZE)
-            )
-            result = await session.execute(stmt)
-            images = list(result.scalars().all())
-            if not images:
-                break
+        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
             for img in images:
                 delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
                 await session.delete(img)
                 total_images += 1
-                last_id = img.id or last_id
             await session.commit()
             await asyncio.sleep(0)
         folder_fs_path = PHOTOS_DIR / folder_path
@@ -623,33 +500,10 @@ async def merge_folders(
     def _belongs_to(rel: str, prefix: str) -> bool:
         return rel == prefix or rel.startswith(prefix + "/")
 
-    async def _collect_items(prefix: str, src: str) -> list[tuple[int, str, str]]:
-        """分批加载，返回 [(id, relative_path, src), ...]"""
-        pf = path_filter_for_prefix(Image.relative_path, prefix)
-        items: list[tuple[int, str, str]] = []
-        last_id = 0
-        while True:
-            stmt = (
-                select(Image.id, Image.relative_path)
-                .where(pf)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_FOLDER_OP_BATCH_SIZE)
-            )
-            result = await session.execute(stmt)
-            rows = result.fetchall()
-            if not rows:
-                break
-            for rid, rp in rows:
-                items.append((rid, rp, src))
-                last_id = rid or last_id
-            await asyncio.sleep(0)
-        return items
-
-    items_a = await _collect_items(folder_a, "a")
-    items_b = await _collect_items(folder_b, "b")
+    items_a = await collect_image_items_by_prefix(session, folder_a, "a", FOLDER_OP_BATCH_SIZE)
+    items_b = await collect_image_items_by_prefix(session, folder_b, "b", FOLDER_OP_BATCH_SIZE)
     count_a, count_b = len(items_a), len(items_b)
-    if body.target == "folder_b":
+    if body.target == "folder_b" or (body.target == "auto" and count_b > count_a):
         target_prefix, source_prefix = folder_b, folder_a
         source_letter, target_letter = "a", "b"
         source_items, target_items = items_a, items_b
@@ -659,11 +513,6 @@ async def merge_folders(
         source_letter, target_letter = "b", "a"
         source_items, target_items = items_b, items_a
         source_path, target_path = path_b, path_a
-    if body.target == "auto" and count_b > count_a:
-        target_prefix, source_prefix = folder_b, folder_a
-        source_letter, target_letter = "a", "b"
-        source_items, target_items = items_a, items_b
-        source_path, target_path = path_a, path_b
 
     preferred = "a" if count_a >= count_b else "b"
     by_hash: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
@@ -733,20 +582,9 @@ async def merge_folders(
         except OSError as e:
             await session.rollback()
             return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
-        old_cache = CACHE_DIR / cache_filename(rel_path)
-        if old_cache.exists():
-            old_cache.unlink(missing_ok=True)
-        img.relative_path = new_rel
-        img.filename = Path(new_rel).name
-        img.filename_natural = natural_sort_key(img.filename)
-        img.relative_path_natural = natural_sort_key(new_rel)
-        img.modified_at = await asyncio.to_thread(os.path.getmtime, new_full)
-        img.file_size = await asyncio.to_thread(os.path.getsize, new_full)
-        new_cache = CACHE_DIR / cache_filename(new_rel)
-        if new_full.suffix.lower() in VIDEO_EXTENSIONS:
-            await asyncio.to_thread(_generate_video_thumbnail, new_full, new_cache)
-        else:
-            await asyncio.to_thread(_generate_thumbnail, new_full, new_cache)
+        await update_image_path_and_regenerate_thumbnail(
+            img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+        )
         session.add(img)
         moved += 1
     if source_path.exists():

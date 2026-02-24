@@ -1,7 +1,6 @@
 """FastPic 应用入口"""
 import asyncio
 import mimetypes
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,6 +27,12 @@ from watcher import start_watcher
 from app_common import templates
 from routers import auth, tags, images, folders, settings
 from utils.path_utils import normalize_path, path_filter_for_prefix
+from utils.path_count_cache import (
+    get_cached_count,
+    set_cached_count,
+    get_path_count_from_db,
+    set_path_count_to_db,
+)
 from utils.folder_tree import (
     get_folder_tree_cached,
     get_subfolders,
@@ -98,84 +103,6 @@ async def favicon():
 def _per_page_for_cols(cols: int) -> int:
     cols = max(2, min(8, cols))
     return cols * ((PER_PAGE + cols - 1) // cols)
-
-
-# count 缓存：内存 TTL 60s，DB 持久化 TTL 5 分钟
-_COUNT_CACHE_TTL = 60.0
-_PATH_COUNT_DB_TTL = 300.0  # 5 分钟
-_COUNT_CACHE_MAX_SIZE = 1000  # 内存缓存上限，防止无限增长
-_count_cache: dict[tuple[str, str], tuple[int, float]] = {}
-
-
-def _prune_count_cache() -> None:
-    """移除过期条目，超限时移除最久未访问的"""
-    now = time.monotonic()
-    expired = [k for k, (_, ts) in _count_cache.items() if now - ts > _COUNT_CACHE_TTL]
-    for k in expired:
-        del _count_cache[k]
-    while len(_count_cache) > _COUNT_CACHE_MAX_SIZE:
-        oldest_key = min(_count_cache.keys(), key=lambda k: _count_cache[k][1])
-        del _count_cache[oldest_key]
-
-
-def _get_cached_count(path: str, mode: str) -> int | None:
-    """先查内存缓存"""
-    key = (path or "", mode)
-    entry = _count_cache.get(key)
-    if entry is None:
-        return None
-    total, ts = entry
-    if time.monotonic() - ts > _COUNT_CACHE_TTL:
-        del _count_cache[key]
-        return None
-    return total
-
-
-def _set_cached_count(path: str, mode: str, total: int) -> None:
-    key = (path or "", mode)
-    _count_cache[key] = (total, time.monotonic())
-    if len(_count_cache) >= _COUNT_CACHE_MAX_SIZE:
-        _prune_count_cache()
-
-
-async def _get_path_count_from_db(path: str, mode: str) -> int | None:
-    """从 DB 读取 path count 缓存，过期返回 None"""
-    from sqlalchemy import text
-
-    path_key = path or ""
-    with sync_engine.connect() as conn:
-        r = conn.execute(
-            text(
-                "SELECT total, updated_at FROM path_count_cache "
-                "WHERE path = :p AND mode = :m"
-            ),
-            {"p": path_key, "m": mode},
-        )
-        row = r.fetchone()
-    if row is None:
-        return None
-    total, updated_at = row
-    if time.time() - updated_at > _PATH_COUNT_DB_TTL:
-        return None
-    return total
-
-
-async def _set_path_count_to_db(path: str, mode: str, total: int) -> None:
-    """写入 path count 到 DB"""
-    from sqlalchemy import text
-
-    path_key = path or ""
-    now = time.time()
-    with sync_engine.connect() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO path_count_cache (path, mode, total, updated_at) "
-                "VALUES (:p, :m, :t, :ts) "
-                "ON DUPLICATE KEY UPDATE total = :t, updated_at = :ts"
-            ),
-            {"p": path_key, "m": mode, "t": total, "ts": now},
-        )
-        conn.commit()
 
 
 
@@ -317,7 +244,7 @@ async def gallery(
         offset = (page - 1) * per_page
         stmt = stmt.offset(offset)
     stmt_paged = stmt.limit(per_page + 1)
-    need_count = search or has_filters or parsed["filter_tag"] or _get_cached_count(path, mode) is None
+    need_count = search or has_filters or parsed["filter_tag"] or get_cached_count(path, mode) is None
     need_subfolders = (
         mode in ("folder", "list")
         and page == 1
@@ -327,19 +254,19 @@ async def gallery(
     )
 
     async def _run_count():
-        cached = _get_cached_count(path, mode)
+        cached = get_cached_count(path, mode)
         if cached is not None:
             return cached
         if not search and not has_filters and not parsed["filter_tag"]:
-            db_cached = await _get_path_count_from_db(path, mode)
+            db_cached = await get_path_count_from_db(path, mode)
             if db_cached is not None:
-                _set_cached_count(path, mode, db_cached)
+                set_cached_count(path, mode, db_cached)
                 return db_cached
         async with async_session_factory() as s:
             t = (await s.execute(count_stmt)).scalar() or 0
             if not search and not has_filters and not parsed["filter_tag"]:
-                _set_cached_count(path, mode, t)
-                await _set_path_count_to_db(path, mode, t)
+                set_cached_count(path, mode, t)
+                await set_path_count_to_db(path, mode, t)
             return t
 
     async def _run_subfolders():
@@ -367,9 +294,9 @@ async def gallery(
         subfolders = []
     elif need_subfolders:
         subfolders, images_list = await asyncio.gather(_run_subfolders(), _run_images())
-        total = _get_cached_count(path, mode) or 0
+        total = get_cached_count(path, mode) or 0
     else:
-        total = _get_cached_count(path, mode) or 0
+        total = get_cached_count(path, mode) or 0
         subfolders = []
         images_list = await _run_images()
     has_next = len(images_list) > per_page

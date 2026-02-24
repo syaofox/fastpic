@@ -189,6 +189,13 @@ def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
             return False
 
 
+def generate_thumbnail_for_media(full_path: Path, cache_path: Path, is_video: bool) -> bool:
+    """根据 is_video 选择图片或视频缩略图生成，供 move/rename/merge 等复用"""
+    if is_video:
+        return _generate_video_thumbnail(full_path, cache_path)
+    return _generate_thumbnail(full_path, cache_path)
+
+
 def _collect_media_files(photos_dir: Path) -> tuple[list[Path], list[Path]]:
     """一次 os.walk 遍历收集图片和视频路径，避免多次 rglob 重复遍历"""
     images: list[Path] = []
