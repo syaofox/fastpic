@@ -6,6 +6,16 @@
         return localStorage.getItem(SIDEBAR_VISIBLE_KEY) === 'true';
     }
 
+    function loadFolderTreeIfNeeded() {
+        var treeEl = document.getElementById('folder-tree');
+        if (!treeEl || treeEl.querySelector('.folder-link')) return;
+        var url = treeEl.getAttribute('hx-get');
+        if (!url) return;
+        if (typeof htmx !== 'undefined') {
+            htmx.ajax('GET', url, {target: '#folder-tree', swap: 'innerHTML'});
+        }
+    }
+
     function applySidebarState(visible) {
         const sidebar = document.getElementById('sidebar');
         const handle = document.getElementById('resize-handle');
@@ -17,6 +27,7 @@
             if (overlay) overlay.classList.remove('hidden');
             btn.classList.add('bg-blue-50', 'text-blue-600');
             btn.classList.remove('text-slate-500');
+            loadFolderTreeIfNeeded();
         } else {
             sidebar.classList.add('hidden');
             handle.classList.add('hidden');
@@ -50,7 +61,14 @@ function toggleFolder(btn) {
         btn.setAttribute('data-expanded', 'false');
         btn.setAttribute('aria-label', '展开');
     } else {
-        if (isLazy && children.hasAttribute('data-lazy-placeholder')) {
+        if (isLazy && (children.hasAttribute('data-lazy-placeholder') || children.hasAttribute('data-lazy-error'))) {
+            children.removeAttribute('data-lazy-error');
+            children.setAttribute('data-lazy-placeholder', 'true');
+            children.innerHTML = '<div class="flex items-center gap-2 py-2 px-3 text-slate-500 text-sm"><svg class="animate-spin w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>加载中...</div>';
+            children.classList.remove('hidden');
+            btn.querySelector('.chevron').classList.add('-rotate-90');
+            btn.setAttribute('data-expanded', 'true');
+            btn.setAttribute('aria-label', '折叠');
             fetch('/api/folder-children?path=' + encodeURIComponent(path))
                 .then(r => r.json())
                 .then(function(data) {
@@ -78,17 +96,11 @@ function toggleFolder(btn) {
                         children.removeAttribute('data-lazy-placeholder');
                         if (typeof htmx !== 'undefined') htmx.process(children);
                     }
-                    children.classList.remove('hidden');
-                    btn.querySelector('.chevron').classList.add('-rotate-90');
-                    btn.setAttribute('data-expanded', 'true');
-                    btn.setAttribute('aria-label', '折叠');
                 })
                 .catch(function() {
                     children.removeAttribute('data-lazy-placeholder');
-                    children.classList.remove('hidden');
-                    btn.querySelector('.chevron').classList.add('-rotate-90');
-                    btn.setAttribute('data-expanded', 'true');
-                    btn.setAttribute('aria-label', '折叠');
+                    children.setAttribute('data-lazy-error', 'true');
+                    children.innerHTML = '<div class="py-2 px-3 text-slate-500 text-sm cursor-pointer hover:text-slate-700 hover:bg-slate-50 rounded" data-retry-folder-path="' + (path || '').replace(/"/g, '&quot;') + '" onclick="retryFolderExpand(this)">加载失败，点击重试</div>';
                 });
             return;
         }
@@ -96,6 +108,19 @@ function toggleFolder(btn) {
         btn.querySelector('.chevron').classList.add('-rotate-90');
         btn.setAttribute('data-expanded', 'true');
         btn.setAttribute('aria-label', '折叠');
+    }
+}
+
+function retryFolderExpand(el) {
+    var path = el.getAttribute('data-retry-folder-path') || '';
+    var node = el.closest('.folder-node');
+    if (!node) return;
+    var btn = node.querySelector('.folder-toggle[data-lazy="true"]');
+    if (btn) {
+        btn.setAttribute('data-expanded', 'false');
+        btn.querySelector('.chevron').classList.remove('-rotate-90');
+        btn.setAttribute('aria-label', '展开');
+        toggleFolder(btn);
     }
 }
 

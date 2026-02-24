@@ -260,7 +260,7 @@
     {% endif %}
     {% for img in images %}
     {% set mt = img.media_type|default('image') %}
-    {% set is_first_screen = loop.index0 < 12 and not append %}
+    {% set is_first_screen = loop.index0 < (cols * 4) and not append %}
     <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white cursor-pointer"
          data-type="{{ mt }}" data-image-id="{{ img.id }}" data-relative-path="{{ img.relative_path }}" data-media-type="{{ mt }}"
          {% if mode == 'waterfall' %}data-w="{{ img.width }}" data-h="{{ img.height }}"{% endif %}

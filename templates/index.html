@@ -42,7 +42,6 @@
             </div>
             <div id="folder-tree" class="space-y-0"
                  hx-get="/api/sidebar-folder-tree?path={{ (request.query_params.get('path') or '')|urlencode_path }}"
-                 hx-trigger="load"
                  hx-swap="innerHTML">
                 <div class="flex justify-center py-4 text-slate-500 text-sm">加载文件夹树...</div>
             </div>
