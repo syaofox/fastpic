@@ -2074,9 +2074,13 @@ document.addEventListener('keydown', function(e) {
                 '<div class="mb-3 text-sm text-slate-500">上传到：<span class="font-medium text-slate-700">' + (getCurrentPath() || '根目录') + '</span></div>' +
                 '<div id="upload-drop-zone" class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer">' +
                     '<svg class="w-10 h-10 mx-auto mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a2.25 2.25 0 002.25-2.25V5.25a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v13.5a2.25 2.25 0 002.25 2.25z"/></svg>' +
-                    '<p class="text-sm text-slate-600 mb-1">拖拽图片或视频到此处，或</p>' +
-                    '<button type="button" class="browse-btn text-sm text-blue-600 hover:text-blue-700 font-medium underline">浏览文件</button>' +
+                    '<p class="text-sm text-slate-600 mb-1">拖拽图片、视频或文件夹到此处，或</p>' +
+                    '<p class="text-sm">' +
+                    '<button type="button" class="browse-file-btn text-blue-600 hover:text-blue-700 font-medium underline">浏览文件</button>' +
+                    '<span class="browse-folder-wrap"><span class="text-slate-400 mx-1">/</span><button type="button" class="browse-folder-btn text-blue-600 hover:text-blue-700 font-medium underline">浏览文件夹</button></span>' +
+                    '</p>' +
                     '<input type="file" id="upload-file-input" multiple accept="image/*,video/*,.ts,video/mp2t" class="hidden">' +
+                    '<input type="file" id="upload-folder-input" webkitdirectory directory class="hidden">' +
                     '<p class="text-xs text-slate-400 mt-2">支持 JPG、PNG、GIF、WebP、AVIF、BMP、MP4、WebM、MOV、MKV、TS</p>' +
                 '</div>' +
                 '<div class="mt-3 flex items-center gap-3 text-sm text-slate-600">' +
@@ -2106,7 +2110,13 @@ document.addEventListener('keydown', function(e) {
 
         var dropZone = overlay.querySelector('#upload-drop-zone');
         var fileInput = overlay.querySelector('#upload-file-input');
-        var browseBtn = overlay.querySelector('.browse-btn');
+        var folderInput = overlay.querySelector('#upload-folder-input');
+        var browseFileBtn = overlay.querySelector('.browse-file-btn');
+        var browseFolderBtn = overlay.querySelector('.browse-folder-btn');
+        var browseFolderWrap = overlay.querySelector('.browse-folder-wrap');
+        if (!('webkitdirectory' in document.createElement('input')) && browseFolderWrap) {
+            browseFolderWrap.style.display = 'none';
+        }
         var fileList = overlay.querySelector('#upload-file-list');
         var confirmBtn = overlay.querySelector('.upload-confirm-btn');
         var progressWrapper = overlay.querySelector('#upload-progress-wrapper');
@@ -2126,10 +2136,12 @@ document.addEventListener('keydown', function(e) {
             confirmBtn.disabled = false;
             var html = '';
             for (var i = 0; i < selectedFiles.length; i++) {
-                var f = selectedFiles[i];
+                var item = selectedFiles[i];
+                var f = item.file;
+                var displayName = item.relativePath || f.name;
                 var sizeMB = (f.size / 1024 / 1024).toFixed(1);
                 html += '<div class="flex items-center justify-between py-1.5 px-2 text-sm ' + (i > 0 ? 'border-t border-slate-100' : '') + '">' +
-                    '<span class="text-slate-700 truncate flex-1 mr-2">' + f.name + '</span>' +
+                    '<span class="text-slate-700 truncate flex-1 mr-2" title="' + (displayName.replace(/"/g, '&quot;')) + '">' + displayName + '</span>' +
                     '<span class="text-slate-400 text-xs flex-shrink-0">' + sizeMB + ' MB</span>' +
                     '<button type="button" class="remove-file ml-2 text-slate-400 hover:text-red-500 flex-shrink-0" data-idx="' + i + '">' +
                         '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>' +
@@ -2147,29 +2159,108 @@ document.addEventListener('keydown', function(e) {
             });
         }
 
+        var mediaExts = /\.(jpg|jpeg|png|gif|webp|avif|bmp|mp4|webm|mov|mkv|ts)(\?|$)/i;
+        function isMediaFile(file) {
+            var t = (file.type || '').toLowerCase();
+            var name = (file.name || '').toLowerCase();
+            return t.startsWith('image/') || t.startsWith('video/') || mediaExts.test(name);
+        }
+
         function addFiles(files) {
-            var mediaExts = /\.(jpg|jpeg|png|gif|webp|avif|bmp|mp4|webm|mov|mkv|ts)(\?|$)/i;
             for (var i = 0; i < files.length; i++) {
-                var t = (files[i].type || '').toLowerCase();
-                var name = (files[i].name || '').toLowerCase();
-                var byType = t.startsWith('image/') || t.startsWith('video/');
-                var byExt = mediaExts.test(name);
-                if (byType || byExt) {
-                    selectedFiles.push(files[i]);
-                }
+                var f = files[i];
+                if (!isMediaFile(f)) continue;
+                var relPath = (f.webkitRelativePath || '').trim();
+                selectedFiles.push({ file: f, relativePath: relPath });
             }
             updateFileList();
         }
 
-        browseBtn.addEventListener('click', function(e) { e.stopPropagation(); fileInput.click(); });
-        dropZone.addEventListener('click', function() { fileInput.click(); });
-        fileInput.addEventListener('change', function() { addFiles(this.files); this.value = ''; });
+        function addFilesFromEntries(items, callback) {
+            var pending = 0;
+            function maybeDone() {
+                if (pending === 0 && callback) callback();
+            }
+            function processFileEntry(entry, pathPrefix) {
+                pending++;
+                entry.file(function(file) {
+                    if (isMediaFile(file)) {
+                        var relPath = (pathPrefix ? pathPrefix + '/' : '') + entry.name;
+                        selectedFiles.push({ file: file, relativePath: relPath });
+                    }
+                    pending--;
+                    maybeDone();
+                }, function() { pending--; maybeDone(); });
+            }
+            function processDirEntry(dirEntry, pathPrefix) {
+                var dirPath = (pathPrefix ? pathPrefix + '/' : '') + dirEntry.name;
+                var reader = dirEntry.createReader();
+                function readBatch() {
+                    reader.readEntries(function(entries) {
+                        if (entries.length === 0) {
+                            pending--;
+                            maybeDone();
+                            return;
+                        }
+                        for (var j = 0; j < entries.length; j++) {
+                            if (entries[j].isFile) {
+                                processFileEntry(entries[j], dirPath);
+                            } else if (entries[j].isDirectory) {
+                                processDirEntry(entries[j], dirPath);
+                            }
+                        }
+                        readBatch();
+                    }, function() { pending--; maybeDone(); });
+                }
+                pending++;
+                readBatch();
+            }
+            for (var i = 0; i < items.length; i++) {
+                var getEntry = items[i].webkitGetAsEntry || items[i].getAsEntry;
+                if (!getEntry) continue;
+                var entry = getEntry.call(items[i]);
+                if (!entry) continue;
+                if (entry.isFile) {
+                    processFileEntry(entry, '');
+                } else if (entry.isDirectory) {
+                    processDirEntry(entry, '');
+                }
+            }
+            maybeDone();
+        }
 
-        dropZone.addEventListener('dragover', function(e) { e.preventDefault(); this.classList.add('border-blue-400', 'bg-blue-50'); });
+        browseFileBtn.addEventListener('click', function(e) { e.stopPropagation(); fileInput.click(); });
+        if (browseFolderBtn) browseFolderBtn.addEventListener('click', function(e) { e.stopPropagation(); folderInput.click(); });
+        dropZone.addEventListener('click', function(e) {
+            if (e.target.closest('.browse-folder-btn')) return;
+            fileInput.click();
+        });
+        fileInput.addEventListener('change', function() {
+            addFiles(this.files);
+            this.value = '';
+        });
+        folderInput.addEventListener('change', function() {
+            addFiles(this.files);
+            this.value = '';
+        });
+
+        dropZone.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; this.classList.add('border-blue-400', 'bg-blue-50'); });
         dropZone.addEventListener('dragleave', function(e) { e.preventDefault(); this.classList.remove('border-blue-400', 'bg-blue-50'); });
         dropZone.addEventListener('drop', function(e) {
             e.preventDefault();
             this.classList.remove('border-blue-400', 'bg-blue-50');
+            var items = e.dataTransfer.items;
+            if (items && items.length > 0) {
+                var hasEntry = false;
+                for (var i = 0; i < items.length; i++) {
+                    var getEntry = items[i].webkitGetAsEntry || items[i].getAsEntry;
+                    if (getEntry && getEntry.call(items[i])) { hasEntry = true; break; }
+                }
+                if (hasEntry) {
+                    addFilesFromEntries(items, function() { updateFileList(); });
+                    return;
+                }
+            }
             if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
         });
 
@@ -2184,24 +2275,39 @@ document.addEventListener('keydown', function(e) {
             formData.append('path', getCurrentPath());
             var dupRadio = overlay.querySelector('input[name="on_duplicate"]:checked');
             formData.append('on_duplicate', dupRadio ? dupRadio.value : 'skip');
+            var filePaths = [];
             for (var i = 0; i < selectedFiles.length; i++) {
-                formData.append('files', selectedFiles[i]);
+                var item = selectedFiles[i];
+                filePaths.push(item.relativePath || item.file.name);
+                formData.append('files', item.file);
             }
+            formData.append('file_paths', JSON.stringify(filePaths));
 
             var xhr = new XMLHttpRequest();
             xhr.open('POST', '/api/upload');
+            xhr.timeout = 600000;
 
             xhr.upload.addEventListener('progress', function(e) {
                 if (e.lengthComputable) {
                     var pct = Math.round((e.loaded / e.total) * 100);
                     progressBar.style.width = pct + '%';
                     progressCount.textContent = pct + '%';
+                    if (pct >= 100) progressText.textContent = '处理中...';
                 }
             });
 
             xhr.addEventListener('load', function() {
                 if (xhr.status === 200) {
-                    var data = JSON.parse(xhr.responseText);
+                    var data;
+                    try {
+                        data = JSON.parse(xhr.responseText);
+                    } catch (err) {
+                        progressText.textContent = '上传失败';
+                        errorEl.textContent = '服务器返回格式错误';
+                        errorEl.classList.remove('hidden');
+                        confirmBtn.disabled = false;
+                        return;
+                    }
                     progressText.textContent = '上传完成';
                     progressBar.style.width = '100%';
                     var summary = data.uploaded + ' 个成功';
@@ -2218,7 +2324,10 @@ document.addEventListener('keydown', function(e) {
                     }, delay);
                 } else {
                     progressText.textContent = '上传失败';
-                    errorEl.textContent = '服务器返回 ' + xhr.status;
+                    var errMsg = '服务器返回 ' + xhr.status;
+                    if (xhr.status === 413) errMsg = '文件过大，请减少数量或分批上传';
+                    else if (xhr.responseText) errMsg += ': ' + String(xhr.responseText).substring(0, 100);
+                    errorEl.textContent = errMsg;
                     errorEl.classList.remove('hidden');
                     confirmBtn.disabled = false;
                 }
@@ -2227,6 +2336,13 @@ document.addEventListener('keydown', function(e) {
             xhr.addEventListener('error', function() {
                 progressText.textContent = '上传失败';
                 errorEl.textContent = '网络错误';
+                errorEl.classList.remove('hidden');
+                confirmBtn.disabled = false;
+            });
+
+            xhr.addEventListener('timeout', function() {
+                progressText.textContent = '上传超时';
+                errorEl.textContent = '服务器处理时间过长，请尝试减少文件数量或分批上传';
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
             });

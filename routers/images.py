@@ -1,20 +1,21 @@
 """图片 API：删除、下载、上传、信息"""
 import asyncio
 import hashlib
+import json
 import os
 import tempfile
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL_SIZE
-from models import Image, Tag, ImageTag, get_async_session, natural_sort_key
+from models import Image, Tag, ImageTag, async_session_factory, get_async_session, natural_sort_key
 from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.images import cache_filename
 from utils.folder_tree import invalidate_folder_tree_cache
@@ -31,7 +32,7 @@ _IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批大小，避免 max_allowed_packe
 
 
 def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
-    """同步计算目标目录中已有图片的 MD5 哈希"""
+    """同步计算目标目录中已有图片的 MD5 哈希，返回 hash -> 相对路径（仅根目录直接子文件）"""
     existing_hashes: dict[str, str] = {}
     if not target_dir.is_dir():
         return existing_hashes
@@ -43,6 +44,67 @@ def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> di
             except OSError:
                 pass
     return existing_hashes
+
+
+def _compute_existing_hashes_recursive(
+    target_dir: Path, media_extensions: set[str]
+) -> dict[str, str]:
+    """递归计算目标目录及子目录中已有媒体文件的 MD5 哈希，返回 hash -> 相对路径（相对 target_dir）"""
+    existing_hashes: dict[str, str] = {}
+    if not target_dir.is_dir():
+        return existing_hashes
+
+    def _walk(base: Path, prefix: str) -> None:
+        try:
+            for p in base.iterdir():
+                rel = f"{prefix}/{p.name}" if prefix else p.name
+                if p.is_file() and p.suffix.lower() in media_extensions:
+                    try:
+                        h = hashlib.md5(p.read_bytes()).hexdigest()
+                        existing_hashes[h] = rel.replace("\\", "/")
+                    except OSError:
+                        pass
+                elif p.is_dir():
+                    _walk(p, rel)
+        except OSError:
+            pass
+
+    _walk(target_dir, "")
+    return existing_hashes
+
+
+def _compute_existing_hashes_for_subdirs(
+    target_dir: Path, subdirs: set[str], media_extensions: set[str]
+) -> dict[str, str]:
+    """仅对指定子目录计算已有媒体文件的 MD5 哈希，返回 hash -> 相对路径（相对 target_dir）。
+    用于文件夹上传时按需哈希，避免扫描整个图库。"""
+    existing_hashes: dict[str, str] = {}
+    for subdir in subdirs:
+        subdir = (subdir or "").strip().replace("\\", "/").strip("/")
+        dir_path = target_dir / subdir if subdir else target_dir
+        if not dir_path.is_dir():
+            continue
+        if subdir:
+            # 递归哈希子目录，路径加前缀
+            partial = _compute_existing_hashes_recursive(dir_path, media_extensions)
+            prefix = subdir + "/"
+            for h, rel in partial.items():
+                existing_hashes[h] = (prefix + rel).replace("//", "/")
+        else:
+            # 根目录：仅直接子文件
+            partial = _compute_existing_hashes(dir_path, media_extensions)
+            existing_hashes.update(partial)
+    return existing_hashes
+
+
+def _sanitize_upload_filename(filename: str) -> str | None:
+    """校验并规范化上传文件名中的路径，非法返回 None。允许纯文件名或 subpath/filename。"""
+    if not filename or not filename.strip():
+        return None
+    p = filename.strip().replace("\\", "/").strip("/")
+    if ".." in p or p.startswith("/"):
+        return None
+    return p
 
 
 @router.post("/delete-images")
@@ -187,123 +249,213 @@ async def get_image_info(
 
 
 @router.post("/upload")
-async def upload_images(
-    path: str = Form(""),
-    on_duplicate: str = Form("skip"),
-    files: list[UploadFile] = File(...),
-    session: AsyncSession = Depends(get_async_session),
-):
-    """上传图片或视频到指定路径"""
+async def upload_images(request: Request):
+    """上传图片或视频到指定路径，支持子目录结构（拖拽/选择文件夹）"""
     from scanner import get_media_metadata_and_thumbnail
     from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
+    form_data = await request.form(
+        max_part_size=MAX_UPLOAD_FILE_SIZE + 1024,
+        max_files=2000,
+    )
+
+    raw_path = form_data.get("path")
+    path = raw_path.strip() if isinstance(raw_path, str) else ""
+    raw_dup = form_data.get("on_duplicate")
+    on_duplicate = (raw_dup or "skip").strip() if isinstance(raw_dup, str) else "skip"
+    files = [f for f in (form_data.getlist("files") or []) if hasattr(f, "read") and hasattr(f, "filename")]
+
+    raw_paths = form_data.get("file_paths")
+    try:
+        file_paths = json.loads(raw_paths) if isinstance(raw_paths, str) else []
+    except (json.JSONDecodeError, TypeError):
+        file_paths = []
+    if not isinstance(file_paths, list):
+        file_paths = []
+    while len(file_paths) < len(files):
+        file_paths.append("")
+    file_paths = file_paths[: len(files)]
+
+    if not files:
+        return {"uploaded": 0, "skipped": 0, "errors": ["未收到任何文件，请检查是否选择了图片或视频"]}
+
     target_path = normalize_path(path, allow_empty=True) or ""
+    print(f"[upload] 开始: {len(files)} 个文件 -> {target_path or '根目录'}", flush=True)
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
-    existing_hashes = await asyncio.to_thread(
-        _compute_existing_hashes, target_dir, IMAGE_EXTENSIONS
+
+    has_subpath = any(
+        "/" in (fp or "") or "\\" in (fp or "") for fp in file_paths
     )
+    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+    if has_subpath:
+        # 仅哈希即将写入的子目录，避免扫描整个图库
+        subdirs: set[str] = set()
+        for i, f in enumerate(files):
+            display_name = (file_paths[i] if i < len(file_paths) else "") or (getattr(f, "filename", "") or "")
+            sanitized = _sanitize_upload_filename(display_name.strip())
+            if sanitized is None:
+                continue
+            parts = Path(sanitized).parts
+            if len(parts) <= 1:
+                subdirs.add("")
+            else:
+                subdirs.add("/".join(parts[:-1]))
+        existing_hashes = await asyncio.to_thread(
+            _compute_existing_hashes_for_subdirs, target_dir, subdirs, media_extensions
+        )
+    else:
+        existing_hashes = await asyncio.to_thread(
+            _compute_existing_hashes, target_dir, IMAGE_EXTENSIONS
+        )
+
+    _UPLOAD_PARALLEL = 4
     uploaded = 0
     skipped = 0
-    errors = []
+    errors: list[str] = []
     total_uploaded_bytes = 0
-    for f in files:
-        if not f.filename:
+    sem = asyncio.Semaphore(_UPLOAD_PARALLEL)
+
+    async def _process_one(
+        i: int,
+        f,
+        display_name: str,
+        sanitized: str,
+        content: bytes,
+        content_hash: str,
+        dest: Path,
+        is_video: bool,
+    ) -> tuple[bool, bool, str | None]:
+        """处理单个文件：写入、缩略图、入库。返回 (uploaded, skipped, error_msg)"""
+        rel_path = str(dest.relative_to(PHOTOS_DIR)).replace("\\", "/")
+        async with sem:
+            try:
+                dest.write_bytes(content)
+                dest_rel = str(dest.relative_to(target_dir)).replace("\\", "/")
+                existing_hashes[content_hash] = dest_rel
+                cache_name = cache_filename(rel_path)
+                cache_path = CACHE_DIR / cache_name
+                data = await asyncio.to_thread(
+                    get_media_metadata_and_thumbnail, dest, cache_path, is_video
+                )
+                if data is None:
+                    print(f"[upload] 处理失败: {display_name}", flush=True)
+                    return False, False, f"{display_name}: 处理失败"
+                width, height, modified_at, file_size, is_corrupted = data
+                async with async_session_factory() as sess:
+                    existing_record = (
+                        await sess.execute(select(Image).where(Image.relative_path == rel_path))
+                    ).scalar_one_or_none()
+                    if existing_record:
+                        existing_record.filename = dest.name
+                        existing_record.filename_natural = natural_sort_key(dest.name)
+                        existing_record.relative_path_natural = natural_sort_key(rel_path)
+                        existing_record.modified_at = modified_at
+                        existing_record.file_size = file_size
+                        existing_record.width = width
+                        existing_record.height = height
+                        existing_record.media_type = "video" if is_video else "image"
+                        sess.add(existing_record)
+                        record = existing_record
+                    else:
+                        record = create_image_record(
+                            filename=dest.name,
+                            relative_path=rel_path,
+                            modified_at=modified_at,
+                            file_size=file_size,
+                            width=width,
+                            height=height,
+                            media_type="video" if is_video else "image",
+                        )
+                        sess.add(record)
+                    if is_corrupted:
+                        damaged_tag = await ensure_tag_exists(sess, DAMAGED_TAG_NAME)
+                        if damaged_tag:
+                            await sess.flush()
+                            await add_tag_to_image(sess, record.id, damaged_tag)
+                    try:
+                        await sess.commit()
+                        print(f"[upload] 成功: {rel_path}", flush=True)
+                        return True, False, None
+                    except IntegrityError:
+                        await sess.rollback()
+                        print(f"[upload] 成功(竞态): {rel_path}", flush=True)
+                        return True, False, None
+            except Exception as e:
+                print(f"[upload] 失败: {display_name} - {e}", flush=True)
+                return False, False, f"{display_name}: {str(e)}"
+
+    tasks: list[tuple[int, object, str, str, bytes, str, Path, bool]] = []
+    for i, f in enumerate(files):
+        display_name = file_paths[i] if i < len(file_paths) else (f.filename or "")
+        if not display_name.strip():
+            display_name = f.filename or ""
+        sanitized = _sanitize_upload_filename(display_name)
+        if sanitized is None:
+            errors.append(f"{display_name or '未知'}: 路径不合法")
             continue
-        ext = Path(f.filename).suffix.lower()
+        ext = Path(sanitized).suffix.lower()
         if ext not in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
-            errors.append(f"{f.filename}: 不支持的格式 {ext}")
+            errors.append(f"{display_name or '未知'}: 不支持的格式 {ext}")
             continue
         if total_uploaded_bytes >= MAX_UPLOAD_TOTAL_SIZE:
-            errors.append(f"{f.filename}: 本次上传总大小已达限制 ({MAX_UPLOAD_TOTAL_SIZE // (1024*1024)}MB)")
+            errors.append(f"{display_name or '未知'}: 本次上传总大小已达限制 ({MAX_UPLOAD_TOTAL_SIZE // (1024*1024)}MB)")
             continue
         is_video = ext in VIDEO_EXTENSIONS
         try:
             content = await f.read(MAX_UPLOAD_FILE_SIZE + 1)
             if len(content) > MAX_UPLOAD_FILE_SIZE:
-                errors.append(f"{f.filename}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024*1024)}MB)")
+                errors.append(f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024*1024)}MB)")
                 continue
             if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
-                errors.append(f"{f.filename}: 本次上传总大小将超限")
+                errors.append(f"{display_name}: 本次上传总大小将超限")
                 continue
         except Exception as e:
-            errors.append(f"{f.filename}: 读取失败 {e}")
+            errors.append(f"{display_name}: 读取失败 {e}")
             continue
         total_uploaded_bytes += len(content)
         content_hash = hashlib.md5(content).hexdigest()
-        is_overwrite = False
+        base_name = Path(sanitized).name
         if content_hash in existing_hashes:
             if on_duplicate == "skip":
                 skipped += 1
                 continue
             elif on_duplicate == "overwrite":
                 dest = target_dir / existing_hashes[content_hash]
-                is_overwrite = True
             else:
-                dest = unique_path(target_dir, Path(f.filename).name, suffix_style="underscore")
+                dest_parent = (target_dir / Path(sanitized).parent) if "/" in sanitized else target_dir
+                dest_parent.mkdir(parents=True, exist_ok=True)
+                dest = unique_path(dest_parent, base_name, suffix_style="underscore")
         else:
-            safe_name = Path(f.filename).name
-            dest = target_dir / safe_name
+            dest_parent = (target_dir / Path(sanitized).parent) if "/" in sanitized else target_dir
+            dest_parent.mkdir(parents=True, exist_ok=True)
+            dest = dest_parent / base_name
             if dest.exists():
                 if on_duplicate == "skip":
                     skipped += 1
                     continue
                 elif on_duplicate == "overwrite":
-                    is_overwrite = True
+                    pass
                 else:
-                    dest = unique_path(target_dir, Path(f.filename).name, suffix_style="underscore")
-        try:
-            dest.write_bytes(content)
-            existing_hashes[content_hash] = dest.name
-            rel_path = str(dest.relative_to(PHOTOS_DIR)).replace("\\", "/")
-            existing_record = (
-                await session.execute(select(Image).where(Image.relative_path == rel_path))
-            ).scalar_one_or_none()
-            cache_name = cache_filename(rel_path)
-            cache_path = CACHE_DIR / cache_name
-            data = await asyncio.to_thread(
-                get_media_metadata_and_thumbnail, dest, cache_path, is_video
-            )
-            if data is None:
-                errors.append(f"{f.filename}: 处理失败")
-                continue
-            width, height, modified_at, file_size, is_corrupted = data
-            if existing_record:
-                existing_record.filename = dest.name
-                existing_record.filename_natural = natural_sort_key(dest.name)
-                existing_record.relative_path_natural = natural_sort_key(rel_path)
-                existing_record.modified_at = modified_at
-                existing_record.file_size = file_size
-                existing_record.width = width
-                existing_record.height = height
-                existing_record.media_type = "video" if is_video else "image"
-                session.add(existing_record)
-                record = existing_record
-            else:
-                record = create_image_record(
-                    filename=dest.name,
-                    relative_path=rel_path,
-                    modified_at=modified_at,
-                    file_size=file_size,
-                    width=width,
-                    height=height,
-                    media_type="video" if is_video else "image",
-                )
-                session.add(record)
-            if is_corrupted:
-                damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME)
-                if damaged_tag:
-                    await session.flush()
-                    await add_tag_to_image(session, record.id, damaged_tag)
-            try:
-                await session.commit()
+                    dest = unique_path(dest_parent, base_name, suffix_style="underscore")
+        tasks.append((i, f, display_name, sanitized, content, content_hash, dest, is_video))
+
+    results = await asyncio.gather(
+        *[_process_one(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7]) for t in tasks],
+        return_exceptions=True,
+    )
+    for r in results:
+        if isinstance(r, Exception):
+            errors.append(str(r))
+        elif isinstance(r, tuple):
+            u, s, err = r
+            if u:
                 uploaded += 1
-            except IntegrityError:
-                await session.rollback()
-                # 竞态：watcher 已先入库，视为成功
-                uploaded += 1
-        except Exception as e:
-            errors.append(f"{f.filename}: {str(e)}")
+            elif s:
+                skipped += 1
+            elif err:
+                errors.append(err)
     if uploaded > 0:
         invalidate_folder_tree_cache()
+    print(f"[upload] 完成: {uploaded} 成功, {skipped} 跳过, {len(errors)} 失败", flush=True)
     return {"uploaded": uploaded, "skipped": skipped, "errors": errors}
