@@ -27,6 +27,16 @@ from utils.folder_tree import invalidate_folder_tree_cache
 router = APIRouter(tags=["settings"])
 
 
+def _estimate_thumb_bytes(width: int, height: int) -> int:
+    """根据原图尺寸估算 300px WebP 缩略图字节数"""
+    if width <= 0 or height <= 0:
+        return 18_000  # 默认 300×200 约 18KB
+    tw = min(300, width)
+    th = int(height * tw / width) if width else 169
+    pixels = tw * th
+    return int(pixels * 0.3)  # 实测约 0.27 B/px，取 0.3
+
+
 @router.get("/settings")
 async def settings_page(request: Request):
     """设置页面"""
@@ -165,7 +175,9 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
     total_size = int(total_size_raw) if total_size_raw else 0
     folder_count = await stats_folder_count_from_db(session)
     cache_count = image_count + video_count
-    cache_size = int(total_size * 0.15)  # webp 缩略图压缩比估算，零磁盘 I/O
+    result = await session.execute(select(Image.width, Image.height))
+    rows = result.fetchall()
+    cache_size = sum(_estimate_thumb_bytes(w or 0, h or 0) for w, h in rows)
     return {
         "image_count": image_count,
         "video_count": video_count,
