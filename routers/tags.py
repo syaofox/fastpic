@@ -193,7 +193,7 @@ async def add_image_tags(
         raise HTTPException(status_code=404, detail="图片不存在")
     added = 0
     for name in (body.tags or []):
-        name = (name or "").strip()
+        name = (name or "").strip().lstrip("#")
         if not name:
             continue
         tag_result = await session.execute(select(Tag).where(Tag.name == name))

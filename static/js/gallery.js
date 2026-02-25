@@ -91,8 +91,31 @@ function getGalleryCacheKeyFromLink(link) {
     if (target && target !== '#gallery-container') return null;
     if (link.getAttribute('hx-include')) {
         try {
-            var path = (new URL(hxGet, location.origin)).searchParams.get('path') || '';
-            return typeof buildGalleryUrl === 'function' ? buildGalleryUrl(path) : null;
+            var url = new URL(hxGet, location.origin);
+            var params = url.searchParams;
+            var path = params.get('path') || '';
+            var opts = {};
+            var filterTag = params.get('filter_tag') || '';
+            var filterFilename = params.get('filter_filename') || '';
+            var filterSizeMin = params.get('filter_size_min') || '';
+            var filterSizeMax = params.get('filter_size_max') || '';
+            var filterDateFrom = params.get('filter_date_from') || '';
+            var filterDateTo = params.get('filter_date_to') || '';
+            if (filterTag || filterFilename || filterSizeMin || filterSizeMax || filterDateFrom || filterDateTo) {
+                opts.filters = {
+                    filter_tag: filterTag,
+                    filter_filename: filterFilename,
+                    filter_size_min: filterSizeMin,
+                    filter_size_max: filterSizeMax,
+                    filter_date_from: filterDateFrom,
+                    filter_date_to: filterDateTo
+                };
+            }
+            if (params.get('mode')) opts.mode = params.get('mode');
+            if (params.get('sort_by')) opts.sortBy = params.get('sort_by');
+            if (params.get('sort_order')) opts.sortOrder = params.get('sort_order');
+            if (params.get('cols')) opts.cols = params.get('cols');
+            return typeof buildGalleryUrl === 'function' ? buildGalleryUrl(path, opts) : null;
         } catch (e) { return null; }
     }
     return hxGet;
@@ -685,7 +708,7 @@ function _bindModalTagHandlers(container, imageId) {
         addInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                var tag = addInput.value.trim();
+                var tag = addInput.value.trim().replace(/^#+/, '');
                 if (tag) {
                     fetch('/api/images/' + imageId + '/tags', {
                         method: 'POST',
