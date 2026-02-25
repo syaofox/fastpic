@@ -168,11 +168,17 @@ _FOLDER_TREE_CACHE_TTL = 60.0
 _folder_tree_cache: dict | None = None
 _folder_tree_cache_lock = asyncio.Lock()
 
+_SUBFOLDER_CACHE_TTL = 90.0
+_SUBFOLDER_CACHE_MAX_SIZE = 50
+_subfolder_cache: dict[str, dict] = {}
+_subfolder_cache_lock = asyncio.Lock()
+
 
 def invalidate_folder_tree_cache() -> None:
     """创建/删除文件夹后调用，使缓存失效"""
-    global _folder_tree_cache
+    global _folder_tree_cache, _subfolder_cache
     _folder_tree_cache = None
+    _subfolder_cache = {}
     try:
         from utils.path_count_cache import invalidate_path_count_cache
         invalidate_path_count_cache()
@@ -285,6 +291,11 @@ async def get_folder_tree_cached(
         return folder_tree, nested_tree, folder_counts
 
 
+def _subfolder_cache_key(path: str, sort_by: str, sort_order: str) -> str:
+    """生成子文件夹缓存的键"""
+    return f"{path}|{sort_by}|{sort_order}"
+
+
 async def get_subfolders(
     session,
     photos_dir: Path,
@@ -293,7 +304,13 @@ async def get_subfolders(
     sort_by: str = "filename",
     sort_order: str = "asc",
 ) -> list[dict]:
-    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。"""
+    """获取当前路径下的直接子文件夹，每个子文件夹取 4 张代表图。带 90 秒短期缓存。"""
+    cache_key = _subfolder_cache_key(path, sort_by, sort_order)
+    async with _subfolder_cache_lock:
+        now = time.monotonic()
+        entry = _subfolder_cache.get(cache_key)
+        if entry is not None and now - entry["ts"] < _SUBFOLDER_CACHE_TTL:
+            return entry["data"]
     path_prefix = path + "/" if path else ""
     sub_name_expr = _extract_direct_child(path_prefix)
 
@@ -373,6 +390,13 @@ async def get_subfolders(
     key = sort_col_map.get(sort_by, "_sort_key_filename")
     reverse = sort_order == "desc"
     subfolders.sort(key=lambda s: s[key], reverse=reverse)
+
+    async with _subfolder_cache_lock:
+        _subfolder_cache[cache_key] = {"ts": time.monotonic(), "data": subfolders}
+        if len(_subfolder_cache) > _SUBFOLDER_CACHE_MAX_SIZE:
+            by_ts = sorted(_subfolder_cache.items(), key=lambda x: x[1]["ts"])
+            for k, _ in by_ts[: len(_subfolder_cache) - _SUBFOLDER_CACHE_MAX_SIZE]:
+                del _subfolder_cache[k]
     return subfolders
 
 

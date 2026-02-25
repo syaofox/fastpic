@@ -5,7 +5,7 @@ from sqlalchemy import text
 from models import sync_engine
 
 _PATH_COUNT_DB_TTL = 300.0  # 5 分钟
-_COUNT_CACHE_TTL = 60.0  # 内存 TTL
+_COUNT_CACHE_TTL = 300.0  # 内存 TTL（与 DB 一致）
 _COUNT_CACHE_MAX_SIZE = 1000  # 内存缓存上限
 _count_cache: dict[tuple[str, str], tuple[int, float]] = {}
 
