@@ -12,6 +12,10 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, STATIC_DIR, PER_PAGE, APP_VERSION
+
+# favicon 启动时检查一次，避免每次请求 stat
+_favicon_path = STATIC_DIR / "favicon.ico"
+_FAVICON_PATH: Path | None = _favicon_path if _favicon_path.exists() else None
 from models import (
     Image,
     Tag,
@@ -92,10 +96,9 @@ app.include_router(settings.router)
 
 @app.get("/favicon.ico")
 async def favicon():
-    """返回网站图标"""
-    favicon_path = STATIC_DIR / "favicon.ico"
-    if favicon_path.exists():
-        return FileResponse(favicon_path, media_type="image/x-icon")
+    """返回网站图标（启动时已检查，不再每次 exists）"""
+    if _FAVICON_PATH is not None:
+        return FileResponse(_FAVICON_PATH, media_type="image/x-icon")
     from fastapi import HTTPException
     raise HTTPException(status_code=404)
 

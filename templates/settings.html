@@ -81,7 +81,8 @@
                     </div>
                     <div class="text-center p-3 bg-slate-50 rounded-lg">
                         <div class="text-2xl font-bold text-slate-800" id="stat-cache">-</div>
-                        <div class="text-xs text-slate-500 mt-1">缓存大小</div>
+                        <div class="text-xs text-slate-500 mt-1" id="stat-cache-label">缓存大小</div>
+                        <button type="button" onclick="loadCacheStatsRealtime()" id="stat-cache-realtime-btn" class="text-xs text-blue-600 hover:text-blue-700 mt-1 disabled:opacity-50 disabled:cursor-not-allowed">精确统计</button>
                     </div>
                 </div>
                 <div class="mt-4 text-xs text-slate-400 space-y-1" id="stats-paths"></div>
@@ -679,6 +680,30 @@ function switchTab(tabName) {
     if (tabName === 'duplicates' && dupGroupsCache.length > 0) renderDuplicateGroups(dupGroupsCache);
 }
 
+// 按需 rglob 获取 cache 精确统计（孤儿/缺失缓存时与 DB 估算可能不一致）
+function loadCacheStatsRealtime() {
+    var btn = document.getElementById('stat-cache-realtime-btn');
+    var cacheEl = document.getElementById('stat-cache');
+    var labelEl = document.getElementById('stat-cache-label');
+    if (!btn || !cacheEl) return;
+    btn.disabled = true;
+    btn.textContent = '统计中...';
+
+    fetch('/api/stats-cache-realtime', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            cacheEl.textContent = formatSize(data.cache_size || 0) + ' (' + (data.cache_count || 0).toLocaleString() + ')';
+            if (labelEl) labelEl.textContent = '缓存大小';
+            btn.textContent = '精确统计';
+            btn.disabled = false;
+        })
+        .catch(function(err) {
+            console.error('精确统计失败:', err);
+            btn.textContent = '精确统计';
+            btn.disabled = false;
+        });
+}
+
 // 加载统计信息
 function loadStats() {
     fetch('/api/stats').then(function(r) { return r.json(); }).then(function(data) {
@@ -690,6 +715,7 @@ function loadStats() {
         document.getElementById('stat-folders').textContent = data.folder_count.toLocaleString();
         document.getElementById('stat-size').textContent = formatSize(data.total_size);
         document.getElementById('stat-cache').textContent = formatSize(data.cache_size) + ' (' + data.cache_count + ')';
+        document.getElementById('stat-cache-label').textContent = data.cache_size_estimated ? '缓存大小（估算）' : '缓存大小';
         document.getElementById('stats-paths').innerHTML =
             '<div>图片目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.photos_dir || '') + '</span></div>' +
             '<div>缓存目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.cache_dir || '') + '</span></div>';

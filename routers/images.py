@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL_SIZE, IN_CLAUSE_BATCH_SIZE
 from models import Image, Tag, ImageTag, async_session_factory, get_async_session, natural_sort_key
 from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from utils.hash_utils import compute_file_md5_by_path
 from utils.images import cache_filename
 from utils.folder_tree import invalidate_folder_tree_cache
 from schemas import DeleteImagesRequest, DownloadZipRequest
@@ -36,11 +37,9 @@ def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> di
         return existing_hashes
     for existing in target_dir.iterdir():
         if existing.is_file() and existing.suffix.lower() in image_extensions:
-            try:
-                h = hashlib.md5(existing.read_bytes()).hexdigest()
+            h = compute_file_md5_by_path(existing)
+            if h is not None:
                 existing_hashes[h] = existing.name
-            except OSError:
-                pass
     return existing_hashes
 
 
@@ -57,11 +56,9 @@ def _compute_existing_hashes_recursive(
             for p in base.iterdir():
                 rel = f"{prefix}/{p.name}" if prefix else p.name
                 if p.is_file() and p.suffix.lower() in media_extensions:
-                    try:
-                        h = hashlib.md5(p.read_bytes()).hexdigest()
+                    h = compute_file_md5_by_path(p)
+                    if h is not None:
                         existing_hashes[h] = rel.replace("\\", "/")
-                    except OSError:
-                        pass
                 elif p.is_dir():
                     _walk(p, rel)
         except OSError:

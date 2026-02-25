@@ -16,7 +16,7 @@ from schemas import ScanDuplicatesRequest
 from app_common import templates
 from utils.path_utils import normalize_path, path_filter_for_prefix
 from utils.hash_utils import compute_file_md5
-from utils.stats import stats_folder_count_from_db, stats_cache_only, invalidate_stats_cache
+from utils.stats import stats_folder_count_from_db
 from utils.folder_tree import invalidate_folder_tree_cache
 
 router = APIRouter(tags=["settings"])
@@ -49,7 +49,6 @@ async def trigger_scan():
     finally:
         end_scan()
         invalidate_folder_tree_cache()
-        invalidate_stats_cache()
 
 
 @router.post("/api/cleanup")
@@ -62,7 +61,6 @@ async def trigger_cleanup():
     finally:
         end_scan()
         invalidate_folder_tree_cache()
-        invalidate_stats_cache()
 
 
 @router.post("/api/scan-duplicates")
@@ -126,6 +124,26 @@ async def scan_duplicates(
     return {"groups": groups}
 
 
+def _stats_cache_realtime_sync() -> tuple[int, int]:
+    """同步执行 rglob 统计 cache 目录（按需调用，避免阻塞）"""
+    count = 0
+    total_size = 0
+    for p in CACHE_DIR.resolve().rglob("*.webp"):
+        try:
+            total_size += p.stat().st_size
+        except OSError:
+            pass
+        count += 1
+    return count, total_size
+
+
+@router.post("/api/stats-cache-realtime")
+async def get_cache_stats_realtime():
+    """按需执行 rglob 获取 cache 精确统计，用于手动刷新（孤儿/缺失缓存时与 DB 估算可能不一致）"""
+    count, total_size = await asyncio.to_thread(_stats_cache_realtime_sync)
+    return {"cache_count": count, "cache_size": total_size}
+
+
 @router.get("/api/stats")
 async def get_stats(session: AsyncSession = Depends(get_async_session)):
     """获取数据库和文件系统统计信息（优先从 DB 统计，支持百万级）"""
@@ -135,15 +153,11 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
     video_count = (
         await session.execute(select(func.count(Image.id)).where(Image.media_type == "video"))
     ).scalar() or 0
-    total_size = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
+    total_size_raw = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
+    total_size = int(total_size_raw) if total_size_raw else 0
     folder_count = await stats_folder_count_from_db(session)
-    cache_count = image_count + video_count  # 与 DB 一致，避免百万级 rglob
-    cache_size = 0
-    cache_count_fs, cache_size = await asyncio.to_thread(
-        stats_cache_only, CACHE_DIR
-    )
-    if cache_count_fs != cache_count:
-        cache_count = cache_count_fs  # 有孤儿/缺失时以文件系统为准
+    cache_count = image_count + video_count
+    cache_size = int(total_size * 0.15)  # webp 缩略图压缩比估算，零磁盘 I/O
     return {
         "image_count": image_count,
         "video_count": video_count,
@@ -152,6 +166,7 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
         "folder_count": folder_count,
         "cache_count": cache_count,
         "cache_size": cache_size,
+        "cache_size_estimated": True,
         "photos_dir": str(PHOTOS_DIR.resolve()),
         "cache_dir": str(CACHE_DIR.resolve()),
     }

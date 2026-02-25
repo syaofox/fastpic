@@ -212,6 +212,19 @@ def _collect_media_files(photos_dir: Path) -> tuple[list[Path], list[Path]]:
     return images, videos
 
 
+def _collect_existing_rel_paths(photos_dir: Path) -> set[str]:
+    """一次 os.walk 收集所有存在的媒体文件相对路径，用于 cleanup 替代 N 次 exists()"""
+    existing: set[str] = set()
+    for root, dirs, files in os.walk(photos_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for f in files:
+            p = Path(root) / f
+            ext = p.suffix.lower()
+            if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
+                existing.add(_relative_path(photos_dir, p))
+    return existing
+
+
 def _process_single_image_sync(
     full_path: Path, photos_dir: Path, cache_dir: Path
 ) -> tuple[str, str, float, int, int, int, bool] | None:
@@ -587,6 +600,9 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
     print("[cleanup] 开始数据库清理...", flush=True)
 
+    # 一次 os.walk 收集存在的媒体文件相对路径，替代 N 次 photo_path.exists()
+    existing_rel_paths = await asyncio.to_thread(_collect_existing_rel_paths, photos_dir)
+
     # ── 第 1 步：清除幽灵记录（分批加载，避免 OOM） ──
     valid_cache_names: set[str] = set()
     async with async_session_factory() as session:
@@ -609,8 +625,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
             batch_count = 0
             for img in batch:
-                photo_path = photos_dir / img.relative_path
-                if not photo_path.exists():
+                if img.relative_path not in existing_rel_paths:
                     cache_name = cache_filename(img.relative_path)
                     cache_path = cache_dir / cache_name
                     if cache_path.exists():
@@ -632,11 +647,14 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
         if stale_removed:
             print(f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
 
-    # ── 第 2 步：清除孤儿缓存文件（按 cache/ab/cd/ 三层结构遍历，分批 yield 避免长时间阻塞） ──
-    async def _remove_orphan_cache(cache_dir: Path, valid: set[str]) -> int:
+    # ── 第 2 步：清除孤儿缓存文件，同时收集 cache_mtimes 供步骤 3 使用（消除 stat 调用） ──
+    async def _remove_orphan_and_collect_mtimes(
+        cache_dir: Path, valid: set[str]
+    ) -> tuple[int, dict[str, float]]:
         count = 0
+        cache_mtimes: dict[str, float] = {}
         if not cache_dir.exists():
-            return 0
+            return 0, cache_mtimes
         for p1 in sorted(cache_dir.iterdir()):
             if not p1.is_dir() or len(p1.name) != 2:
                 continue
@@ -647,18 +665,24 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
                     if f.suffix.lower() != ".webp":
                         continue
                     rel = str(f.relative_to(cache_dir)).replace("\\", "/")
+                    try:
+                        cache_mtimes[rel] = f.stat().st_mtime
+                    except OSError:
+                        pass
                     if rel not in valid:
                         f.unlink(missing_ok=True)
                         count += 1
                 await asyncio.sleep(0)
             await asyncio.sleep(0)
-        return count
+        return count, cache_mtimes
 
-    orphan_cache_removed = await _remove_orphan_cache(cache_dir, valid_cache_names)
+    orphan_cache_removed, cache_mtimes = await _remove_orphan_and_collect_mtimes(
+        cache_dir, valid_cache_names
+    )
     if orphan_cache_removed:
         print(f"[cleanup] 清除 {orphan_cache_removed} 个孤儿缓存文件", flush=True)
 
-    # ── 第 3 步：补全缺失的缩略图缓存（分批加载 + 多进程生成） ──
+    # ── 第 3 步：补全缺失的缩略图缓存（用 existing_rel_paths + cache_mtimes 替代 stat，分批加载 + 多进程生成） ──
     async with async_session_factory() as session:
         last_id = 0
         loop = asyncio.get_running_loop()
@@ -676,15 +700,17 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
             to_regen: list[tuple[Path, Path, bool]] = []
             for img in batch:
+                if img.relative_path not in existing_rel_paths:
+                    continue  # 原图已删，跳过
                 cache_name = cache_filename(img.relative_path)
                 cache_path = cache_dir / cache_name
                 photo_path = photos_dir / img.relative_path
-                need_regen = False
-                if not cache_path.exists():
-                    need_regen = photo_path.exists()
-                elif photo_path.exists():
-                    need_regen = photo_path.stat().st_mtime > cache_path.stat().st_mtime
-                if need_regen:
+                # 用 DB modified_at 与 cache_mtimes 比较，无需 stat
+                cache_fresh = (
+                    cache_name in cache_mtimes
+                    and cache_mtimes[cache_name] >= (img.modified_at or 0)
+                )
+                if not cache_fresh:
                     is_video = getattr(img, "media_type", "image") == "video"
                     to_regen.append((photo_path, cache_path, is_video))
                 last_id = img.id or last_id
