@@ -64,7 +64,7 @@
             flex-direction: column;
             gap: 0.5rem;
         }
-        #gallery-grid.gallery-list > .selectable-item {
+        #gallery-grid.gallery-list .selectable-item {
             width: 100%;
             content-visibility: auto;
             contain-intrinsic-size: auto 100px;
@@ -92,7 +92,7 @@
             gap: 1rem;
         }
         /* 使用 data-cols 避免 calc+var 在部分浏览器失效，JS 会在加载后同步 */
-        #gallery-grid.gallery-flex > .selectable-item {
+        #gallery-grid.gallery-flex .selectable-item {
             flex: 0 0 auto;
             min-width: 0;
             width: calc(25% - 0.75rem); /* 默认 4 列 */
@@ -102,13 +102,13 @@
             content-visibility: auto;
             contain-intrinsic-size: auto 200px;
         }
-        #gallery-grid.gallery-flex[data-cols="2"] > .selectable-item { width: calc(50% - 0.5rem); }
-        #gallery-grid.gallery-flex[data-cols="3"] > .selectable-item { width: calc(33.333% - 0.667rem); }
-        #gallery-grid.gallery-flex[data-cols="4"] > .selectable-item { width: calc(25% - 0.75rem); }
-        #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item { width: calc(20% - 0.8rem); }
-        #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item { width: calc(16.666% - 0.833rem); }
-        #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item { width: calc(14.285% - 0.857rem); }
-        #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item { width: calc(12.5% - 0.875rem); }
+        #gallery-grid.gallery-flex[data-cols="2"] .selectable-item { width: calc(50% - 0.5rem); }
+        #gallery-grid.gallery-flex[data-cols="3"] .selectable-item { width: calc(33.333% - 0.667rem); }
+        #gallery-grid.gallery-flex[data-cols="4"] .selectable-item { width: calc(25% - 0.75rem); }
+        #gallery-grid.gallery-flex[data-cols="5"] .selectable-item { width: calc(20% - 0.8rem); }
+        #gallery-grid.gallery-flex[data-cols="6"] .selectable-item { width: calc(16.666% - 0.833rem); }
+        #gallery-grid.gallery-flex[data-cols="7"] .selectable-item { width: calc(14.285% - 0.857rem); }
+        #gallery-grid.gallery-flex[data-cols="8"] .selectable-item { width: calc(12.5% - 0.875rem); }
         #gallery-grid.gallery-flex > .folder-image-separator,
         #gallery-grid.gallery-flex > .scroll-sentinel {
             flex: 0 0 100%;
@@ -127,38 +127,38 @@
         /* 响应式：按断点限制最大列数 */
         /* 手机 < 640px：最多 2 列 */
         @media (max-width: 639px) {
-            #gallery-grid.gallery-flex[data-cols="3"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="4"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+            #gallery-grid.gallery-flex[data-cols="3"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="4"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="5"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="6"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
                 width: calc(50% - 0.5rem);
             }
         }
         /* sm 640px–767px：最多 3 列 */
         @media (min-width: 640px) and (max-width: 767px) {
-            #gallery-grid.gallery-flex[data-cols="4"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+            #gallery-grid.gallery-flex[data-cols="4"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="5"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="6"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
                 width: calc(33.333% - 0.667rem);
             }
         }
         /* md 768px–1023px：最多 4 列 */
         @media (min-width: 768px) and (max-width: 1023px) {
-            #gallery-grid.gallery-flex[data-cols="5"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="6"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+            #gallery-grid.gallery-flex[data-cols="5"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="6"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
                 width: calc(25% - 0.75rem);
             }
         }
         /* lg 1024px–1279px：最多 6 列 */
         @media (min-width: 1024px) and (max-width: 1279px) {
-            #gallery-grid.gallery-flex[data-cols="7"] > .selectable-item,
-            #gallery-grid.gallery-flex[data-cols="8"] > .selectable-item {
+            #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+            #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
                 width: calc(16.666% - 0.833rem);
             }
         }

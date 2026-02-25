@@ -37,6 +37,27 @@
     };
 })();
 
+// ---------- gallery-top-bar 移入顶栏兜底：应对 htmx:afterSwap 未及时触发的极端情况 ----------
+(function() {
+    function ensureTopBarInSlot() {
+        var container = document.getElementById('gallery-container');
+        var slot = document.getElementById('gallery-top-slot');
+        if (!container || !slot) return;
+        var topBar = container.querySelector('.gallery-top-bar');
+        if (topBar && !slot.contains(topBar)) {
+            slot.innerHTML = '';
+            slot.appendChild(topBar);
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensureTopBarInSlot);
+    } else {
+        ensureTopBarInSlot();
+    }
+    // 延迟再检查一次，应对首屏 gallery 异步加载完成时 afterSwap 早于本脚本执行的情况
+    setTimeout(ensureTopBarInSlot, 500);
+})();
+
 // ---------- galleryPathCache：LRU 缓存，TTL 7min，max 40 条 ----------
 (function() {
     var MAX_ENTRIES = 40;
