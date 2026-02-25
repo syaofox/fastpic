@@ -163,7 +163,7 @@
         <!-- 左侧：主内容区（点击空白区域关闭） -->
         <div class="flex-1 min-w-0 relative flex items-center justify-center" onclick="handleModalContentClick(event)">
         <!-- 顶部工具栏 -->
-        <div class="absolute top-0 left-0 right-0 flex items-center justify-between p-4 z-10" onclick="event.stopPropagation()">
+        <div id="modal-toolbar" class="absolute top-0 left-0 right-0 flex items-center justify-between p-3 md:p-4 z-10" onclick="event.stopPropagation()">
             <!-- 左侧：幻灯片控件 -->
             <div class="flex items-center gap-2">
                 <button type="button" id="slideshow-btn" onclick="toggleSlideshow(); event.stopPropagation();"

@@ -259,6 +259,7 @@ function openModal(photoUrl, index, allUrls, allIds, mediaTypes) {
             if (closeBtn) closeBtn.focus();
         });
     });
+    /* 应用工具栏展开/收起状态，保证移动端双行布局初始状态正确 */
     applyModalToolbarState(isModalToolbarCollapsed());
     _updateIntervalUI(slideshowInterval);
     _updateSlideshowModeUI(slideshowMode);
@@ -387,6 +388,7 @@ function setModalToolbarCollapsed(collapsed) {
     localStorage.setItem(MODAL_TOOLBAR_COLLAPSED_KEY, String(collapsed));
 }
 function applyModalToolbarState(collapsed) {
+    var toolbar = document.getElementById('modal-toolbar');
     var wrap = document.getElementById('modal-toolbar-buttons');
     var expandIcon = document.getElementById('modal-toolbar-expand-icon');
     var collapseIcon = document.getElementById('modal-toolbar-collapse-icon');
@@ -396,11 +398,13 @@ function applyModalToolbarState(collapsed) {
         wrap.classList.remove('max-w-[999px]', 'opacity-100');
         expandIcon.classList.remove('hidden');
         collapseIcon.classList.add('hidden');
+        toolbar?.classList.remove('modal-toolbar-expanded');
     } else {
         wrap.classList.remove('max-w-0', 'opacity-0');
         wrap.classList.add('max-w-[999px]', 'opacity-100');
         expandIcon.classList.add('hidden');
         collapseIcon.classList.remove('hidden');
+        toolbar?.classList.add('modal-toolbar-expanded');
     }
 }
 function toggleModalToolbar() {
@@ -909,8 +913,15 @@ function toggleSetThumbnailPopover() {
         } else {
             popover.style.top = (rect.top - popH - gap) + 'px';
         }
-        popover.style.left = '';
-        popover.style.right = (window.innerWidth - rect.right) + 'px';
+        var minLeft = 16;
+        var popoverWidth = 180;
+        if (rect.right - popoverWidth < minLeft) {
+            popover.style.left = minLeft + 'px';
+            popover.style.right = 'auto';
+        } else {
+            popover.style.left = '';
+            popover.style.right = (window.innerWidth - rect.right) + 'px';
+        }
     }
     popover.classList.toggle('hidden');
 }
