@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, SCAN_DUPLICATES_BATCH_SIZE
 from models import Image, get_async_session
-from scanner import scan_photos, scan_videos, cleanup_database
+from scanner import (
+    _collect_media_and_existing,
+    scan_photos,
+    scan_videos,
+    cleanup_database,
+)
 from utils.images import cache_filename
 from scan_state import begin_scan, end_scan
 from schemas import ScanDuplicatesRequest
@@ -40,11 +45,14 @@ async def get_scan_status():
 
 @router.post("/scan")
 async def trigger_scan():
-    """手动触发扫描"""
+    """手动触发扫描。一次 os.walk 收集 images/videos，供 scan 复用。"""
     begin_scan()
     try:
-        n_img = await scan_photos(PHOTOS_DIR, CACHE_DIR)
-        n_vid = await scan_videos(PHOTOS_DIR, CACHE_DIR)
+        images, videos, _ = await asyncio.to_thread(
+            _collect_media_and_existing, PHOTOS_DIR.resolve()
+        )
+        n_img = await scan_photos(PHOTOS_DIR, CACHE_DIR, images)
+        n_vid = await scan_videos(PHOTOS_DIR, CACHE_DIR, videos)
         return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
     finally:
         end_scan()

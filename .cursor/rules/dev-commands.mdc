@@ -103,3 +103,4 @@ docker compose logs -f
 | `DB_MAX_OVERFLOW` | `20` | 连接池最大溢出，百万级建议 40 |
 | `TZ` | `Asia/Shanghai` | 时区 |
 | `PUID` / `PGID` | `1000` | 容器内用户 UID/GID |
+| `SKIP_FULL_SCAN_ON_STARTUP` | - | 设为 `1` 或 `true` 时，启动时仅做 DB 校验（移除幽灵记录），不执行 os.walk 全量扫描，适合「几乎无新增文件」的日常使用 |

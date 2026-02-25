@@ -47,6 +47,11 @@ MAX_UPLOAD_TOTAL_SIZE = _parse_size(_MAX_TOTAL, 500 * 1024 * 1024)
 ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "").strip()
 SESSION_TOKEN = secrets.token_hex(32) if ACCESS_PASSWORD else ""
 
+# 启动时跳过全量 os.walk 扫描，仅做 DB 校验（移除已删除文件的幽灵记录）
+# 适用于「几乎无新增文件」的日常使用，可显著加快启动
+_SKIP_FULL_SCAN = os.environ.get("SKIP_FULL_SCAN_ON_STARTUP", "").strip().lower()
+SKIP_FULL_SCAN_ON_STARTUP = _SKIP_FULL_SCAN in ("1", "true", "yes")
+
 
 def get_version() -> str:
     """从 pyproject.toml 读取版本号"""

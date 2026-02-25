@@ -196,10 +196,16 @@ def generate_thumbnail_for_media(full_path: Path, cache_path: Path, is_video: bo
     return _generate_thumbnail(full_path, cache_path)
 
 
-def _collect_media_files(photos_dir: Path) -> tuple[list[Path], list[Path]]:
-    """一次 os.walk 遍历收集图片和视频路径，避免多次 rglob 重复遍历"""
+def _collect_media_and_existing(photos_dir: Path) -> tuple[list[Path], list[Path], set[str]]:
+    """
+    一次 os.walk 遍历收集图片、视频路径及存在的媒体相对路径，
+    供 cleanup_database、scan_photos、scan_videos 复用，避免多次磁盘遍历。
+    返回 (images, videos, existing_rel_paths)。
+    """
+
     images: list[Path] = []
     videos: list[Path] = []
+    existing_rel_paths: set[str] = set()
     for root, dirs, files in os.walk(photos_dir):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for f in files:
@@ -207,22 +213,11 @@ def _collect_media_files(photos_dir: Path) -> tuple[list[Path], list[Path]]:
             ext = p.suffix.lower()
             if ext in IMAGE_EXTENSIONS:
                 images.append(p)
+                existing_rel_paths.add(_relative_path(photos_dir, p))
             elif ext in VIDEO_EXTENSIONS:
                 videos.append(p)
-    return images, videos
-
-
-def _collect_existing_rel_paths(photos_dir: Path) -> set[str]:
-    """一次 os.walk 收集所有存在的媒体文件相对路径，用于 cleanup 替代 N 次 exists()"""
-    existing: set[str] = set()
-    for root, dirs, files in os.walk(photos_dir):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for f in files:
-            p = Path(root) / f
-            ext = p.suffix.lower()
-            if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
-                existing.add(_relative_path(photos_dir, p))
-    return existing
+                existing_rel_paths.add(_relative_path(photos_dir, p))
+    return images, videos, existing_rel_paths
 
 
 def _process_single_image_sync(
@@ -275,11 +270,14 @@ def _process_single_video_sync(
         return None
 
 
-async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
+async def scan_photos(
+    photos_dir: Path, cache_dir: Path, image_files: list[Path] | None = None
+) -> int:
     """
     异步扫描 photos 目录，生成缩略图并写入数据库。
     返回新扫描的图片数量。
     使用 ProcessPoolExecutor 多进程并行生成缩略图，充分利用多核。
+    若传入 image_files 则复用预收集结果，避免重复 os.walk。
     """
     photos_dir = photos_dir.resolve()
     cache_dir = cache_dir.resolve()
@@ -290,7 +288,10 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
     DB_BATCH_SIZE = 50  # 每 50 张提交一次，边扫边可见
 
     async with async_session_factory() as session:
-        image_files, _ = await asyncio.to_thread(_collect_media_files, photos_dir)
+        if image_files is None:
+            image_files, _, _ = await asyncio.to_thread(
+                _collect_media_and_existing, photos_dir
+            )
         total_files = len(image_files)
         print(f"[scan] 发现 {total_files} 个图片文件", flush=True)
 
@@ -427,17 +428,23 @@ async def scan_photos(photos_dir: Path, cache_dir: Path) -> int:
     return count
 
 
-async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
+async def scan_videos(
+    photos_dir: Path, cache_dir: Path, video_files: list[Path] | None = None
+) -> int:
     """
     异步扫描 photos 目录中的视频文件，生成缩略图并写入数据库。
     返回新扫描的视频数量。
     使用 ProcessPoolExecutor 多进程并行处理视频（ffprobe/ffmpeg），充分利用多核。
+    若传入 video_files 则复用预收集结果，避免重复 os.walk。
     """
     photos_dir = photos_dir.resolve()
     cache_dir = cache_dir.resolve()
     count = 0
 
-    _, video_files = await asyncio.to_thread(_collect_media_files, photos_dir)
+    if video_files is None:
+        _, video_files, _ = await asyncio.to_thread(
+            _collect_media_and_existing, photos_dir
+        )
     if not video_files:
         return 0
 
@@ -570,6 +577,89 @@ async def scan_videos(photos_dir: Path, cache_dir: Path) -> int:
     return count
 
 
+async def run_db_only_validation(photos_dir: Path, cache_dir: Path) -> dict:
+    """
+    仅 DB 校验：不执行 os.walk，遍历数据库记录检查原图是否存在。
+    若原图已删除则移除幽灵记录及对应缓存。适用于 SKIP_FULL_SCAN_ON_STARTUP 场景。
+    返回 {"stale_removed": int}，与 run_full_scan 部分字段兼容。
+    """
+    photos_dir = photos_dir.resolve()
+    cache_dir = cache_dir.resolve()
+    stale_removed = 0
+
+    print("[scan] SKIP_FULL_SCAN 模式：仅做 DB 校验，不遍历磁盘", flush=True)
+
+    async with async_session_factory() as session:
+        last_id = 0
+        total_checked = 0
+        while True:
+            stmt = (
+                select(Image)
+                .where(Image.id > last_id)
+                .order_by(Image.id)
+                .limit(_CLEANUP_BATCH_SIZE)
+            )
+            result = await session.execute(stmt)
+            batch = list(result.scalars().all())
+            if not batch:
+                break
+            total_checked += len(batch)
+            if total_checked == len(batch):
+                print(f"[scan] 数据库共约 {len(batch)}+ 条记录，校验原图是否存在...", flush=True)
+
+            batch_count = 0
+            for img in batch:
+                full_path = photos_dir / img.relative_path
+                if not full_path.exists():
+                    cache_name = cache_filename(img.relative_path)
+                    cache_path = cache_dir / cache_name
+                    if cache_path.exists():
+                        cache_path.unlink(missing_ok=True)
+                    await session.delete(img)
+                    stale_removed += 1
+                    batch_count += 1
+                    if batch_count >= 100:
+                        await session.commit()
+                        batch_count = 0
+                last_id = img.id or last_id
+
+            if batch_count > 0:
+                await session.commit()
+            await asyncio.sleep(0)
+
+        if stale_removed:
+            print(f"[scan] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
+
+    path_count_expired = cleanup_expired_path_count_cache()
+    if path_count_expired:
+        print(f"[scan] 清理 {path_count_expired} 条过期 path_count_cache", flush=True)
+
+    print("[scan] DB 校验完成", flush=True)
+    return {"stale_removed": stale_removed}
+
+
+async def run_full_scan(photos_dir: Path, cache_dir: Path) -> dict:
+    """
+    完整扫描：一次 os.walk 遍历，依次执行 cleanup + scan_photos + scan_videos，
+    消除 3 次独立遍历，供启动与手动「完整同步」使用。
+    返回 {"stale_removed": int, "orphan_cache_removed": int, "cache_regenerated": int, "images_added": int, "videos_added": int}
+    """
+    photos_dir = photos_dir.resolve()
+    images, videos, existing_rel_paths = await asyncio.to_thread(
+        _collect_media_and_existing, photos_dir
+    )
+    cleanup_result = await cleanup_database(
+        photos_dir, cache_dir, existing_rel_paths
+    )
+    n_img = await scan_photos(photos_dir, cache_dir, images)
+    n_vid = await scan_videos(photos_dir, cache_dir, videos)
+    return {
+        **cleanup_result,
+        "images_added": n_img,
+        "videos_added": n_vid,
+    }
+
+
 def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
     """根据参数重新生成单个缩略图，供多进程调用（需为模块级函数以便 pickle）"""
     photo_path, cache_path, is_video = args
@@ -581,7 +671,9 @@ def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
 _CLEANUP_BATCH_SIZE = 5000  # 分批处理，避免百万级全表加载 OOM
 
 
-async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
+async def cleanup_database(
+    photos_dir: Path, cache_dir: Path, existing_rel_paths: set[str] | None = None
+) -> dict:
     """
     数据库清理同步，处理三种不一致：
     1. 幽灵记录：原图已被外部删除 → 移除数据库记录 + 对应缓存
@@ -589,6 +681,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
     3. 缺失缓存：数据库有记录但缩略图丢失 → 重新生成
 
     使用分批处理，支持百万级规模，避免全表加载 OOM。
+    若传入 existing_rel_paths 则复用预收集结果，避免重复 os.walk。
     返回 {"stale_removed": int, "orphan_cache_removed": int, "cache_regenerated": int}
     """
     photos_dir = photos_dir.resolve()
@@ -600,8 +693,10 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path) -> dict:
 
     print("[cleanup] 开始数据库清理...", flush=True)
 
-    # 一次 os.walk 收集存在的媒体文件相对路径，替代 N 次 photo_path.exists()
-    existing_rel_paths = await asyncio.to_thread(_collect_existing_rel_paths, photos_dir)
+    if existing_rel_paths is None:
+        _, _, existing_rel_paths = await asyncio.to_thread(
+            _collect_media_and_existing, photos_dir
+        )
 
     # ── 第 1 步：清除幽灵记录（分批加载，避免 OOM） ──
     valid_cache_names: set[str] = set()

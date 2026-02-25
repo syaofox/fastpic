@@ -12,7 +12,14 @@ from sqlmodel import select
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR, STATIC_DIR, PER_PAGE, APP_VERSION
+from config import (
+    PHOTOS_DIR,
+    CACHE_DIR,
+    STATIC_DIR,
+    PER_PAGE,
+    APP_VERSION,
+    SKIP_FULL_SCAN_ON_STARTUP,
+)
 
 # favicon 启动时检查一次，避免每次请求 stat
 _favicon_path = STATIC_DIR / "favicon.ico"
@@ -26,7 +33,7 @@ from models import (
     async_session_factory,
     sync_engine,
 )
-from scanner import scan_photos, scan_videos, cleanup_database
+from scanner import run_full_scan, run_db_only_validation
 from scan_state import begin_scan, end_scan
 from watcher import start_watcher
 from app_common import templates
@@ -53,13 +60,17 @@ from utils.query_builder import (
 
 
 async def _background_scan():
-    """后台扫描包装：先清理再扫描，捕获并打印异常。扫描完成后预热 folder_tree 缓存。"""
+    """后台扫描包装：SKIP_FULL_SCAN 时仅做 DB 校验，否则一次 os.walk 完成 cleanup + scan。扫描完成后预热 folder_tree 缓存。"""
     begin_scan()
     try:
-        await cleanup_database(PHOTOS_DIR, CACHE_DIR)
-        n_img = await scan_photos(PHOTOS_DIR, CACHE_DIR)
-        n_vid = await scan_videos(PHOTOS_DIR, CACHE_DIR)
-        print(f"[scan] 扫描完成，新增 {n_img} 张图片、{n_vid} 个视频")
+        if SKIP_FULL_SCAN_ON_STARTUP:
+            result = await run_db_only_validation(PHOTOS_DIR, CACHE_DIR)
+            print(f"[scan] DB 校验完成，清除 {result['stale_removed']} 条幽灵记录")
+        else:
+            result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+            print(
+                f"[scan] 扫描完成，新增 {result['images_added']} 张图片、{result['videos_added']} 个视频"
+            )
     except Exception as e:
         import traceback
         print(f"[scan] 扫描失败: {e}")
