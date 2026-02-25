@@ -3,6 +3,7 @@ import asyncio
 import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Depends
 from fastapi.responses import FileResponse
@@ -398,7 +399,7 @@ async def api_folder_images(
     if truncated:
         rows = rows[:_FOLDER_IMAGES_MAX]
     return {
-        "urls": ["/photos/" + r.relative_path for r in rows],
+        "urls": ["/photos/" + "/".join(quote(p, safe="") for p in (r.relative_path or "").split("/")) for r in rows],
         "ids": [r.id for r in rows],
         "media_types": [getattr(r, "media_type", "image") for r in rows],
         "truncated": truncated,

@@ -275,9 +275,9 @@
         </div>
         <!-- 选中遮罩 -->
         <div class="select-overlay hidden absolute inset-0 bg-blue-500/10 z-[5] pointer-events-none rounded-lg ring-2 ring-blue-500"></div>
-        <a href="/photos/{{ img.relative_path }}"
+        <a href="/photos/{{ img.relative_path|urlencode_path_segments }}"
            class="{{ 'flex flex-row items-center gap-3 p-2' if mode == 'list' else 'block' }} image-nav-link"
-           onclick="event.preventDefault(); if(!window._selectMode) { (window.openModalFromGallery || openModal)('/photos/{{ img.relative_path }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}'{{ i.media_type|default('image') }}'{% if not loop.last %},{% endif %}{% endfor %}]); }">
+           onclick="event.preventDefault(); if(!window._selectMode) { (window.openModalFromGallery || openModal)('/photos/{{ img.relative_path|urlencode_path_segments }}', {{ loop.index0 }}, [{% for i in images %}'/photos/{{ i.relative_path|urlencode_path_segments }}'{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}{{ i.id }}{% if not loop.last %},{% endif %}{% endfor %}], [{% for i in images %}'{{ i.media_type|default('image') }}'{% if not loop.last %},{% endif %}{% endfor %}]); }">
             <div class="overflow-hidden bg-slate-100 {{ 'w-20 h-20 flex-shrink-0 rounded' if mode == 'list' else 'aspect-square' if mode == 'folder' else '' }} relative"
                  {% if mode == 'waterfall' and img.width and img.height %}style="aspect-ratio: {{ img.width }}/{{ img.height }};"{% elif mode == 'waterfall' %}style="aspect-ratio: 1;"{% endif %}>
                 <img src="/cache/{{ img.relative_path|cache_key }}"

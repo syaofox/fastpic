@@ -905,7 +905,7 @@ function downloadCurrentImage() {
     } else {
         var url = modalImages[modalIndex];
         if (url && url.indexOf('/photos/') === 0) {
-            var rel = url.slice('/photos/'.length);
+            var rel = decodeURIComponent(url.slice('/photos/'.length).split('?')[0]);
             window.location.href = '/api/download/image?relative_path=' + encodeURIComponent(rel);
         }
     }

@@ -10,6 +10,9 @@ from utils.images import cache_filename
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 templates.env.filters["cache_key"] = cache_filename
 templates.env.filters["urlencode_path"] = lambda s: quote(s or "", safe="")
+templates.env.filters["urlencode_path_segments"] = (
+    lambda s: "/".join(quote(part, safe="") for part in (s or "").split("/"))
+)
 
 
 def _format_filesize(size: int) -> str:
