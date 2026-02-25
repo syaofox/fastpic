@@ -110,7 +110,7 @@
                 </div>
             </div>
             <div id="gallery-container"
-                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1&cols=4"
+                 hx-get="/gallery?path={{ (request.query_params.get('path') or '')|urlencode_path }}&search=&mode={{ request.query_params.get('mode', 'folder') }}&sort_by={{ request.query_params.get('sort_by', 'modified_at') }}&sort_order={{ request.query_params.get('sort_order', 'desc') }}&page=1&cols=4{% if not (request.query_params.get('path') or '') %}&defer_subfolders=1{% endif %}"
                  hx-trigger="load"
                  hx-swap="innerHTML"
                  hx-include="#cols-input, #sort-by-input, #sort-order-input">

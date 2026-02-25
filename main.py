@@ -182,6 +182,63 @@ async def sidebar_folder_tree(request: Request, session: AsyncSession = Depends(
     )
 
 
+@app.get("/api/gallery-subfolders")
+async def api_gallery_subfolders(
+    request: Request,
+    path: str = "",
+    mode: str = "folder",
+    sort_by: str = "modified_at",
+    sort_order: str = "desc",
+    cols: int = 4,
+    filter_filename: str = "",
+    filter_size_min: str = "",
+    filter_size_max: str = "",
+    filter_date_from: str = "",
+    filter_date_to: str = "",
+    filter_tag: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """返回子文件夹卡片 HTML 片段，供 defer_subfolders 占位符按需加载。"""
+    path = normalize_path(path, allow_empty=True) or ""
+    valid_modes = ("folder", "list", "waterfall")
+    mode = mode if mode in valid_modes else "folder"
+    parsed = parse_filter_params(
+        filter_filename, filter_size_min, filter_size_max,
+        filter_date_from, filter_date_to, filter_tag,
+    )
+    _, pf, has_filters = apply_image_filters(
+        select(Image), path, "", mode, parsed
+    )
+    if path == "":
+        _, _, folder_counts = await get_folder_tree_cached(
+            PHOTOS_DIR, session=session
+        )
+        subfolders = await get_root_subfolders_from_counts(folder_counts, session)
+    else:
+        async with async_session_factory() as s:
+            subfolders = await get_subfolders(
+                s, PHOTOS_DIR, path, pf, sort_by, sort_order
+            )
+    return templates.TemplateResponse(
+        "partials/gallery_subfolders.html",
+        {
+            "request": request,
+            "subfolders": subfolders,
+            "path": path,
+            "mode": mode,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+            "cols": cols,
+            "filter_filename": filter_filename,
+            "filter_size_min": filter_size_min,
+            "filter_size_max": filter_size_max,
+            "filter_date_from": filter_date_from,
+            "filter_date_to": filter_date_to,
+            "filter_tag": filter_tag,
+        },
+    )
+
+
 def _parse_cursor(cursor: str, sort_by: str) -> tuple[float | str | None, int | None]:
     """解析 keyset 游标，返回 (sort_value, id)。支持 modified_at/file_size 数值或字符串。"""
     if not cursor or "_" not in cursor:
@@ -216,6 +273,7 @@ async def gallery(
     filter_date_from: str = "",
     filter_date_to: str = "",
     filter_tag: str = "",
+    defer_subfolders: bool = False,
     session: AsyncSession = Depends(get_async_session),
 ):
     """返回图片网格 HTML 片段（供 HTMX 调用）。支持 cursor 游标分页，百万级时避免 offset 性能问题。"""
@@ -267,6 +325,9 @@ async def gallery(
         and not has_filters
         and not parsed["filter_tag"]
     )
+    if defer_subfolders and path == "" and page == 1:
+        need_count = False
+        need_subfolders = False
 
     async def _run_count():
         cached = get_cached_count(path, mode)
@@ -354,6 +415,7 @@ async def gallery(
             "total": total,
             "append": page > 1,
             "subfolders": subfolders,
+            "defer_subfolders": defer_subfolders,
             "breadcrumb_parts": breadcrumb_parts,
             "filter_filename": filter_filename,
             "filter_size_min": filter_size_min,

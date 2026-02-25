@@ -113,6 +113,38 @@ def test_gallery_endpoint_returns_html():
     assert "gallery-container" in body or "current-path-marker" in body, "响应应包含 gallery 相关标记"
 
 
+def test_defer_subfolders_in_main():
+    """main.py gallery 路由支持 defer_subfolders 参数"""
+    import inspect
+    from main import gallery
+    sig = inspect.signature(gallery)
+    assert "defer_subfolders" in sig.parameters, "gallery 应有 defer_subfolders 参数"
+
+
+def test_build_gallery_url_defer_subfolders():
+    """utils.js buildGalleryUrl 在 path 空且 page=1 时加 defer_subfolders=1"""
+    js_path = Path(__file__).resolve().parent.parent / "static" / "js" / "utils.js"
+    content = js_path.read_text(encoding="utf-8")
+    assert "defer_subfolders" in content, "buildGalleryUrl 应支持 defer_subfolders"
+    assert "normalizedPath === ''" in content or "path === ''" in content or "path == ''" in content, "应有 path 空判断"
+
+
+def test_index_html_defer_param():
+    """index.html 首屏 hx-get 在 path 空时加 defer_subfolders=1"""
+    html_path = Path(__file__).resolve().parent.parent / "templates" / "index.html"
+    content = html_path.read_text(encoding="utf-8")
+    assert "defer_subfolders" in content, "index.html 应有 defer_subfolders"
+    assert "hx-get" in content and "/gallery" in content, "应有 gallery 的 hx-get"
+
+
+def test_gallery_subfolders_partial_exists():
+    """partials/gallery_subfolders.html 存在"""
+    partial_path = Path(__file__).resolve().parent.parent / "templates" / "partials" / "gallery_subfolders.html"
+    assert partial_path.exists(), "gallery_subfolders.html 应存在"
+    content = partial_path.read_text(encoding="utf-8")
+    assert "subfolders" in content, "partial 应渲染 subfolders"
+
+
 def run_tests():
     tests = [
         ("path_count_cache TTL", test_path_count_cache_ttl),
@@ -123,6 +155,10 @@ def run_tests():
         ("gallery.js 缓存集成", test_gallery_js_cache_integration),
         ("invalidate 清空子文件夹缓存", test_invalidate_folder_tree_clears_subfolder_cache),
         ("gallery 端点返回 HTML", test_gallery_endpoint_returns_html),
+        ("defer_subfolders main.py", test_defer_subfolders_in_main),
+        ("defer_subfolders buildGalleryUrl", test_build_gallery_url_defer_subfolders),
+        ("defer_subfolders index.html", test_index_html_defer_param),
+        ("gallery_subfolders partial", test_gallery_subfolders_partial_exists),
     ]
     passed = 0
     failed = []

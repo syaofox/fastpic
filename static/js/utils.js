@@ -39,13 +39,19 @@ function buildGalleryUrl(path, opts) {
     var sortOrder = opts.sortOrder !== undefined ? opts.sortOrder : ((document.getElementById('sort-order-input') && document.getElementById('sort-order-input').value) || 'desc');
     var cols = opts.cols !== undefined ? opts.cols : ((document.getElementById('cols-input') && document.getElementById('cols-input').value) || '4');
     var filters = opts.filters !== undefined ? opts.filters : ((typeof window.getFilterState === 'function') ? window.getFilterState() : {});
-    return '/gallery?path=' + encodeURIComponent(path || '') + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=1&cols=' + encodeURIComponent(cols) +
+    var page = opts.page !== undefined ? opts.page : 1;
+    var normalizedPath = path || '';
+    var url = '/gallery?path=' + encodeURIComponent(normalizedPath) + '&search=&mode=' + mode + '&sort_by=' + sortBy + '&sort_order=' + sortOrder + '&page=' + page + '&cols=' + encodeURIComponent(cols) +
         '&filter_filename=' + encodeURIComponent(filters.filter_filename || '') +
         '&filter_size_min=' + encodeURIComponent(filters.filter_size_min || '') +
         '&filter_size_max=' + encodeURIComponent(filters.filter_size_max || '') +
         '&filter_date_from=' + encodeURIComponent(filters.filter_date_from || '') +
         '&filter_date_to=' + encodeURIComponent(filters.filter_date_to || '') +
         '&filter_tag=' + encodeURIComponent(filters.filter_tag || '');
+    if (normalizedPath === '' && page === 1) {
+        url += '&defer_subfolders=1';
+    }
+    return url;
 }
 
 /** 从 location.search 解析 path 参数 */

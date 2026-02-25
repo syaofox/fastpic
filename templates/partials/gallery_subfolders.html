@@ -1,0 +1,64 @@
+{% from "macros/gallery_macros.html" import gallery_url_params %}
+{% for sub in subfolders|default([]) %}
+<div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-[border-color,box-shadow] bg-white cursor-pointer"
+     data-type="folder" data-folder-path="{{ sub.full_path }}"
+     onclick="window.handleItemClick(event, this)">
+    <!-- 选择复选框（选择模式下显示） -->
+    <div class="select-checkbox hidden absolute top-2 left-2 z-10">
+        <div class="w-6 h-6 rounded-full border-2 border-white bg-white/80 shadow flex items-center justify-center transition-colors
+                    item-unchecked:border-slate-300 item-checked:bg-blue-500 item-checked:border-blue-500">
+            <svg class="w-4 h-4 text-white check-icon hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        </div>
+    </div>
+    <!-- 选中遮罩 -->
+    <div class="select-overlay hidden absolute inset-0 bg-blue-500/10 z-[5] pointer-events-none rounded-lg ring-2 ring-blue-500"></div>
+    <a href="?path={{ sub.full_path|urlencode_path }}"
+       class="{{ 'flex flex-row items-center gap-3 p-2' if mode == 'list' else 'block' }} folder-nav-link"
+       hx-get="/gallery?{{ gallery_url_params(sub.full_path, '', mode, sort_by, sort_order, 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag) }}"
+       hx-target="#gallery-container"
+       hx-swap="innerHTML"
+       hx-indicator="#gallery-loading-indicator"
+       onclick="if(window._selectMode){event.stopPropagation();event.preventDefault();window.handleItemClick(event,this.closest('.selectable-item'));return false;}"
+       hx-on:click="if(!window._selectMode) document.querySelector('[name=path]').value = '{{ sub.full_path }}'">
+        {% if mode == 'list' %}
+        <div class="w-20 h-20 flex-shrink-0 rounded overflow-hidden bg-slate-100">
+            {% if sub.thumbnails %}
+            <img src="/cache/{{ sub.thumbnails[0]|cache_key }}"
+                 alt="文件夹 {{ sub.name }} 缩略图"
+                 class="w-full h-full object-cover"
+                 loading="lazy">
+            {% else %}
+            <div class="w-full h-full flex items-center justify-center text-slate-400">
+                <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            </div>
+            {% endif %}
+        </div>
+        <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+            <span class="text-sm font-medium text-slate-800 truncate group-hover:text-blue-600 transition-colors">{{ sub.name }}</span>
+            {% if sub.image_count > 0 %}
+            <span class="text-xs text-slate-500">{{ sub.image_count }} 张图片</span>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="aspect-square grid grid-cols-2 grid-rows-2 gap-0.5 p-0.5 bg-slate-100">
+            {% for i in range(4) %}
+            <div class="bg-slate-200 overflow-hidden">
+                {% if i < (sub.thumbnails|length) %}
+                <img src="/cache/{{ sub.thumbnails[i]|cache_key }}"
+                     alt="文件夹 {{ sub.name }} 缩略图"
+                     class="w-full h-full object-cover"
+                     loading="lazy">
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="px-2 py-1.5 flex items-center gap-1 min-w-0">
+            <span class="text-sm text-slate-700 truncate group-hover:text-blue-600 transition-colors">{{ sub.name }}</span>
+            {% if sub.image_count > 0 %}
+            <span class="text-xs text-slate-400 flex-shrink-0">{{ sub.image_count }}</span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </a>
+</div>
+{% endfor %}
