@@ -144,44 +144,6 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
     )
 
 
-@app.get("/api/folder-children")
-async def api_folder_children(
-    path: str = "",
-    session: AsyncSession = Depends(get_async_session),
-):
-    """按需加载深层子文件夹（超过 _FOLDER_TREE_MAX_DEPTH 时用）"""
-    from utils.folder_tree import get_subfolders, _FOLDER_TREE_MAX_DEPTH
-    from utils.path_utils import path_filter_for_prefix
-
-    path = normalize_path(path, allow_empty=True) or ""
-    path_depth = len(path.split("/")) if path else 0
-    if path_depth < _FOLDER_TREE_MAX_DEPTH:
-        return {"children": []}
-    pf = path_filter_for_prefix(Image.relative_path, path) if path else None
-    subfolders = await get_subfolders(
-        session, PHOTOS_DIR, path, pf, "filename", "asc"
-    )
-    return {
-        "children": [
-            {"path": s["full_path"], "name": s["name"], "image_count": s["image_count"]}
-            for s in subfolders
-        ],
-    }
-
-
-@app.get("/api/sidebar-folder-tree")
-async def sidebar_folder_tree(request: Request, session: AsyncSession = Depends(get_async_session)):
-    """返回侧栏文件夹树 HTML 片段"""
-    path = request.query_params.get("path", "")
-    folder_tree, nested_tree, folder_counts = await get_folder_tree_cached(
-        PHOTOS_DIR, session=session
-    )
-    return templates.TemplateResponse(
-        "partials/folder_tree.html",
-        {"request": request, "nested_tree": nested_tree, "folder_counts": folder_counts, "current_path": path},
-    )
-
-
 @app.get("/api/gallery-subfolders")
 async def api_gallery_subfolders(
     request: Request,

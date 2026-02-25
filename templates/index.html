@@ -31,19 +31,14 @@
 <!-- 移动端侧边栏遮罩（点击关闭，sm 及以上不显示） -->
 <div id="sidebar-overlay" class="hidden fixed inset-0 z-40 bg-black/40 md:hidden" onclick="toggleSidebar()" aria-hidden="true"></div>
 <div class="flex h-screen" id="layout">
-    <!-- 左侧文件夹树（可调节宽度，默认隐藏；移动端全屏遮罩+85vw） -->
+    <!-- 左侧侧边栏（可调节宽度，默认隐藏；移动端全屏遮罩+85vw） -->
     <aside id="sidebar" class="bg-white border-r border-slate-200 flex-shrink-0 flex flex-col hidden relative z-50" style="width: var(--sidebar-width, 220px); min-width: 160px; max-width: 800px;">
         <div class="p-4 flex-1 overflow-y-auto">
             <div class="flex items-center justify-between mb-3">
-                <h2 class="font-semibold text-slate-800">全部文件夹</h2>
-                <button type="button" class="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="隐藏文件夹树" title="隐藏文件夹树" onclick="toggleSidebar()">
+                <h2 class="font-semibold text-slate-800">标签</h2>
+                <button type="button" class="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="隐藏侧边栏" title="隐藏侧边栏" onclick="toggleSidebar()">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
                 </button>
-            </div>
-            <div id="folder-tree" class="space-y-0"
-                 hx-get="/api/sidebar-folder-tree?path={{ (request.query_params.get('path') or '')|urlencode_path }}"
-                 hx-swap="innerHTML">
-                <div class="flex justify-center py-4 text-slate-500 text-sm">加载文件夹树...</div>
             </div>
             {% include "partials/tag_list.html" with context %}
         </div>
@@ -90,7 +85,7 @@
             <div class="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3">
                 <button type="button" id="sidebar-toggle-btn"
                         class="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors flex-shrink-0"
-                        title="显示/隐藏文件夹树"
+                        title="显示/隐藏侧边栏"
                         onclick="toggleSidebar()">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
                 </button>

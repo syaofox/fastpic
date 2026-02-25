@@ -70,10 +70,6 @@ def build_nested_tree(flat_folders: list[list[str]]) -> dict:
     return root
 
 
-async def _empty_list_coro() -> list:
-    return []
-
-
 async def _get_user_thumbnails(session, folder_paths: list[str], limit: int = 4) -> dict[str, list[str]]:
     """获取用户指定的文件夹缩略图，按 display_order 排序，每文件夹最多 limit 张。"""
     if not folder_paths:
@@ -125,13 +121,72 @@ async def _get_direct_layer_thumbnails(
     return out
 
 
+async def _get_direct_layer_thumbnails_batch(
+    session,
+    folder_paths: list[str],
+    user_thumbs: dict[str, list[str]],
+    limit_per_folder: int = 4,
+) -> dict[str, list[str]]:
+    """批量查询多文件夹的直接层缩略图，一次 SQL 替代 N 次 _get_direct_layer_thumbnails。
+    返回 {folder_path: [relative_path, ...]}，每文件夹最多 limit_per_folder 张（不含 user_thumbs）。"""
+    need_map: dict[str, int] = {}
+    for fp in folder_paths:
+        ut = user_thumbs.get(fp, [])
+        need = limit_per_folder - len(ut)
+        if need > 0:
+            need_map[fp] = need
+
+    if not need_map:
+        return {fp: [] for fp in folder_paths}
+
+    conditions = []
+    params: dict = {}
+    for i, fp in enumerate(need_map):
+        escaped = escape_like(fp)
+        like_prefix = f"{escaped}/%"
+        like_prefix_sub = f"{escaped}/%/%"
+        conditions.append(
+            f"(relative_path LIKE :like_prefix_{i} ESCAPE '{LIKE_ESCAPE}' "
+            f"AND relative_path NOT LIKE :like_prefix_sub_{i} ESCAPE '{LIKE_ESCAPE}')"
+        )
+        params[f"like_prefix_{i}"] = like_prefix
+        params[f"like_prefix_sub_{i}"] = like_prefix_sub
+
+    total_limit = min(
+        sum(n + 50 for n in need_map.values()),
+        10000,
+    )
+    params["lim"] = total_limit
+    sql = text(
+        "SELECT relative_path FROM images "
+        f"WHERE {' OR '.join(conditions)} "
+        "ORDER BY modified_at DESC LIMIT :lim"
+    )
+    result = await session.execute(sql, params)
+    rows = result.fetchall()
+
+    exclude_sets = {fp: set(user_thumbs.get(fp, [])) for fp in need_map}
+    out: dict[str, list[str]] = {fp: [] for fp in folder_paths}
+    for row in rows:
+        rp = row[0]
+        folder = "/".join(rp.split("/")[:-1])
+        if folder not in need_map:
+            continue
+        if rp in exclude_sets.get(folder, set()):
+            continue
+        if len(out[folder]) >= need_map[folder]:
+            continue
+        out[folder].append(rp)
+    return out
+
+
 async def get_root_subfolders_from_counts(
     folder_counts: dict[str, int],
     session,
     limit_thumbnails: int = 4,
 ) -> list[dict]:
     """从 folder_counts 提取根路径下的直接子文件夹，避免 path='' 时 get_subfolders 的全表扫描。
-    使用 _get_direct_layer_thumbnails 获取每层缩略图（索引友好）。
+    使用 _get_direct_layer_thumbnails_batch 批量获取每层缩略图（索引友好）。
     返回格式与 get_subfolders 兼容：[{name, full_path, thumbnails, image_count}, ...]，按名称自然排序。"""
     result: list[dict] = []
     for path_key, count in folder_counts.items():
@@ -146,21 +201,13 @@ async def get_root_subfolders_from_counts(
     result.sort(key=lambda s: natural_sort_key(s["name"]))
     folder_paths = [sub["full_path"] for sub in result]
     user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=limit_thumbnails)
-    thumb_tasks = []
+    auto_thumbs = await _get_direct_layer_thumbnails_batch(
+        session, folder_paths, user_thumbs, limit_per_folder=limit_thumbnails
+    )
     for sub in result:
         fp = sub["full_path"]
         ut = user_thumbs.get(fp, [])
-        need = limit_thumbnails - len(ut)
-        thumb_tasks.append(
-            _get_direct_layer_thumbnails(session, fp, limit=need, exclude_paths=set(ut))
-            if need > 0
-            else _empty_list_coro()
-        )
-    auto_results = await asyncio.gather(*thumb_tasks)
-    for sub, auto_thumbs in zip(result, auto_results):
-        fp = sub["full_path"]
-        ut = user_thumbs.get(fp, [])
-        sub["thumbnails"] = (ut + list(auto_thumbs))[:limit_thumbnails]
+        sub["thumbnails"] = (ut + auto_thumbs.get(fp, []))[:limit_thumbnails]
     return result
 
 
@@ -365,21 +412,13 @@ async def get_subfolders(
 
     folder_paths = [sub["full_path"] for sub in subfolders]
     user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=4)
-    thumb_tasks = []
+    auto_thumbs = await _get_direct_layer_thumbnails_batch(
+        session, folder_paths, user_thumbs, limit_per_folder=4
+    )
     for sub in subfolders:
         fp = sub["full_path"]
         ut = user_thumbs.get(fp, [])
-        need = 4 - len(ut)
-        thumb_tasks.append(
-            _get_direct_layer_thumbnails(session, fp, limit=need, exclude_paths=set(ut))
-            if need > 0
-            else _empty_list_coro()
-        )
-    auto_results = await asyncio.gather(*thumb_tasks)
-    for sub, auto_thumbs in zip(subfolders, auto_results):
-        fp = sub["full_path"]
-        ut = user_thumbs.get(fp, [])
-        sub["thumbnails"] = (ut + list(auto_thumbs))[:4]
+        sub["thumbnails"] = (ut + auto_thumbs.get(fp, []))[:4]
 
     sort_col_map = {
         "filename": "_sort_key_filename",

@@ -38,7 +38,6 @@ alwaysApply: false
 - **隐藏 input**：index 顶栏有 `#path-input`、`#mode-input`、`#cols-input`、`#sort-by-input`、`#sort-order-input`，供 hx-include 或 JS 读取。
 - **状态标记**：`#current-path-marker` 上有 `data-path`、`data-mode`、`data-sort-by`、`data-sort-order`、`data-cols`、`data-total`、`data-filter-*`，供 JS 拼出正确的 `hx-get` URL。
 - **面包屑**：与 gallery.html 一致，用 `breadcrumb_parts` 循环，每段链接的 `hx-get` 带齐当前 mode/sort/filter 参数。
-- **文件夹树**：复用 `templates/partials/folder_tree.html` 的 macro `render_folder`；链接带 `hx-include="#mode-input, #sort-by-input, #sort-order-input, #cols-input"`，并同步 `document.querySelector('[name=path]').value`。文件夹树不传 filter 参数（导航时筛选不保留）。
 - **标签列表**：`partials/tag_list.html` 中标签链接带 `filter_tag` 参数，`hx-include` 含 mode/sort/cols。
 - **筛选**：筛选条件与 gallery 的 `filter_*` 参数对应；gallery 顶栏的筛选弹窗通过 JS 读取输入后调用 `window.refreshGallery()`，刷新时把 filter 参数写入 URL。
 - **扫描条**：base 已通过 `/api/scan-status` 轮询实现，新页面无需重复。
@@ -51,7 +50,7 @@ alwaysApply: false
 
 ## 常用 window 函数
 
-- 侧栏：`toggleSidebar`、`refreshSidebar`
+- 侧栏：`toggleSidebar`
 - 图库：`refreshGallery`、`rebuildWaterfall`、`syncGalleryGridCols`、`getFilterState`
 - 选择模式：`toggleSelectMode`、`toggleSelectAll`、`exitSelectMode`、`handleItemClick`、`getSelectedFolders`、`getSelectedImages`、`confirmDeleteSelected`、`downloadSelected`
 - 对话框：`showCreateFolderDialog`、`showUploadDialog`、`showMoveDialog`、`showRenameDialog`、`showRenameFolderDialog`、`showRenameImageDialog`、`showBatchRenameDialog`、`showMoveDialogForCurrentImage`

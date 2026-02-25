@@ -6,16 +6,6 @@
         return localStorage.getItem(SIDEBAR_VISIBLE_KEY) === 'true';
     }
 
-    function loadFolderTreeIfNeeded() {
-        var treeEl = document.getElementById('folder-tree');
-        if (!treeEl || treeEl.querySelector('.folder-link')) return;
-        var url = treeEl.getAttribute('hx-get');
-        if (!url) return;
-        if (typeof htmx !== 'undefined') {
-            htmx.ajax('GET', url, {target: '#folder-tree', swap: 'innerHTML'});
-        }
-    }
-
     function applySidebarState(visible) {
         const sidebar = document.getElementById('sidebar');
         const handle = document.getElementById('resize-handle');
@@ -27,7 +17,6 @@
             if (overlay) overlay.classList.remove('hidden');
             btn.classList.add('bg-blue-50', 'text-blue-600');
             btn.classList.remove('text-slate-500');
-            loadFolderTreeIfNeeded();
         } else {
             sidebar.classList.add('hidden');
             handle.classList.add('hidden');
@@ -156,12 +145,6 @@ function applyGalleryFromCache(html) {
     if (sortByInput) sortByInput.value = sortBy;
     var sortOrderInput = document.getElementById('sort-order-input');
     if (sortOrderInput) sortOrderInput.value = sortOrder;
-    document.querySelectorAll('#sidebar .folder-link').forEach(function(link) {
-        var isCurrent = link.getAttribute('data-path') === path;
-        link.classList.toggle('bg-blue-50', isCurrent);
-        link.classList.toggle('text-blue-600', isCurrent);
-        link.classList.toggle('hover:bg-slate-100', !isCurrent);
-    });
     if (marker && typeof window.getFilterState === 'function') {
         var filterState = window.getFilterState();
         filterState.filter_filename = marker.getAttribute('data-filter-filename') || '';
@@ -190,82 +173,6 @@ function applyGalleryFromCache(html) {
         applyGalleryFromCache(cached);
     }, true);
 })();
-
-function toggleFolder(btn) {
-    const node = btn.closest('.folder-node');
-    const children = node.querySelector(':scope > .folder-children');
-    if (!children) return;
-    const expanded = btn.getAttribute('data-expanded') === 'true';
-    const isLazy = btn.getAttribute('data-lazy') === 'true';
-    const path = btn.getAttribute('data-path') || '';
-    if (expanded) {
-        children.classList.add('hidden');
-        btn.querySelector('.chevron').classList.remove('-rotate-90');
-        btn.setAttribute('data-expanded', 'false');
-        btn.setAttribute('aria-label', '展开');
-    } else {
-        if (isLazy && (children.hasAttribute('data-lazy-placeholder') || children.hasAttribute('data-lazy-error'))) {
-            children.removeAttribute('data-lazy-error');
-            children.setAttribute('data-lazy-placeholder', 'true');
-            children.innerHTML = '<div class="flex items-center gap-2 py-2 px-3 text-slate-500 text-sm"><svg class="animate-spin w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>加载中...</div>';
-            children.classList.remove('hidden');
-            btn.querySelector('.chevron').classList.add('-rotate-90');
-            btn.setAttribute('data-expanded', 'true');
-            btn.setAttribute('aria-label', '折叠');
-            fetch('/api/folder-children?path=' + encodeURIComponent(path))
-                .then(r => r.json())
-                .then(function(data) {
-                    if (!data.children || data.children.length === 0) {
-                        children.innerHTML = '';
-                        children.removeAttribute('data-lazy-placeholder');
-                    } else {
-                        var html = '';
-                        var currentPath = (document.querySelector('[name=path]') || {}).value || '';
-                        data.children.forEach(function(c) {
-                            var isCur = c.path === currentPath;
-                            html += '<div class="folder-node" data-path="' + (c.path || '').replace(/"/g, '&quot;') + '">' +
-                                '<div class="flex items-center group" style="padding-left: ' + (12 + 4 * 16) + 'px;">' +
-                                '<span class="w-5 flex-shrink-0"></span>' +
-                                '<a href="?path=' + encodeURIComponent(c.path) + '" data-path="' + (c.path || '').replace(/"/g, '&quot;') + '" ' +
-                                'class="folder-link flex-1 min-w-0 flex items-center px-2 py-1.5 rounded transition-colors ' + (isCur ? 'bg-blue-50 text-blue-600' : 'hover:bg-slate-100 text-slate-700') + '" ' +
-                                'hx-get="/gallery?path=' + encodeURIComponent(c.path) + '&search=&page=1" hx-target="#gallery-container" hx-swap="innerHTML" ' +
-                                'hx-indicator="#gallery-loading-indicator" hx-include="#mode-input,#sort-by-input,#sort-order-input,#cols-input" ' +
-                                'hx-on:click="document.querySelector(\'[name=path]\').value = \'' + (c.path || '').replace(/'/g, "\\'") + '\'">' +
-                                '<span class="truncate">' + (c.name || '').replace(/</g, '&lt;') + '</span>' +
-                                (c.image_count > 0 ? '<span class="ml-auto text-xs ' + (isCur ? 'text-blue-400' : 'text-slate-400') + ' pl-2 flex-shrink-0">' + c.image_count + '</span>' : '') +
-                                '</a></div></div>';
-                        });
-                        children.innerHTML = html;
-                        children.removeAttribute('data-lazy-placeholder');
-                        if (typeof htmx !== 'undefined') htmx.process(children);
-                    }
-                })
-                .catch(function() {
-                    children.removeAttribute('data-lazy-placeholder');
-                    children.setAttribute('data-lazy-error', 'true');
-                    children.innerHTML = '<div class="py-2 px-3 text-slate-500 text-sm cursor-pointer hover:text-slate-700 hover:bg-slate-50 rounded" data-retry-folder-path="' + (path || '').replace(/"/g, '&quot;') + '" onclick="retryFolderExpand(this)">加载失败，点击重试</div>';
-                });
-            return;
-        }
-        children.classList.remove('hidden');
-        btn.querySelector('.chevron').classList.add('-rotate-90');
-        btn.setAttribute('data-expanded', 'true');
-        btn.setAttribute('aria-label', '折叠');
-    }
-}
-
-function retryFolderExpand(el) {
-    var path = el.getAttribute('data-retry-folder-path') || '';
-    var node = el.closest('.folder-node');
-    if (!node) return;
-    var btn = node.querySelector('.folder-toggle[data-lazy="true"]');
-    if (btn) {
-        btn.setAttribute('data-expanded', 'false');
-        btn.querySelector('.chevron').classList.remove('-rotate-90');
-        btn.setAttribute('aria-label', '展开');
-        toggleFolder(btn);
-    }
-}
 
 let modalImages = [];
 let modalImageIds = [];
@@ -1916,7 +1823,6 @@ document.addEventListener('keydown', function(e) {
                     var pathInput = document.querySelector('[name=path]');
                     if (pathInput) pathInput.value = newPath;
                     refreshGalleryFromModal();
-                    if (window.refreshSidebar) window.refreshSidebar();
                 } else {
                     errorEl.textContent = (data && (data.error || data.detail)) || '重命名失败';
                     errorEl.classList.remove('hidden');
@@ -2022,7 +1928,6 @@ document.addEventListener('keydown', function(e) {
                     overlay.remove();
                     if (window.exitSelectMode) window.exitSelectMode();
                     if (typeof refreshGalleryFromModal === 'function') refreshGalleryFromModal();
-                    if (window.refreshSidebar) window.refreshSidebar();
                     if (data.path && typeof modalImageIds !== 'undefined' && modalImageIds[modalIndex] === imageId) {
                         var newUrl = '/photos/' + (data.path || '').split('/').map(encodeURIComponent).join('/');
                         modalImages[modalIndex] = newUrl;
@@ -2356,7 +2261,6 @@ document.addEventListener('keydown', function(e) {
                 overlay.remove();
                 if (window.exitSelectMode) window.exitSelectMode();
                 if (typeof refreshGalleryFromModal === 'function') refreshGalleryFromModal();
-                if (window.refreshSidebar) window.refreshSidebar();
                 if (data && data.errors && data.errors.length) { alert('部分失败: ' + data.errors.join('; ')); }
             }).catch(function(err) {
                 confirmBtn.disabled = false;
@@ -3143,9 +3047,7 @@ document.addEventListener('keydown', function(e) {
         Promise.all(promises).then(function(results) {
             // 退出选择模式
             exitSelectMode();
-            // 刷新画廊和侧栏文件夹树
             refreshGallery();
-            if (folderPaths.length > 0) refreshSidebar();
         }).catch(function(err) {
             console.error('删除失败:', err);
             if (typeof showToast === 'function') showToast('删除失败，请查看控制台日志', 'error');
@@ -3351,7 +3253,6 @@ document.addEventListener('keydown', function(e) {
                     }
                     if (!fromModal) {
                         refreshGallery();
-                        if (folderPaths.length > 0) refreshSidebar();
                     }
                 } else {
                     if (allErrors.length > 0) {
@@ -3426,24 +3327,6 @@ document.addEventListener('keydown', function(e) {
         htmx.ajax('GET', buildGalleryUrl(path, opts), {target: '#gallery-container', swap: 'innerHTML'});
     }
     window.refreshGallery = refreshGallery;
-
-    function refreshSidebar() {
-        var marker = document.getElementById('current-path-marker');
-        var path = marker ? (marker.getAttribute('data-path') || '') : '';
-        var pathInput = document.querySelector('[name=path]');
-        if (pathInput) path = pathInput.value || path;
-        fetch('/api/sidebar-folder-tree?path=' + encodeURIComponent(path))
-            .then(function(r) { return r.text(); })
-            .then(function(html) {
-                var el = document.getElementById('folder-tree');
-                if (el) {
-                    el.innerHTML = html;
-                    if (typeof htmx !== 'undefined') htmx.process(el);
-                }
-            })
-            .catch(function(err) { console.error('刷新侧栏失败:', err); });
-    }
-    window.refreshSidebar = refreshSidebar;
 
     // HTMX 加载新内容后，如果处于选择模式，需要更新新内容的复选框状态
     document.body.addEventListener('htmx:afterSettle', function(ev) {
@@ -3807,12 +3690,6 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
         if (sortByInput) sortByInput.value = sortBy;
         const sortOrderInput = document.getElementById('sort-order-input');
         if (sortOrderInput) sortOrderInput.value = sortOrder;
-        document.querySelectorAll('#sidebar .folder-link').forEach(function(link) {
-            const isCurrent = link.getAttribute('data-path') === path;
-            link.classList.toggle('bg-blue-50', isCurrent);
-            link.classList.toggle('text-blue-600', isCurrent);
-            link.classList.toggle('hover:bg-slate-100', !isCurrent);
-        });
 
         // 同步筛选状态到全局
         if (marker && typeof window.getFilterState === 'function') {
