@@ -193,12 +193,12 @@
 {% endif %}
     {% if not append %}
     {% for sub in subfolders %}
-    <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white cursor-pointer"
+    <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-[border-color,box-shadow] bg-white cursor-pointer"
          data-type="folder" data-folder-path="{{ sub.full_path }}"
          onclick="window.handleItemClick(event, this)">
         <!-- 选择复选框（选择模式下显示） -->
         <div class="select-checkbox hidden absolute top-2 left-2 z-10">
-            <div class="w-6 h-6 rounded-full border-2 border-white bg-white/80 shadow flex items-center justify-center transition-all
+            <div class="w-6 h-6 rounded-full border-2 border-white bg-white/80 shadow flex items-center justify-center transition-colors
                         item-unchecked:border-slate-300 item-checked:bg-blue-500 item-checked:border-blue-500">
                 <svg class="w-4 h-4 text-white check-icon hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
             </div>
@@ -261,14 +261,14 @@
     {% endif %}
     {% for img in images %}
     {% set mt = img.media_type|default('image') %}
-    {% set is_first_screen = loop.index0 < (cols * 4) and not append %}
-    <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all bg-white cursor-pointer"
+    {% set is_first_screen = loop.index0 < (cols * 3) and not append %}
+    <div class="selectable-item relative group rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 hover:shadow-md transition-[border-color,box-shadow] bg-white cursor-pointer"
          data-type="{{ mt }}" data-image-id="{{ img.id }}" data-relative-path="{{ img.relative_path }}" data-media-type="{{ mt }}"
          {% if mode == 'waterfall' %}data-w="{{ img.width }}" data-h="{{ img.height }}"{% endif %}
          onclick="window.handleItemClick(event, this)">
         <!-- 选择复选框 -->
         <div class="select-checkbox hidden absolute top-2 left-2 z-10">
-            <div class="w-6 h-6 rounded-full border-2 border-white bg-white/80 shadow flex items-center justify-center transition-all
+            <div class="w-6 h-6 rounded-full border-2 border-white bg-white/80 shadow flex items-center justify-center transition-colors
                         item-unchecked:border-slate-300 item-checked:bg-blue-500 item-checked:border-blue-500">
                 <svg class="w-4 h-4 text-white check-icon hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
             </div>
@@ -325,7 +325,7 @@
 <div class="scroll-sentinel"
      style="height: 4px;"
      hx-get="/gallery?{{ gallery_url_params(path, search, mode, sort_by, sort_order, page + 1, cols, filter_filename, filter_size_min, filter_size_max, filter_date_from, filter_date_to, filter_tag, next_cursor) }}"
-     hx-trigger="intersect once root:#scroll-container threshold:0"
+     hx-trigger="intersect once root:#scroll-container threshold:0.2"
      hx-swap="beforeend"
      hx-target="#gallery-grid"
      hx-indicator="#infinite-scroll-loading">

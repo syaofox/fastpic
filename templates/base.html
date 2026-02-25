@@ -79,6 +79,11 @@
             flex: 1;
             min-width: 0;
         }
+        /* 瀑布流 item 视口外跳过渲染，提升长列表滚动帧率 */
+        #wf-row .wf-col .selectable-item {
+            content-visibility: auto;
+            contain-intrinsic-size: auto 200px;
+        }
 
         /* 文件夹模式：Flexbox 布局，避免 Grid 空单元格产生大面积空白 */
         #gallery-grid.gallery-flex {

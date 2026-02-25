@@ -128,6 +128,10 @@ let modalImages = [];
 let modalImageIds = [];
 let modalMediaTypes = [];
 let modalIndex = 0;
+/** 大图切换请求 ID，用于校验加载完成时是否仍为当前请求，避免快速滑动时显示过时图片 */
+var _modalRequestId = 0;
+/** 图片信息内存缓存，避免重复 fetch /api/image-info */
+var imageInfoCache = {};
 let slideshowTimer = null;
 let slideshowInterval = parseFloat(localStorage.getItem('fastpic_slideshow_interval') || '2');
 let slideshowMode = localStorage.getItem('fastpic_slideshow_mode') || 'loop';
@@ -149,13 +153,22 @@ function _inferMediaType(url) {
     return 'image';
 }
 
-/** 大图模式预加载前后各 N 张，提升左右切换流畅度（仅图片） */
-var MODAL_PRELOAD_COUNT = 2;
-function preloadModalImages(centerIndex) {
+/** 大图模式预加载前后各 N 张，提升左右切换流畅度（仅图片）
+ * 桌面端预加载更多（3-4 张），移动端保持 2 张；根据滑动方向动态增加该侧预加载数量 */
+function _getModalPreloadCounts(direction) {
+    var isDesktop = window.innerWidth >= 768 && !('ontouchstart' in window);
+    var base = isDesktop ? 6 : 4;
+    var extra = isDesktop ? 2 : 1;  // 滑动方向侧额外预加载
+    if (direction === 'prev') return { prev: base + extra, next: base };
+    if (direction === 'next') return { prev: base, next: base + extra };
+    return { prev: base, next: base };
+}
+function preloadModalImages(centerIndex, direction) {
     if (!modalImages.length) return;
     var types = modalMediaTypes.length ? modalMediaTypes : modalImages.map(_inferMediaType);
-    var start = Math.max(0, centerIndex - MODAL_PRELOAD_COUNT);
-    var end = Math.min(modalImages.length - 1, centerIndex + MODAL_PRELOAD_COUNT);
+    var counts = _getModalPreloadCounts(direction || null);
+    var start = Math.max(0, centerIndex - counts.prev);
+    var end = Math.min(modalImages.length - 1, centerIndex + counts.next);
     for (var i = start; i <= end; i++) {
         if (i === centerIndex) continue;
         if (types[i] === 'image') {
@@ -225,8 +238,8 @@ function _showModalContent(url, mediaType) {
     }
 }
 
-/** 预加载完成后显示，避免切换时白屏 */
-function _showModalContentWhenReady(url, mediaType, cb) {
+/** 预加载完成后显示，避免切换时白屏。requestId 用于校验：加载完成时若已切换则丢弃，避免过时图片覆盖 */
+function _showModalContentWhenReady(url, mediaType, requestId, cb) {
     var mt = mediaType || _inferMediaType(url);
     if (mt === 'video') {
         _showModalContent(url, mediaType);
@@ -234,6 +247,7 @@ function _showModalContentWhenReady(url, mediaType, cb) {
     } else {
         var img = new Image();
         img.onload = img.onerror = function() {
+            if (requestId !== _modalRequestId) return;
             _showModalContent(url, mediaType);
             if (cb) cb();
         };
@@ -413,6 +427,32 @@ function toggleModalToolbar() {
     applyModalToolbarState(collapsed);
 }
 
+/** 将 image-info 数据渲染到 content 元素 */
+function _renderImageInfoContent(content, data, imageId) {
+    var tags = data.tags || [];
+    var tagsHtml = '<div class="flex justify-between gap-3 mt-2 pt-2 border-t border-white/20"><span class="text-white/50 flex-shrink-0">标签</span><span class="flex flex-wrap gap-1 justify-end">';
+    tags.forEach(function(t) {
+        tagsHtml += '<span class="modal-tag-pill inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-red-500/60 cursor-pointer text-xs" data-tag="' + escapeAttr(t) + '" title="点击移除">#' + escapeHtml(t) + ' <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></span>';
+    });
+    tagsHtml += '</span></div>';
+    tagsHtml += '<div class="mt-2 relative"><input type="text" id="modal-add-tag-input" placeholder="添加标签（点击输入框选择或输入后按 Enter）..." class="w-full px-2 py-1 text-sm bg-white/10 border border-white/20 rounded text-white placeholder-white/50 focus:outline-none focus:ring-1 focus:ring-white/50" data-image-id="' + imageId + '"><div id="modal-tag-suggestions" class="hidden absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto bg-slate-800 rounded border border-white/10 text-sm shadow-lg"></div></div>';
+
+    content.innerHTML =
+        '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">完整路径</span><span class="break-all text-right">' + escapeHtml(data.full_path) + '</span></div>' +
+        '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件名</span><span class="break-all text-right">' + escapeHtml(data.filename) + '</span></div>' +
+        '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">分辨率</span><span>' + escapeHtml(data.resolution) + '</span></div>' +
+        '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件大小</span><span>' + escapeHtml(data.file_size) + '</span></div>' +
+        '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">修改时间</span><span>' + escapeHtml(data.modified_at) + '</span></div>' +
+        tagsHtml;
+
+    _bindModalTagHandlers(content, imageId);
+}
+
+/** 使指定图片的信息缓存失效（如标签修改后） */
+function invalidateImageInfoCache(imageId) {
+    if (imageId != null) delete imageInfoCache[imageId];
+}
+
 /** 加载并显示当前图片信息到左下角面板（不负责开关面板，仅填充内容并显示） */
 function showImageInfo() {
     var panel = document.getElementById('modal-image-info-panel');
@@ -426,6 +466,15 @@ function showImageInfo() {
         return;
     }
     var imageId = modalImageIds[modalIndex];
+
+    var cached = imageInfoCache[imageId];
+    if (cached) {
+        panel.classList.remove('hidden');
+        _updateImageInfoBtnState(true);
+        _renderImageInfoContent(content, cached, imageId);
+        return;
+    }
+
     content.innerHTML = '<div class="text-white/50">加载中...</div>';
     panel.classList.remove('hidden');
     _updateImageInfoBtnState(true);
@@ -439,23 +488,8 @@ function showImageInfo() {
             return res.json();
         })
         .then(function(data) {
-            var tags = data.tags || [];
-            var tagsHtml = '<div class="flex justify-between gap-3 mt-2 pt-2 border-t border-white/20"><span class="text-white/50 flex-shrink-0">标签</span><span class="flex flex-wrap gap-1 justify-end">';
-            tags.forEach(function(t) {
-                tagsHtml += '<span class="modal-tag-pill inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-red-500/60 cursor-pointer text-xs" data-tag="' + escapeAttr(t) + '" title="点击移除">#' + escapeHtml(t) + ' <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></span>';
-            });
-            tagsHtml += '</span></div>';
-            tagsHtml += '<div class="mt-2 relative"><input type="text" id="modal-add-tag-input" placeholder="添加标签（点击输入框选择或输入后按 Enter）..." class="w-full px-2 py-1 text-sm bg-white/10 border border-white/20 rounded text-white placeholder-white/50 focus:outline-none focus:ring-1 focus:ring-white/50" data-image-id="' + imageId + '"><div id="modal-tag-suggestions" class="hidden absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto bg-slate-800 rounded border border-white/10 text-sm shadow-lg"></div></div>';
-
-            content.innerHTML =
-                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">完整路径</span><span class="break-all text-right">' + escapeHtml(data.full_path) + '</span></div>' +
-                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件名</span><span class="break-all text-right">' + escapeHtml(data.filename) + '</span></div>' +
-                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">分辨率</span><span>' + escapeHtml(data.resolution) + '</span></div>' +
-                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">文件大小</span><span>' + escapeHtml(data.file_size) + '</span></div>' +
-                '<div class="flex justify-between gap-3"><span class="text-white/50 flex-shrink-0">修改时间</span><span>' + escapeHtml(data.modified_at) + '</span></div>' +
-                tagsHtml;
-
-            _bindModalTagHandlers(content, imageId);
+            imageInfoCache[imageId] = data;
+            _renderImageInfoContent(content, data, imageId);
         })
         .catch(function(err) {
             content.innerHTML = '<div class="text-red-300">' + escapeHtml(String(err)) + '</div>';
@@ -473,7 +507,10 @@ function _bindModalTagHandlers(container, imageId) {
             if (!tag) return;
             fetch('/api/images/' + imageId + '/tags/' + encodeURIComponent(tag), { method: 'DELETE' })
                 .then(function(r) { return r.json(); })
-                .then(function() { showImageInfo(); });
+                .then(function() {
+                    invalidateImageInfoCache(imageId);
+                    showImageInfo();
+                });
         }
     });
     var addInput = container.querySelector('#modal-add-tag-input');
@@ -495,6 +532,7 @@ function _bindModalTagHandlers(container, imageId) {
                     }).then(function(r) { return r.json(); }).then(function() {
                         addInput.value = '';
                         suggestions.classList.add('hidden');
+                        invalidateImageInfoCache(imageId);
                         showImageInfo();
                     });
                 });
@@ -536,6 +574,7 @@ function _bindModalTagHandlers(container, imageId) {
                     }).then(function(r) { return r.json(); }).then(function() {
                         addInput.value = '';
                         if (suggestions) suggestions.classList.add('hidden');
+                        invalidateImageInfoCache(imageId);
                         showImageInfo();
                     });
                 }
@@ -565,10 +604,12 @@ function _bindModalTagHandlers(container, imageId) {
 function prevImage() {
     if (modalImages.length === 0) return;
     modalIndex = (modalIndex - 1 + modalImages.length) % modalImages.length;
-    _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
+    _modalRequestId++;
+    var reqId = _modalRequestId;
+    _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], reqId, function() {
         _updateModalImageCounter();
         refreshImageInfoIfVisible();
-        preloadModalImages(modalIndex);
+        preloadModalImages(modalIndex, 'prev');
     });
 }
 
@@ -597,20 +638,24 @@ function nextImage(fromSlideshow) {
         if (modalIndex === modalImages.length - 1) {
             showConfirm('已经是最后一张，是否从头开始？', '从头开始', function() {
                 modalIndex = 0;
-                _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
+                _modalRequestId++;
+                var reqId = _modalRequestId;
+                _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], reqId, function() {
                     _updateModalImageCounter();
                     refreshImageInfoIfVisible();
-                    preloadModalImages(modalIndex);
+                    preloadModalImages(modalIndex, 'next');
                 });
             });
             return false;
         }
         modalIndex = modalIndex + 1;
     }
-    _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], function() {
+    _modalRequestId++;
+    var reqId = _modalRequestId;
+    _showModalContentWhenReady(modalImages[modalIndex], modalMediaTypes[modalIndex], reqId, function() {
         _updateModalImageCounter();
         refreshImageInfoIfVisible();
-        preloadModalImages(modalIndex);
+        preloadModalImages(modalIndex, 'next');
     });
     return true;
 }
@@ -1313,14 +1358,27 @@ document.addEventListener('keydown', function(e) {
         const startX = e.clientX;
         const startWidth = sidebar.getBoundingClientRect().width;
 
+        let rafId = null;
+        let pendingWidth = null;
+
         function onMouseMove(e) {
-            const dx = e.clientX - startX;
-            setSidebarWidth(startWidth + dx);
+            pendingWidth = startWidth + (e.clientX - startX);
+            if (rafId === null) {
+                rafId = requestAnimationFrame(function() {
+                    setSidebarWidth(pendingWidth);
+                    rafId = null;
+                });
+            }
         }
 
-        function onMouseUp() {
+        function onMouseUp(e) {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+                setSidebarWidth(startWidth + (e.clientX - startX));
+            }
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
         }
@@ -1379,6 +1437,25 @@ document.addEventListener('keydown', function(e) {
         wfHeights[idx] += getItemHeight(item);
     }
 
+    /** 使用 DocumentFragment 批量 append 到各列，减少 reflow */
+    function placeItemsBatch(items) {
+        if (items.length === 0) return;
+        var fragments = [];
+        for (var i = 0; i < wfColumns.length; i++) {
+            fragments.push(document.createDocumentFragment());
+        }
+        items.forEach(function(item) {
+            var idx = getShortestCol();
+            fragments[idx].appendChild(item);
+            wfHeights[idx] += getItemHeight(item);
+        });
+        for (var j = 0; j < wfColumns.length; j++) {
+            if (fragments[j].childNodes.length > 0) {
+                wfColumns[j].appendChild(fragments[j]);
+            }
+        }
+    }
+
     function initWaterfall() {
         var grid = document.getElementById('gallery-grid');
         if (!grid) return;
@@ -1420,8 +1497,8 @@ document.addEventListener('keydown', function(e) {
             wfColumns.push(col);
         }
 
-        // 按最短列分配图片
-        items.forEach(function(item) { placeItem(item); });
+        // 使用 DocumentFragment 批量 append，减少 reflow
+        placeItemsBatch(items);
 
         // 哨兵放在 grid 最后（在列容器下方，确保滚动到底部才触发）
         if (sentinel) grid.appendChild(sentinel);
@@ -1450,11 +1527,9 @@ document.addEventListener('keydown', function(e) {
             }
         });
 
-        // 将新图片分配到最短列
-        newImages.forEach(function(item) {
-            item.remove();
-            placeItem(item);
-        });
+        // 从 grid 移除后，使用 DocumentFragment 批量分配到各列
+        newImages.forEach(function(item) { item.remove(); });
+        placeItemsBatch(newImages);
 
         // 只保留最新的哨兵，移除旧的
         if (sentinels.length > 1) {
@@ -1502,12 +1577,7 @@ document.addEventListener('keydown', function(e) {
     // 暴露给外部（缩略图大小改变时调用）
     window.rebuildWaterfall = rebuildWaterfall;
 
-    // 窗口 resize 时重建瀑布流（如横竖屏切换）
-    var wfResizeTimer;
-    window.addEventListener('resize', function() {
-        clearTimeout(wfResizeTimer);
-        wfResizeTimer = setTimeout(rebuildWaterfall, 150);
-    });
+    // resize 处理已统一到 initThumbnailSize 模块：cols 更新 + syncGalleryGridCols + rebuildWaterfall
 
     // 监听 HTMX 交换事件
     document.body.addEventListener('htmx:afterSettle', function(ev) {
@@ -1520,8 +1590,8 @@ document.addEventListener('keydown', function(e) {
                 initWaterfall();
             }
         } else if (ev.detail.target.id === 'gallery-grid' && wfInitialized && isWaterfallMode()) {
-            // 追加加载（无限滚动）
-            distributeNew();
+            // 追加加载（无限滚动），延迟到下一帧避免阻塞 HTMX 交换后的渲染
+            requestAnimationFrame(function() { distributeNew(); });
         } else if (ev.detail.target.id === 'gallery-grid' && !isWaterfallMode()) {
             // 文件夹模式追加加载：清理旧的滚动哨兵，只保留最新的
             var grid = document.getElementById('gallery-grid');

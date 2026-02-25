@@ -31,7 +31,7 @@ alwaysApply: false
 - **路径编码**：URL 中的路径/搜索词/标签用 `|urlencode_path`。
 - **首次加载**：容器内放「加载中...」或 `htmx-indicator`，用 `hx-trigger="load"` 触发首次请求。
 - **加载指示**：用 `hx-indicator="#gallery-loading-indicator"` 等指向对应元素，避免重复定义。
-- **无限滚动**：用 `scroll-sentinel` + `hx-trigger="intersect once root:#scroll-container threshold:0"` + `hx-swap="beforeend"` + `hx-target="#gallery-grid"`，分页加载时 `page` 递增。
+- **无限滚动**：用 `scroll-sentinel` + `hx-trigger="intersect once root:#scroll-container threshold:0.2"` + `hx-swap="beforeend"` + `hx-target="#gallery-grid"`，分页加载时 `page` 递增。
 
 ## 公共模式与复用
 
