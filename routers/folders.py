@@ -32,11 +32,9 @@ from utils.path_utils import normalize_path, path_filter_for_prefix, invalid_fil
 from utils.unique_path import unique_path
 from utils.images import delete_image_files
 from utils.folder_tree import (
-    get_folder_tree_cached,
     get_folder_counts_for_search,
     invalidate_folder_tree_cache,
     get_subfolders,
-    scan_all_dirs_for_search,
 )
 from utils.search import search_match
 from utils.hash_utils import compute_file_md5
@@ -722,12 +720,11 @@ async def search_dirs(
     limit: int = 20,
     session: AsyncSession = Depends(get_async_session),
 ):
-    """全局目录搜索（SQL 聚合 folder_counts，max_depth=10 支持更深目录）"""
+    """全局目录搜索（仅用 DB 的 folder_counts，空文件夹不参与搜索）"""
     q = (q or "").strip()
     if not q:
         return {"dirs": []}
     full_dir_counts = dict(await get_folder_counts_for_search(session))
-    await asyncio.to_thread(scan_all_dirs_for_search, PHOTOS_DIR, "", full_dir_counts)
     matched = []
     for dir_path, count in sorted(full_dir_counts.items()):
         if search_match(q, dir_path):
@@ -742,25 +739,14 @@ async def list_subdirs(
     path: str = "",
     session: AsyncSession = Depends(get_async_session),
 ):
-    """列出指定路径下的直接子文件夹"""
+    """列出指定路径下的直接子文件夹（使用 get_subfolders，避免 _scan_dirs）"""
     path = normalize_path(path, allow_empty=True) or ""
-    path_parts = path.split("/") if path else []
-    folder_tree, _, folder_counts = await get_folder_tree_cached(
-        PHOTOS_DIR, session=session
+    pf = path_filter_for_prefix(Image.relative_path, path) if path else None
+    subfolders = await get_subfolders(
+        session, PHOTOS_DIR, path, pf, sort_by="filename", sort_order="asc"
     )
-    depth = len(path_parts) + 1
-    subdirs: list[dict] = []
-    seen: set[str] = set()
-    for parts in folder_tree:
-        if len(parts) != depth:
-            continue
-        if path_parts and parts[: len(path_parts)] != path_parts:
-            continue
-        sub_path = "/".join(parts)
-        if sub_path in seen:
-            continue
-        seen.add(sub_path)
-        count = folder_counts.get(sub_path, 0)
-        subdirs.append({"path": sub_path, "name": parts[-1], "image_count": count})
-    subdirs.sort(key=lambda x: x["name"])
+    subdirs = [
+        {"path": s["full_path"], "name": s["name"], "image_count": s["image_count"]}
+        for s in subfolders
+    ]
     return {"dirs": subdirs, "parent": path}

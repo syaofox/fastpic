@@ -49,6 +49,7 @@ from utils.folder_tree import (
     get_folder_tree_cached,
     get_subfolders,
     get_root_subfolders_from_counts,
+    get_root_folder_counts_only,
     _FOLDER_TREE_MAX_DEPTH,
 )
 from utils.query_builder import (
@@ -172,9 +173,7 @@ async def api_gallery_subfolders(
         select(Image), path, "", mode, parsed
     )
     if path == "":
-        _, _, folder_counts = await get_folder_tree_cached(
-            PHOTOS_DIR, session=session
-        )
+        folder_counts = await get_root_folder_counts_only(session)
         subfolders = await get_root_subfolders_from_counts(folder_counts, session)
     else:
         async with async_session_factory() as s:
@@ -311,9 +310,7 @@ async def gallery(
         if not need_subfolders:
             return []
         if path == "":
-            _, _, folder_counts = await get_folder_tree_cached(
-                PHOTOS_DIR, session=session
-            )
+            folder_counts = await get_root_folder_counts_only(session)
             return await get_root_subfolders_from_counts(folder_counts, session)
         async with async_session_factory() as s:
             return await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)

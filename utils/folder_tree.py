@@ -217,6 +217,7 @@ _folder_tree_cache_lock = asyncio.Lock()
 
 _SUBFOLDER_CACHE_TTL = 90.0
 _SUBFOLDER_CACHE_MAX_SIZE = 50
+_SUBFOLDER_ITERDIR_THRESHOLD = 50  # DB 已有较多子文件夹时跳过 iterdir 补充空目录
 _subfolder_cache: dict[str, dict] = {}
 _subfolder_cache_lock = asyncio.Lock()
 
@@ -267,6 +268,18 @@ async def _get_folder_counts_from_sql(
         prefix, cnt = row[0], row[1]
         counts[prefix] = int(cnt)
     return counts
+
+
+async def get_root_folder_counts_only(session) -> dict[str, int]:
+    """仅获取根路径下直接子文件夹的图片数量，单条 SQL，用于首页 path='' 快速路径。
+    返回 dict[str, int]，如 {'2024': 1000, '2023': 500}，不含空字符串键。"""
+    sql = text(
+        "SELECT SUBSTRING_INDEX(relative_path, '/', 1) AS prefix, COUNT(*) AS cnt "
+        "FROM images WHERE relative_path LIKE '%/%' GROUP BY prefix"
+    )
+    result = await session.execute(sql)
+    rows = result.fetchall()
+    return {row[0]: int(row[1]) for row in rows}
 
 
 async def get_folder_counts_for_search(session) -> dict[str, int]:
@@ -387,7 +400,7 @@ async def get_subfolders(
 
     fs_dir = photos_dir / path if path else photos_dir
     db_names = {r[0] for r in agg_rows}
-    if fs_dir.is_dir():
+    if fs_dir.is_dir() and len(agg_rows) < _SUBFOLDER_ITERDIR_THRESHOLD:
         children = await asyncio.to_thread(
             lambda: [c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")]
         )
