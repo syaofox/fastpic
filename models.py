@@ -24,6 +24,7 @@ ASYNC_DATABASE_URL = f"mysql+aiomysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MY
 # 连接池：可通过环境变量调优，生产环境建议 pool_size=20, max_overflow=40
 _db_pool_size = int(os.environ.get("DB_POOL_SIZE", "10"))
 _db_max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+_db_pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "3600"))  # 1 小时，避免 MariaDB wait_timeout 关闭后复用
 
 # 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
 _NATURAL_PAD = 10
@@ -98,6 +99,7 @@ async_engine = create_async_engine(
     echo=False,
     pool_size=_db_pool_size,
     max_overflow=_db_max_overflow,
+    pool_recycle=_db_pool_recycle,
 )
 async_session_factory = async_sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
