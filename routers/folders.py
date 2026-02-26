@@ -94,6 +94,8 @@ async def move_images(
     except IntegrityError:
         await session.rollback()
         errors.append("路径冲突（可能与已有文件重复），请重试")
+    if moved > 0:
+        invalidate_folder_tree_cache()
     return {"moved": moved, "errors": errors}
 
 
@@ -243,7 +245,7 @@ async def rename_image(
     result = await session.execute(select(Image).where(Image.id == body.id))
     img = result.scalar_one_or_none()
     if not img:
-        return {"ok": False, "error": "图片不存在"}
+        return {"ok": False, "error": "媒体文件不存在"}
 
     src_path = PHOTOS_DIR / img.relative_path
     if not src_path.exists() or not src_path.is_file():

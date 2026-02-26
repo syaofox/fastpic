@@ -1,8 +1,11 @@
 import asyncio
+import logging
 import os
 import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from PIL import Image as PILImage, ImageFile
 from sqlmodel import select
@@ -385,7 +388,7 @@ async def scan_photos(
                         await session.commit()
                     except (IntegrityError, DataError) as e:
                         await session.rollback()
-                        print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
+                        logger.debug("跳过异常记录 (batch): %s %s", type(e).__name__, e)
                     batch_count = 0
 
                 await asyncio.sleep(0)  # 让出事件循环
@@ -422,7 +425,7 @@ async def scan_photos(
                 await session.commit()
             except (IntegrityError, DataError) as e:
                 await session.rollback()
-                print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
+                logger.debug("跳过异常记录 (pending): %s %s", type(e).__name__, e)
         print(f"[scan] 图片扫描完成，新增 {count} 条记录", flush=True)
 
     return count
@@ -538,7 +541,7 @@ async def scan_videos(
                         await session.commit()
                     except (IntegrityError, DataError) as e:
                         await session.rollback()
-                        print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
+                        logger.debug("跳过异常记录 (video batch): %s %s", type(e).__name__, e)
                     batch_count = 0
 
                 await asyncio.sleep(0)
@@ -570,7 +573,7 @@ async def scan_videos(
                 await session.commit()
             except (IntegrityError, DataError) as e:
                 await session.rollback()
-                print(f"[scan] 跳过异常记录: {type(e).__name__}，继续扫描", flush=True)
+                logger.debug("跳过异常记录 (video pending): %s %s", type(e).__name__, e)
         if count:
             print(f"[scan] 视频扫描完成，新增 {count} 条记录", flush=True)
 

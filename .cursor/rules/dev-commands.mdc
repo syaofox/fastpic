@@ -45,6 +45,20 @@ docker compose -f docker-compose.dev.yml down
 
 **连接信息**（与主 compose 一致）：Host `127.0.0.1`，Port `3306`，User/Password/Database 均为 `fastpic`。首次启动需等待 healthcheck 通过（约 10–20 秒）。
 
+## 测试
+
+```bash
+# 安装测试依赖
+uv sync --extra dev
+
+# 运行测试（conftest 自动设置 MYSQL_HOST=127.0.0.1）
+uv run pytest
+
+# 含数据库的测试需先启动 MariaDB
+docker compose -f docker-compose.dev.yml up -d
+uv run pytest
+```
+
 ## 依赖管理
 
 ```bash

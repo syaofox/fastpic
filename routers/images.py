@@ -137,7 +137,7 @@ async def download_image(
         result = await session.execute(select(Image).where(Image.id == id))
         img = result.scalar_one_or_none()
         if not img:
-            raise HTTPException(status_code=404, detail="图片不存在")
+            raise HTTPException(status_code=404, detail="媒体文件不存在")
         rel = img.relative_path
         filename = img.filename
     elif relative_path:
@@ -221,7 +221,7 @@ async def get_image_info(
     result = await session.execute(select(Image).where(Image.id == image_id))
     img = result.scalar_one_or_none()
     if not img:
-        raise HTTPException(status_code=404, detail="图片不存在或已被删除")
+        raise HTTPException(status_code=404, detail="媒体文件不存在或已被删除")
     tag_result = await session.execute(
         select(Tag.name)
         .join(ImageTag, ImageTag.tag_id == Tag.id)

@@ -10,9 +10,12 @@
 """
 
 import asyncio
+import logging
 import os
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from queue import Queue, Empty
 from threading import Thread
 
@@ -121,9 +124,9 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
                 await add_tag_to_image(session, record.id, damaged_tag)
             await session.commit()
             print(f"[watcher] 新增: {rel_path}", flush=True)
-        except IntegrityError:
+        except IntegrityError as e:
             # 竞态：scanner 已先入库，静默忽略
-            pass
+            logger.debug("IntegrityError on add %s (scanner may have inserted first): %s", rel_path, e)
         except Exception as e:
             print(f"[watcher] 处理新增失败 {rel_path}: {e}", flush=True)
 
@@ -199,8 +202,9 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
                 session.add(img)
                 await session.commit()
                 print(f"[watcher] 移动: {src_rel} → {dst_rel}", flush=True)
-            except IntegrityError:
+            except IntegrityError as e:
                 # 竞态：dst_rel 刚被其他操作占用，静默忽略
+                logger.debug("IntegrityError on move %s -> %s: %s", src_rel, dst_rel, e)
                 await session.rollback()
         else:
             # 源记录不存在，当作新增处理
@@ -241,10 +245,14 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
         return
 
     # 按路径去重，保留最后事件
-    path_events: dict[str, tuple] = {}
+    # moved 事件使用 (src, dst) 作为键，避免被同路径的 created/deleted 覆盖
+    path_events: dict[str | tuple, tuple] = {}
     for ev in ready:
         event_type, src, dst, ts = ev
-        key = src
+        if event_type == "moved":
+            key = ("moved", src, dst)
+        else:
+            key = (event_type, src)
         path_events[key] = ev
 
     # 若有扫描/清理在进行，暂不处理，将事件放回队列

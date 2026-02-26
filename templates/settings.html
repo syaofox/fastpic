@@ -77,7 +77,7 @@
                     </div>
                     <div class="text-center p-3 bg-slate-50 rounded-lg">
                         <div class="text-2xl font-bold text-slate-800" id="stat-size">-</div>
-                        <div class="text-xs text-slate-500 mt-1">图片总大小</div>
+                        <div class="text-xs text-slate-500 mt-1">媒体总大小</div>
                     </div>
                     <div class="text-center p-3 bg-slate-50 rounded-lg">
                         <div class="text-2xl font-bold text-slate-800" id="stat-cache">-</div>
@@ -90,8 +90,8 @@
 
             <!-- 操作区 -->
             <div class="space-y-4">
-                <!-- 扫描新图片 -->
-                {% call settings_card('bg-blue-50', '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>', '扫描新图片', '扫描 photos 目录中尚未入库的图片，自动生成缩略图并写入数据库。适用于手动拷贝图片到目录后的场景。') %}
+                <!-- 扫描新媒体 -->
+                {% call settings_card('bg-blue-50', '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>', '扫描新媒体', '扫描 photos 目录中尚未入库的图片和视频，自动生成缩略图并写入数据库。适用于手动拷贝媒体文件到目录后的场景。') %}
                 <div class="flex items-center gap-3">
                     <button type="button" id="scan-btn" onclick="triggerScan()"
                             class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
@@ -304,7 +304,7 @@
                 </div>
                 <div id="tags-list-container" class="border border-slate-200 rounded-lg overflow-hidden">
                     <div id="tags-list-loading" class="p-8 text-center text-slate-500 text-sm">加载中...</div>
-                    <div id="tags-list-empty" class="hidden p-8 text-center text-slate-500 text-sm">暂无标签，可在图片预览中添加</div>
+                    <div id="tags-list-empty" class="hidden p-8 text-center text-slate-500 text-sm">暂无标签，可在媒体预览中添加</div>
                     <table id="tags-list-table" class="hidden w-full text-sm">
                         <thead class="bg-slate-50 border-b border-slate-200">
                             <tr>
@@ -312,7 +312,7 @@
                                     <input type="checkbox" id="tags-select-all" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" title="全选">
                                 </th>
                                 <th class="text-left px-4 py-3 font-medium text-slate-700">标签名</th>
-                                <th class="text-left px-4 py-3 font-medium text-slate-700">关联图片数</th>
+                                <th class="text-left px-4 py-3 font-medium text-slate-700">关联媒体数</th>
                                 <th class="text-right px-4 py-3 font-medium text-slate-700">操作</th>
                             </tr>
                         </thead>
@@ -332,7 +332,7 @@
                     </div>
                     <div>
                         <h2 class="text-xl font-bold text-slate-800">FastPic</h2>
-                        <p class="text-sm text-slate-500">轻量级本地图片查看器</p>
+                        <p class="text-sm text-slate-500">轻量级本地图片/视频查看器</p>
                     </div>
                 </div>
                 <div class="space-y-3 text-sm text-slate-600">
@@ -717,7 +717,7 @@ function loadStats() {
         document.getElementById('stat-cache').textContent = formatSize(data.cache_size) + ' (' + data.cache_count + ')';
         document.getElementById('stat-cache-label').textContent = data.cache_size_estimated ? '缓存大小（估算）' : '缓存大小';
         document.getElementById('stats-paths').innerHTML =
-            '<div>图片目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.photos_dir || '') + '</span></div>' +
+            '<div>媒体目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.photos_dir || '') + '</span></div>' +
             '<div>缓存目录：<span class="text-slate-600 font-mono">' + escapeHtml(data.cache_dir || '') + '</span></div>';
     }).catch(function(err) {
         console.error('加载统计失败:', err);
@@ -738,7 +738,10 @@ function triggerScan() {
         .then(function(data) {
             btn.disabled = false;
             btn.textContent = '开始扫描';
-            status.textContent = '扫描完成，新增 ' + data.scanned + ' 张图片';
+            var nImg = data.images || 0, nVid = data.videos || 0;
+            status.textContent = data.scanned > 0
+                ? '扫描完成，新增 ' + data.scanned + ' 个媒体文件（图片 ' + nImg + ' 张、视频 ' + nVid + ' 个）'
+                : '扫描完成，无新增';
             status.className = 'text-sm text-green-600';
             loadStats();
         })
@@ -815,7 +818,7 @@ function triggerRebuild() {
                 '<div class="ml-3">清除孤儿缓存：' + (data.orphan_cache_removed || 0) + ' 个</div>' +
                 '<div class="ml-3">重新生成缓存：' + (data.cache_regenerated || 0) + ' 个</div>' +
                 '<div class="font-medium text-slate-700 mt-2 mb-1">扫描结果：</div>' +
-                '<div class="ml-3">新增图片：' + scanned + ' 张</div>';
+                '<div class="ml-3">新增媒体：' + scanned + ' 个</div>';
             loadStats();
         })
         .catch(function(err) {
@@ -1165,7 +1168,7 @@ function batchDeleteSelectedTags() {
         showSettingsAlert('请先选择要删除的标签');
         return;
     }
-    showSettingsConfirm('确认批量删除', '确定要删除选中的 ' + selected.length + ' 个标签吗？将同时移除这些标签在所有图片上的关联。', function() {
+    showSettingsConfirm('确认批量删除', '确定要删除选中的 ' + selected.length + ' 个标签吗？将同时移除这些标签在所有媒体上的关联。', function() {
         fetch('/api/tags/batch-delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1205,7 +1208,7 @@ function renameTag(oldName) {
 }
 
 function deleteTag(name) {
-    showSettingsConfirm('确认删除', '确定要删除标签「' + name + '」吗？将同时移除该标签在所有图片上的关联。', function() {
+    showSettingsConfirm('确认删除', '确定要删除标签「' + name + '」吗？将同时移除该标签在所有媒体上的关联。', function() {
         fetch('/api/tags/' + encodeURIComponent(name), { method: 'DELETE' })
             .then(function(r) {
                 if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });

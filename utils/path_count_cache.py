@@ -1,4 +1,5 @@
 """path count 持久化缓存：减轻百万级 COUNT 查询。含内存 + DB 双层缓存供 gallery 使用。"""
+import asyncio
 import time
 from sqlalchemy import text
 
@@ -42,8 +43,8 @@ def set_cached_count(path: str, mode: str, total: int) -> None:
         _prune_count_cache()
 
 
-async def get_path_count_from_db(path: str, mode: str) -> int | None:
-    """从 DB 读取 path count 缓存，过期返回 None"""
+def _get_path_count_from_db_sync(path: str, mode: str) -> int | None:
+    """同步 DB 读取，供 asyncio.to_thread 调用，避免阻塞事件循环"""
     path_key = path or ""
     with sync_engine.connect() as conn:
         r = conn.execute(
@@ -62,8 +63,13 @@ async def get_path_count_from_db(path: str, mode: str) -> int | None:
     return total
 
 
-async def set_path_count_to_db(path: str, mode: str, total: int) -> None:
-    """写入 path count 到 DB"""
+async def get_path_count_from_db(path: str, mode: str) -> int | None:
+    """从 DB 读取 path count 缓存，过期返回 None"""
+    return await asyncio.to_thread(_get_path_count_from_db_sync, path, mode)
+
+
+def _set_path_count_to_db_sync(path: str, mode: str, total: int) -> None:
+    """同步 DB 写入，供 asyncio.to_thread 调用，避免阻塞事件循环"""
     path_key = path or ""
     now = time.time()
     with sync_engine.connect() as conn:
@@ -76,6 +82,11 @@ async def set_path_count_to_db(path: str, mode: str, total: int) -> None:
             {"p": path_key, "m": mode, "t": total, "ts": now},
         )
         conn.commit()
+
+
+async def set_path_count_to_db(path: str, mode: str, total: int) -> None:
+    """写入 path count 到 DB"""
+    await asyncio.to_thread(_set_path_count_to_db_sync, path, mode, total)
 
 
 def cleanup_expired_path_count_cache() -> int:

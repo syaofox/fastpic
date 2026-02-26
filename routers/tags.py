@@ -170,7 +170,7 @@ async def get_image_tags(
     """获取某图片的标签列表"""
     result = await session.execute(select(Image).where(Image.id == image_id))
     if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="图片不存在")
+        raise HTTPException(status_code=404, detail="媒体文件不存在")
     tag_result = await session.execute(
         select(Tag.name)
         .join(ImageTag, ImageTag.tag_id == Tag.id)
@@ -190,7 +190,7 @@ async def add_image_tags(
     """为图片添加标签"""
     result = await session.execute(select(Image).where(Image.id == image_id))
     if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="图片不存在")
+        raise HTTPException(status_code=404, detail="媒体文件不存在")
     added = 0
     for name in (body.tags or []):
         name = (name or "").strip().lstrip("#")

@@ -7,19 +7,21 @@ from sqlalchemy import BigInteger, Column, String
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 # 数据库配置：仅支持 MariaDB，需设置 MYSQL_HOST
+# 检查推迟到 init_db()，便于测试时 mock 或通过 conftest 设置 MYSQL_HOST
 _MYSQL_HOST = os.environ.get("MYSQL_HOST", "").strip()
 _MYSQL_USER = os.environ.get("MYSQL_USER", "fastpic")
 _MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "fastpic")
 _MYSQL_DATABASE = os.environ.get("MYSQL_DATABASE", "fastpic")
 
-if not _MYSQL_HOST:
-    print("错误: 请设置 MYSQL_HOST 环境变量连接 MariaDB", file=sys.stderr)
-    sys.exit(1)
-
 _db_user = _MYSQL_USER
 _db_pass = _MYSQL_PASSWORD.replace("%", "%%")
-DATABASE_URL = f"mysql+pymysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
-ASYNC_DATABASE_URL = f"mysql+aiomysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
+if _MYSQL_HOST:
+    DATABASE_URL = f"mysql+pymysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
+    ASYNC_DATABASE_URL = f"mysql+aiomysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
+else:
+    # 占位 URL，仅用于导入；实际连接前 init_db() 会检查 MYSQL_HOST
+    DATABASE_URL = "mysql+pymysql://fake:fake@127.0.0.1:3306/fake"
+    ASYNC_DATABASE_URL = "mysql+aiomysql://fake:fake@127.0.0.1:3306/fake"
 
 # 连接池：可通过环境变量调优，生产环境建议 pool_size=20, max_overflow=40
 _db_pool_size = int(os.environ.get("DB_POOL_SIZE", "10"))
@@ -140,6 +142,9 @@ def _run_fulltext_migration() -> None:
 
 def init_db() -> None:
     """创建数据库表（仅支持全新部署）"""
+    if not _MYSQL_HOST:
+        print("错误: 请设置 MYSQL_HOST 环境变量连接 MariaDB", file=sys.stderr)
+        sys.exit(1)
     SQLModel.metadata.create_all(sync_engine)
     _run_natural_sort_index_migration()
     _run_fulltext_migration()

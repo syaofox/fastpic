@@ -6,7 +6,7 @@
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin>
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
-    <title>{% block title %}FastPic 图片查看器{% endblock %}</title>
+    <title>{% block title %}FastPic 图片/视频查看器{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/mpegts.js@1.8.0/dist/mpegts.js"></script>
@@ -219,7 +219,7 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <span>正在扫描图片库，新图片将陆续显示…</span>
+        <span>正在扫描媒体库，新媒体将陆续显示…</span>
     </div>
     {% block content %}{% endblock %}
     <!-- 通用确认弹窗（主站与设置页复用） -->

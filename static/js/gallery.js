@@ -531,7 +531,7 @@ function showImageInfo() {
     if (!panel || !content) return;
 
     if (modalImageIds.length === 0 || modalIndex < 0 || modalIndex >= modalImageIds.length) {
-        content.innerHTML = '<div class="text-white/70">暂无图片信息</div>';
+        content.innerHTML = '<div class="text-white/70">暂无媒体信息</div>';
         panel.classList.remove('hidden');
         _updateImageInfoBtnState(true);
         return;
@@ -553,7 +553,7 @@ function showImageInfo() {
     fetch('/api/image-info/' + imageId)
         .then(function(res) {
             if (!res.ok) {
-                if (res.status === 404) return Promise.reject('图片不存在或已被删除');
+                if (res.status === 404) return Promise.reject('媒体文件不存在或已被删除');
                 return Promise.reject('获取信息失败');
             }
             return res.json();
@@ -929,7 +929,7 @@ function deleteCurrentImage() {
     var imageId = modalImageIds[modalIndex];
     if (!imageId) return;
 
-    showConfirm('确定要删除这张图片吗？此操作不可恢复。', '删除', function() {
+    showConfirm('确定要删除当前媒体文件吗？此操作不可恢复。', '删除', function() {
         var btn = document.getElementById('modal-delete-btn');
         if (btn) btn.disabled = true;
 
@@ -944,7 +944,7 @@ function deleteCurrentImage() {
             modalMediaTypes.splice(modalIndex, 1);
 
             if (modalImages.length === 0) {
-                // 没有图片了，关闭模态框并刷新画廊
+                // 没有媒体了，关闭模态框并刷新画廊
                 closeModalAndStopSlideshow();
                 refreshGalleryFromModal();
             } else {
@@ -989,7 +989,7 @@ function setAsFolderThumbnail() {
     var relPath = decodeURIComponent(url.slice('/photos/'.length).split('?')[0]);
     var lastSlash = relPath.lastIndexOf('/');
     if (lastSlash < 0) {
-        if (typeof showToast === 'function') showToast('根目录图片无法设为文件夹缩略图', 'error');
+        if (typeof showToast === 'function') showToast('根目录媒体文件无法设为文件夹缩略图', 'error');
         return;
     }
     var folderPath = relPath.slice(0, lastSlash);
@@ -1056,7 +1056,7 @@ function showSetThumbnailFolderDialog() {
     var relPath = decodeURIComponent(url.slice('/photos/'.length).split('?')[0]);
     var lastSlash = relPath.lastIndexOf('/');
     if (lastSlash < 0) {
-        if (typeof showToast === 'function') showToast('根目录图片无法设为文件夹缩略图', 'error');
+        if (typeof showToast === 'function') showToast('根目录媒体文件无法设为文件夹缩略图', 'error');
         return;
     }
     var initialPath = relPath.slice(0, lastSlash);

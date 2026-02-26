@@ -42,5 +42,6 @@ LICENSE
 # uv 锁文件不排除（构建时需要）
 # uv.lock
 
-# tests
+# 测试（不打包进发布镜像）
 tests/
+conftest.py
