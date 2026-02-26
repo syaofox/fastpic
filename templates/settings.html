@@ -789,42 +789,33 @@ function triggerCleanup() {
         });
 }
 
-// 完整重建
+// 完整重建（一次 os.walk 完成 cleanup + scan，避免重复遍历）
 function triggerRebuild() {
     var btn = document.getElementById('rebuild-btn');
     var status = document.getElementById('rebuild-status');
     var resultEl = document.getElementById('rebuild-result');
     btn.disabled = true;
     btn.textContent = '重建中...';
-    status.textContent = '正在执行清理同步...';
+    status.textContent = '正在执行完整同步...';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
 
-    // 先清理
-    fetch('/api/cleanup', { method: 'POST' })
+    fetch('/api/full-sync', { method: 'POST' })
         .then(function(r) { return r.json(); })
-        .then(function(cleanupData) {
-            status.textContent = '清理完成，正在扫描新图片...';
-            // 再扫描
-            return fetch('/scan', { method: 'POST' })
-                .then(function(r) { return r.json(); })
-                .then(function(scanData) {
-                    return { cleanup: cleanupData, scan: scanData };
-                });
-        })
-        .then(function(result) {
+        .then(function(data) {
             btn.disabled = false;
             btn.textContent = '完整重建';
             status.textContent = '重建完成';
             status.className = 'text-sm text-green-600';
             resultEl.classList.remove('hidden');
+            var scanned = (data.images_added || 0) + (data.videos_added || 0);
             resultEl.innerHTML =
                 '<div class="font-medium text-slate-700 mb-1">清理结果：</div>' +
-                '<div class="ml-3">清除幽灵记录：' + result.cleanup.stale_removed + ' 条</div>' +
-                '<div class="ml-3">清除孤儿缓存：' + result.cleanup.orphan_cache_removed + ' 个</div>' +
-                '<div class="ml-3">重新生成缓存：' + result.cleanup.cache_regenerated + ' 个</div>' +
+                '<div class="ml-3">清除幽灵记录：' + (data.stale_removed || 0) + ' 条</div>' +
+                '<div class="ml-3">清除孤儿缓存：' + (data.orphan_cache_removed || 0) + ' 个</div>' +
+                '<div class="ml-3">重新生成缓存：' + (data.cache_regenerated || 0) + ' 个</div>' +
                 '<div class="font-medium text-slate-700 mt-2 mb-1">扫描结果：</div>' +
-                '<div class="ml-3">新增图片：' + result.scan.scanned + ' 张</div>';
+                '<div class="ml-3">新增图片：' + scanned + ' 张</div>';
             loadStats();
         })
         .catch(function(err) {

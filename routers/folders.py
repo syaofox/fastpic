@@ -586,17 +586,12 @@ async def merge_folders(
         session.add(img)
         moved += 1
     if source_path.exists():
-        for d in sorted(source_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-            if d.is_dir() and not any(d.iterdir()):
+        for root, dirs, files in os.walk(str(source_path), topdown=False):
+            if not dirs and not files:
                 try:
-                    d.rmdir()
+                    os.rmdir(root)
                 except OSError:
                     pass
-        if not any(source_path.iterdir()):
-            try:
-                source_path.rmdir()
-            except OSError:
-                pass
     try:
         await session.commit()
         invalidate_folder_tree_cache()

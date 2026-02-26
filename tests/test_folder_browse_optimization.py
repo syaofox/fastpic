@@ -145,6 +145,54 @@ def test_gallery_subfolders_partial_exists():
     assert "subfolders" in content, "partial 应渲染 subfolders"
 
 
+def test_get_direct_children_from_folder_counts():
+    """_get_direct_children_from_folder_counts 从 folder_counts 解析直接子目录"""
+    from utils.folder_tree import _get_direct_children_from_folder_counts
+
+    folder_counts = {
+        "2024": 100,
+        "2024/01": 30,
+        "2024/01/15": 5,
+        "2024/02": 20,
+        "2023": 50,
+    }
+    # path_prefix "2024/01" -> 直接子目录应为 "15"
+    children = _get_direct_children_from_folder_counts(folder_counts, "2024/01")
+    assert children == {"15"}, f"期望 {{15}}，实际 {children}"
+
+    # path_prefix "2024" -> 直接子目录应为 "01", "02"
+    children2 = _get_direct_children_from_folder_counts(folder_counts, "2024")
+    assert children2 == {"01", "02"}, f"期望 {{01, 02}}，实际 {children2}"
+
+    # path_prefix 带尾斜杠也正确
+    children4 = _get_direct_children_from_folder_counts(folder_counts, "2024/")
+    assert children4 == {"01", "02"}, f"期望 {{01, 02}}，实际 {children4}"
+
+
+def test_folder_tree_no_scan_all_dirs_dead_code():
+    """folder_tree 已移除 scan_all_dirs_for_search 死代码"""
+    import utils.folder_tree as ft
+    assert not hasattr(ft, "scan_all_dirs_for_search"), "scan_all_dirs_for_search 应已移除"
+
+
+def test_merge_folder_uses_os_walk_topdown_false():
+    """merge_folder 使用 os.walk(..., topdown=False) 自底向上删空目录"""
+    folders_path = Path(__file__).resolve().parent.parent / "routers" / "folders.py"
+    content = folders_path.read_text(encoding="utf-8")
+    assert "os.walk" in content, "merge_folder 应使用 os.walk"
+    assert "topdown=False" in content, "merge_folder 应使用 topdown=False 自底向上"
+
+
+def test_settings_trigger_cleanup_uses_run_full_scan():
+    """trigger_cleanup 复用 run_full_scan，一次 os.walk 完成"""
+    settings_path = Path(__file__).resolve().parent.parent / "routers" / "settings.py"
+    content = settings_path.read_text(encoding="utf-8")
+    assert "run_full_scan" in content, "settings 应使用 run_full_scan"
+    assert "trigger_cleanup" in content
+    # trigger_cleanup 应调用 run_full_scan 而非单独的 _collect_media
+    assert content.count("run_full_scan") >= 2, "trigger_scan 与 trigger_cleanup 均应调用 run_full_scan"
+
+
 def run_tests():
     tests = [
         ("path_count_cache TTL", test_path_count_cache_ttl),
@@ -159,6 +207,10 @@ def run_tests():
         ("defer_subfolders buildGalleryUrl", test_build_gallery_url_defer_subfolders),
         ("defer_subfolders index.html", test_index_html_defer_param),
         ("gallery_subfolders partial", test_gallery_subfolders_partial_exists),
+        ("_get_direct_children_from_folder_counts", test_get_direct_children_from_folder_counts),
+        ("folder_tree 无 scan_all_dirs 死代码", test_folder_tree_no_scan_all_dirs_dead_code),
+        ("merge_folder os.walk topdown=False", test_merge_folder_uses_os_walk_topdown_false),
+        ("settings trigger_cleanup 复用 run_full_scan", test_settings_trigger_cleanup_uses_run_full_scan),
     ]
     passed = 0
     failed = []

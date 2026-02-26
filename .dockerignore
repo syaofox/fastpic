@@ -41,3 +41,6 @@ LICENSE
 
 # uv 锁文件不排除（构建时需要）
 # uv.lock
+
+# tests
+tests/

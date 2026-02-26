@@ -287,6 +287,21 @@ async def get_folder_counts_for_search(session) -> dict[str, int]:
     return await _get_folder_counts_from_sql(session, max_depth=_SEARCH_DIRS_MAX_DEPTH)
 
 
+def _get_direct_children_from_folder_counts(
+    folder_counts: dict[str, int], path_prefix: str
+) -> set[str]:
+    """从 folder_counts 解析 path_prefix 下的直接子目录名，无需 iterdir。"""
+    if not path_prefix.endswith("/"):
+        path_prefix = path_prefix + "/"
+    children: set[str] = set()
+    for path_key in folder_counts:
+        if path_key.startswith(path_prefix) and path_key != path_prefix:
+            rest = path_key[len(path_prefix) :]
+            child_name = rest.split("/")[0]
+            children.add(child_name)
+    return children
+
+
 async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
     """从数据库 SQL 聚合获取 folder_counts，再构建 folder_tree 和 nested_tree。"""
     folder_counts = await _get_folder_counts_from_sql(session)
@@ -301,6 +316,15 @@ async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
 
     def _scan_dirs(base: Path, prefix: tuple[str, ...] = ()):
         if not base.is_dir() or len(prefix) >= _FOLDER_TREE_MAX_DEPTH:
+            return
+        # 深度达到限制前一层时，从 DB folder_counts 解析子目录，跳过 iterdir
+        if len(prefix) >= _FOLDER_TREE_MAX_DEPTH - 1:
+            path_prefix = "/".join(prefix)
+            for child_name in _get_direct_children_from_folder_counts(
+                folder_counts, path_prefix
+            ):
+                if not child_name.startswith("."):
+                    folders.add(prefix + (child_name,))
             return
         for child in sorted(base.iterdir()):
             if child.is_dir() and not child.name.startswith("."):
@@ -450,15 +474,3 @@ async def get_subfolders(
             for k, _ in by_ts[: len(_subfolder_cache) - _SUBFOLDER_CACHE_MAX_SIZE]:
                 del _subfolder_cache[k]
     return subfolders
-
-
-def scan_all_dirs_for_search(base: Path, prefix: str, dir_counts: dict[str, int]) -> None:
-    """递归扫描目录，将空文件夹加入 dir_counts（用于 search_dirs）"""
-    if not base.is_dir():
-        return
-    for child in sorted(base.iterdir()):
-        if child.is_dir() and not child.name.startswith("."):
-            child_path = f"{prefix}/{child.name}" if prefix else child.name
-            if child_path not in dir_counts:
-                dir_counts[child_path] = 0
-            scan_all_dirs_for_search(child, child_path, dir_counts)

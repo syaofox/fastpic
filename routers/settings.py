@@ -9,12 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PHOTOS_DIR, CACHE_DIR, SCAN_DUPLICATES_BATCH_SIZE
 from models import Image, get_async_session
-from scanner import (
-    _collect_media_and_existing,
-    scan_photos,
-    scan_videos,
-    cleanup_database,
-)
+from scanner import run_full_scan
 from utils.images import cache_filename
 from scan_state import begin_scan, end_scan
 from schemas import ScanDuplicatesRequest
@@ -55,14 +50,12 @@ async def get_scan_status():
 
 @router.post("/scan")
 async def trigger_scan():
-    """手动触发扫描。一次 os.walk 收集 images/videos，供 scan 复用。"""
+    """手动触发扫描。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""
     begin_scan()
     try:
-        images, videos, _ = await asyncio.to_thread(
-            _collect_media_and_existing, PHOTOS_DIR.resolve()
-        )
-        n_img = await scan_photos(PHOTOS_DIR, CACHE_DIR, images)
-        n_vid = await scan_videos(PHOTOS_DIR, CACHE_DIR, videos)
+        result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        n_img = result.get("images_added", 0)
+        n_vid = result.get("videos_added", 0)
         return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
     finally:
         end_scan()
@@ -71,11 +64,26 @@ async def trigger_scan():
 
 @router.post("/api/cleanup")
 async def trigger_cleanup():
-    """手动触发数据库清理同步"""
+    """手动触发数据库清理同步。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""
     begin_scan()
     try:
-        result = await cleanup_database(PHOTOS_DIR, CACHE_DIR)
-        return result
+        result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        return {
+            "stale_removed": result.get("stale_removed", 0),
+            "orphan_cache_removed": result.get("orphan_cache_removed", 0),
+            "cache_regenerated": result.get("cache_regenerated", 0),
+        }
+    finally:
+        end_scan()
+        invalidate_folder_tree_cache()
+
+
+@router.post("/api/full-sync")
+async def trigger_full_sync():
+    """完整同步：一次 os.walk 完成 cleanup + scan，供「完整重建」等场景使用。"""
+    begin_scan()
+    try:
+        return await run_full_scan(PHOTOS_DIR, CACHE_DIR)
     finally:
         end_scan()
         invalidate_folder_tree_cache()
