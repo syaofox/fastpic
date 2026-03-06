@@ -229,6 +229,8 @@
                  {% if mode == 'waterfall' and img.width and img.height %}style="aspect-ratio: {{ img.width }}/{{ img.height }};"{% elif mode == 'waterfall' %}style="aspect-ratio: 1;"{% endif %}>
                 <img src="/cache/{{ img.relative_path|cache_key }}"
                      alt="{{ img.filename }}"
+                     width="300"
+                     {% if img.width and img.height %}height="{{ (300 * img.height / img.width)|int }}"{% elif img.height %}height="{{ img.height }}"{% endif %}
                      class="w-full {{ 'h-full object-cover' if mode in ('folder', 'list') else 'h-auto' }}"
                      decoding="async"
                      {% if is_first_screen %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}

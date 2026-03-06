@@ -25,6 +25,7 @@
             {% if sub.thumbnails %}
             <img src="/cache/{{ sub.thumbnails[0]|cache_key }}"
                  alt="文件夹 {{ sub.name }} 缩略图"
+                 width="80" height="80"
                  class="w-full h-full object-cover"
                  loading="lazy">
             {% else %}
@@ -46,6 +47,7 @@
                 {% if i < (sub.thumbnails|length) %}
                 <img src="/cache/{{ sub.thumbnails[i]|cache_key }}"
                      alt="文件夹 {{ sub.name }} 缩略图"
+                     width="150" height="150"
                      class="w-full h-full object-cover"
                      loading="lazy">
                 {% endif %}

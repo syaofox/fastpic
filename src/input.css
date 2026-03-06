@@ -1,0 +1,201 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 侧边栏：细窄滚动条，浅色主题 */
+#sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(203 213 225) transparent;
+}
+/* 移动端：侧边栏打开时占 85vw，便于点击遮罩关闭 */
+@media (max-width: 767px) {
+    #sidebar:not(.hidden) {
+        width: 85vw !important;
+        max-width: 85vw !important;
+    }
+}
+#sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+#sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+#sidebar::-webkit-scrollbar-thumb {
+    background: rgb(203 213 225);
+    border-radius: 3px;
+}
+#sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgb(148 163 184);
+}
+
+/* 主区：细窄滚动条，浅色主题 */
+#scroll-container {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(203 213 225) transparent;
+}
+#scroll-container::-webkit-scrollbar {
+    width: 6px;
+}
+#scroll-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+#scroll-container::-webkit-scrollbar-thumb {
+    background: rgb(203 213 225);
+    border-radius: 3px;
+}
+#scroll-container::-webkit-scrollbar-thumb:hover {
+    background: rgb(148 163 184);
+}
+
+/* 列表模式：单列，每行缩略图+信息 */
+#gallery-grid.gallery-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+#gallery-grid.gallery-list .selectable-item {
+    width: 100%;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 100px;
+}
+
+/* 瀑布流：JS 列布局 */
+#wf-row {
+    display: flex;
+    align-items: flex-start;
+}
+#wf-row > .wf-col {
+    flex: 1;
+    min-width: 0;
+}
+/* 瀑布流 item 视口外跳过渲染，提升长列表滚动帧率 */
+#wf-row .wf-col .selectable-item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+}
+
+/* 文件夹模式：Flexbox 布局，避免 Grid 空单元格产生大面积空白 */
+#gallery-grid.gallery-flex {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+/* 使用 data-cols 避免 calc+var 在部分浏览器失效，JS 会在加载后同步 */
+#gallery-grid.gallery-flex .selectable-item {
+    flex: 0 0 auto;
+    min-width: 0;
+    width: calc(25% - 0.75rem); /* 默认 4 列 */
+    /* 仅对 border/shadow 做过渡，避免列数变化时 width 产生缩小动画 */
+    transition: border-color 0.2s, box-shadow 0.2s;
+    /* 视口外元素跳过渲染，提升长列表滚动帧率 */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+}
+#gallery-grid.gallery-flex[data-cols="2"] .selectable-item { width: calc(50% - 0.5rem); }
+#gallery-grid.gallery-flex[data-cols="3"] .selectable-item { width: calc(33.333% - 0.667rem); }
+#gallery-grid.gallery-flex[data-cols="4"] .selectable-item { width: calc(25% - 0.75rem); }
+#gallery-grid.gallery-flex[data-cols="5"] .selectable-item { width: calc(20% - 0.8rem); }
+#gallery-grid.gallery-flex[data-cols="6"] .selectable-item { width: calc(16.666% - 0.833rem); }
+#gallery-grid.gallery-flex[data-cols="7"] .selectable-item { width: calc(14.285% - 0.857rem); }
+#gallery-grid.gallery-flex[data-cols="8"] .selectable-item { width: calc(12.5% - 0.875rem); }
+#gallery-grid.gallery-flex > .folder-image-separator,
+#gallery-grid.gallery-flex > .scroll-sentinel {
+    flex: 0 0 100%;
+    width: 100%;
+}
+/* 滚动哨兵负边距消除与上一行之间的可见间隙 */
+#gallery-grid.gallery-flex > .scroll-sentinel {
+    margin-top: -0.25rem;
+}
+/* 无限滚动加载指示器 */
+#infinite-scroll-loading.htmx-indicator { opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+#infinite-scroll-loading.htmx-indicator.htmx-request { opacity: 1; }
+#gallery-grid.gallery-flex > #infinite-scroll-loading,
+#gallery-grid.gallery-list > #infinite-scroll-loading { flex: 0 0 100%; width: 100%; }
+
+/* 响应式：按断点限制最大列数 */
+/* 手机 < 640px：最多 2 列 */
+@media (max-width: 639px) {
+    #gallery-grid.gallery-flex[data-cols="3"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="4"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="5"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="6"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
+        width: calc(50% - 0.5rem);
+    }
+}
+/* sm 640px–767px：最多 3 列 */
+@media (min-width: 640px) and (max-width: 767px) {
+    #gallery-grid.gallery-flex[data-cols="4"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="5"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="6"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
+        width: calc(33.333% - 0.667rem);
+    }
+}
+/* md 768px–1023px：最多 4 列 */
+@media (min-width: 768px) and (max-width: 1023px) {
+    #gallery-grid.gallery-flex[data-cols="5"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="6"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
+        width: calc(25% - 0.75rem);
+    }
+}
+/* lg 1024px–1279px：最多 6 列 */
+@media (min-width: 1024px) and (max-width: 1279px) {
+    #gallery-grid.gallery-flex[data-cols="7"] .selectable-item,
+    #gallery-grid.gallery-flex[data-cols="8"] .selectable-item {
+        width: calc(16.666% - 0.833rem);
+    }
+}
+/* 切换文件夹时的加载指示器：延迟 150ms 显示，避免快速响应时闪烁 */
+#gallery-loading-indicator.htmx-indicator { opacity: 0; transition: opacity 0.2s; }
+#gallery-loading-indicator.htmx-indicator.htmx-request.gallery-loading-visible { opacity: 1; }
+/* 切换文件夹时 gallery 容器淡入淡出过渡 */
+#gallery-container { transition: opacity 0.15s ease; }
+#gallery-container.gallery-swapping { opacity: 0.6; }
+
+/* 模态框淡入淡出过渡 */
+#modal { transition: opacity 0.2s ease; opacity: 0; pointer-events: none; visibility: hidden; }
+#modal.modal-open { opacity: 1; pointer-events: auto; visibility: visible; }
+/* 大图切换时淡入，避免白屏 */
+#modal-img { transition: opacity 0.15s ease; }
+#modal-img.modal-img-loading { opacity: 0.4; }
+
+/* 移动端：工具栏展开时改为双行布局，避免左右重叠 */
+@media (max-width: 767px) {
+    #modal-toolbar.modal-toolbar-expanded {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+    #modal-toolbar.modal-toolbar-expanded > div:last-child {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.5rem;
+    }
+}
+
+/* 上传处理中：indeterminate 动画，避免用户误以为卡死 */
+@keyframes upload-indeterminate {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+#upload-progress-bar.upload-progress-indeterminate {
+    position: relative;
+    width: 100% !important;
+    overflow: hidden;
+}
+#upload-progress-bar.upload-progress-indeterminate::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+    animation: upload-indeterminate 1.2s ease-in-out infinite;
+}

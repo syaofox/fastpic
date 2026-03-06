@@ -45,3 +45,5 @@ LICENSE
 # 测试（不打包进发布镜像）
 tests/
 conftest.py
+
+node_modules/

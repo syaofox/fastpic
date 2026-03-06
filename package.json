@@ -1,0 +1,12 @@
+{
+  "name": "fastpic",
+  "version": "0.3.8",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/input.css -o ./static/assets/styles.css --minify",
+    "watch:css": "tailwindcss -i ./src/input.css -o ./static/assets/styles.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

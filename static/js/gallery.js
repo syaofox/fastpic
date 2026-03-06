@@ -93,6 +93,78 @@
     };
 })();
 
+// ---------- folderImagesCache：大图模式全量图片列表缓存 ----------
+(function() {
+    var cache = {};
+    var TTL_MS = 5 * 60 * 1000;  // 5 分钟
+
+    function buildFolderImagesKey(marker) {
+        if (!marker) return null;
+        var p = marker.getAttribute('data-path') || '';
+        var s = marker.getAttribute('data-search') || '';
+        var m = marker.getAttribute('data-mode') || 'folder';
+        var sb = marker.getAttribute('data-sort-by') || 'modified_at';
+        var so = marker.getAttribute('data-sort-order') || 'desc';
+        var ff = marker.getAttribute('data-filter-filename') || '';
+        var fsm = marker.getAttribute('data-filter-size-min') || '';
+        var fsx = marker.getAttribute('data-filter-size-max') || '';
+        var fdf = marker.getAttribute('data-filter-date-from') || '';
+        var fdt = marker.getAttribute('data-filter-date-to') || '';
+        var ft = marker.getAttribute('data-filter-tag') || '';
+        return p + '|' + s + '|' + m + '|' + sb + '|' + so + '|' + ff + '|' + fsm + '|' + fsx + '|' + fdf + '|' + fdt + '|' + ft;
+    }
+
+    window.folderImagesCache = {
+        get: function() {
+            var marker = document.getElementById('current-path-marker');
+            var key = buildFolderImagesKey(marker);
+            if (!key || !cache[key]) return null;
+            var entry = cache[key];
+            if (Date.now() - entry.timestamp > TTL_MS) {
+                delete cache[key];
+                return null;
+            }
+            return entry.data;
+        },
+        set: function(data) {
+            var marker = document.getElementById('current-path-marker');
+            var key = buildFolderImagesKey(marker);
+            if (!key) return;
+            cache[key] = { data: data, timestamp: Date.now() };
+        },
+        clear: function() {
+            cache = {};
+        },
+        prefetch: function() {
+            var marker = document.getElementById('current-path-marker');
+            if (!marker) return;
+            var total = parseInt(marker.getAttribute('data-total') || '0', 10);
+            if (total <= 0) return;
+            var params = new URLSearchParams({
+                path: marker.getAttribute('data-path') || '',
+                search: marker.getAttribute('data-search') || '',
+                mode: marker.getAttribute('data-mode') || 'folder',
+                sort_by: marker.getAttribute('data-sort-by') || 'modified_at',
+                sort_order: marker.getAttribute('data-sort-order') || 'desc',
+                filter_filename: marker.getAttribute('data-filter-filename') || '',
+                filter_size_min: marker.getAttribute('data-filter-size-min') || '',
+                filter_size_max: marker.getAttribute('data-filter-size-max') || '',
+                filter_date_from: marker.getAttribute('data-filter-date-from') || '',
+                filter_date_to: marker.getAttribute('data-filter-date-to') || '',
+                filter_tag: marker.getAttribute('data-filter-tag') || ''
+            });
+            fetch('/api/folder-images?' + params.toString())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.urls && data.ids) {
+                        window.folderImagesCache.set(data);
+                    }
+                })
+                .catch(function() {});
+        }
+    };
+})();
+
 /** 从 gallery 导航链接获取缓存键（完整 URL） */
 function getGalleryCacheKeyFromLink(link) {
     var hxGet = link.getAttribute('hx-get');
@@ -360,6 +432,28 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds, pageMediaTypes
     if (!marker) return;
     var total = parseInt(marker.getAttribute('data-total') || '0', 10);
     if (total <= pageUrls.length) return;
+
+    // 优先使用预缓存的全量图片列表
+    var cachedData = null;
+    if (window.folderImagesCache) {
+        cachedData = window.folderImagesCache.get();
+    }
+    if (cachedData && cachedData.urls && cachedData.ids && cachedData.ids.length > 0) {
+        var currentId = modalImageIds[modalIndex];
+        var newIndex = cachedData.ids.indexOf(currentId);
+        if (newIndex < 0) newIndex = cachedData.urls.indexOf(modalImages[modalIndex]);
+        if (newIndex < 0) newIndex = 0;
+        modalImages = cachedData.urls;
+        modalImageIds = cachedData.ids;
+        modalMediaTypes = cachedData.media_types || modalImages.map(_inferMediaType);
+        modalIndex = newIndex;
+        _showModalContent(modalImages[modalIndex], modalMediaTypes[modalIndex]);
+        _updateModalImageCounter();
+        preloadModalImages(modalIndex);
+        return;
+    }
+
+    // 缓存未命中，发起请求
     var params = new URLSearchParams({
         path: marker.getAttribute('data-path') || '',
         search: marker.getAttribute('data-search') || '',
@@ -377,6 +471,10 @@ function openModalFromGallery(photoUrl, index, pageUrls, pageIds, pageMediaTypes
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.urls || !data.ids || data.urls.length === 0) return;
+            // 存入缓存供后续使用
+            if (window.folderImagesCache) {
+                window.folderImagesCache.set(data);
+            }
             var currentId = modalImageIds[modalIndex];
             var newIndex = data.ids.indexOf(currentId);
             if (newIndex < 0) newIndex = data.urls.indexOf(modalImages[modalIndex]);
@@ -1143,6 +1241,7 @@ window.showSetThumbnailFolderDialog = showSetThumbnailFolderDialog;
 
 function refreshGalleryFromModal() {
     if (window.galleryPathCache) window.galleryPathCache.clear();
+    if (window.folderImagesCache) window.folderImagesCache.clear();
     var marker = document.getElementById('current-path-marker');
     var path = marker ? (marker.getAttribute('data-path') || '') : '';
     var opts = marker ? {
@@ -3336,6 +3435,7 @@ document.addEventListener('keydown', function(e) {
 
     function refreshGallery() {
         if (window.galleryPathCache) window.galleryPathCache.clear();
+        if (window.folderImagesCache) window.folderImagesCache.clear();
         var marker = document.getElementById('current-path-marker');
         var path = marker ? (marker.getAttribute('data-path') || '') : '';
         var colsInput = document.getElementById('cols-input');
@@ -3722,6 +3822,11 @@ document.body.addEventListener('htmx:afterSwap', function(ev) {
             filterState.filter_date_from = marker.getAttribute('data-filter-date-from') || '';
             filterState.filter_date_to = marker.getAttribute('data-filter-date-to') || '';
             filterState.filter_tag = marker.getAttribute('data-filter-tag') || '';
+        }
+
+        // 预取大图模式全量图片列表（5 分钟内不重复请求）
+        if (window.folderImagesCache && typeof window.folderImagesCache.prefetch === 'function') {
+            window.folderImagesCache.prefetch();
         }
     }
 });

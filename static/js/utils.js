@@ -59,3 +59,33 @@ function getPathFromUrl() {
     var params = new URLSearchParams(location.search);
     return params.get('path') || '';
 }
+
+/**
+ * 动态计算首屏显示的图片数量阈值
+ * 基于视口高度和列数计算，适配不同设备和屏幕尺寸
+ * 返回：首屏可显示的行数 * 列数
+ */
+function getFirstScreenThreshold() {
+    var cols = 4;  // 默认列数
+    var colsInput = document.getElementById('cols-input');
+    if (colsInput) {
+        cols = parseInt(colsInput.value, 10) || 4;
+    }
+    // 获取视口高度
+    var viewportHeight = window.innerHeight || 600;
+    // 估算每行高度（缩略图 + 间距 + 标题区域）
+    // 文件夹模式：大约 200px 行高 + 16px gap
+    // 假设每行约 220px
+    var estimatedRowHeight = 220;
+    // 减去顶部工具栏和底部空间（约 200px）
+    var usableHeight = viewportHeight - 200;
+    // 计算可见行数（至少 2 行）
+    var visibleRows = Math.max(2, Math.floor(usableHeight / estimatedRowHeight));
+    // 响应式调整：移动端减少行数
+    if (window.innerWidth < 640) {
+        visibleRows = Math.min(visibleRows, 3);
+    } else if (window.innerWidth < 768) {
+        visibleRows = Math.min(visibleRows, 4);
+    }
+    return visibleRows * cols;
+}

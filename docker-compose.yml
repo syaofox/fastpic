@@ -57,6 +57,7 @@ services:
       args:
         PUID: ${PUID:-1000}
         PGID: ${PGID:-1000}
+    image: fastpic:prod
     container_name: fastpic
     restart: unless-stopped
     depends_on:
