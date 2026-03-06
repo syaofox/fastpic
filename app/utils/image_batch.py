@@ -1,10 +1,11 @@
 """按路径前缀分批加载 Image 的迭代器，供 move/rename/delete/merge 等复用"""
+
 from collections.abc import AsyncIterator
 
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Image
+from app.models import Image
 from .path_utils import path_filter_for_prefix
 
 

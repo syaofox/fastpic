@@ -21,19 +21,24 @@ from threading import Thread
 
 from sqlalchemy.exc import IntegrityError
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileDeletedEvent, FileMovedEvent
+from watchdog.events import (
+    FileSystemEventHandler,
+    FileCreatedEvent,
+    FileDeletedEvent,
+    FileMovedEvent,
+)
 
-from scanner import (
+from app.services.scanner import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
     _relative_path,
     get_media_metadata_and_thumbnail,
 )
-from utils.images import cache_filename
-from models import Image, async_session_factory, natural_sort_key
-from utils.image_records import create_image_record
-from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
-from scan_state import begin_scan, end_scan, is_scanning
+from app.utils.images import cache_filename
+from app.models import Image, async_session_factory, natural_sort_key
+from app.utils.image_records import create_image_record
+from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
+from app.services.scan_state import begin_scan, end_scan, is_scanning
 
 from sqlmodel import select
 
@@ -74,7 +79,9 @@ class _PhotoEventHandler(FileSystemEventHandler):
             src_media = _is_media(event.src_path)
             dst_media = _is_media(event.dest_path)
             if src_media or dst_media:
-                self._queue.put(("moved", event.src_path, event.dest_path, time.monotonic()))
+                self._queue.put(
+                    ("moved", event.src_path, event.dest_path, time.monotonic())
+                )
 
 
 async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
@@ -99,7 +106,9 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             # 在线程中执行 PIL/ffmpeg 等阻塞操作
             data = await asyncio.to_thread(
                 get_media_metadata_and_thumbnail,
-                full_path, cache_path, is_vid,
+                full_path,
+                cache_path,
+                is_vid,
             )
             if data is None:
                 return
@@ -107,7 +116,11 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             width, height, modified_at, file_size, is_corrupted = data
             media_type = "video" if is_vid else "image"
 
-            damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME) if is_corrupted else None
+            damaged_tag = (
+                await ensure_tag_exists(session, DAMAGED_TAG_NAME)
+                if is_corrupted
+                else None
+            )
 
             record = create_image_record(
                 filename=full_path.name,
@@ -126,7 +139,11 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             print(f"[watcher] 新增: {rel_path}", flush=True)
         except IntegrityError as e:
             # 竞态：scanner 已先入库，静默忽略
-            logger.debug("IntegrityError on add %s (scanner may have inserted first): %s", rel_path, e)
+            logger.debug(
+                "IntegrityError on add %s (scanner may have inserted first): %s",
+                rel_path,
+                e,
+            )
         except Exception as e:
             print(f"[watcher] 处理新增失败 {rel_path}: {e}", flush=True)
 
@@ -154,7 +171,9 @@ async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
         print(f"[watcher] 删除: {rel_path}", flush=True)
 
 
-async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_path: Path):
+async def _process_moved(
+    photos_dir: Path, cache_dir: Path, src_path: Path, dst_path: Path
+):
     """处理移动/重命名：更新数据库记录路径 + 缓存"""
     src_rel = _relative_path(photos_dir, src_path)
     dst_rel = _relative_path(photos_dir, dst_path)
@@ -189,7 +208,9 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
                 is_video = getattr(img, "media_type", "image") == "video"
                 data = await asyncio.to_thread(
                     get_media_metadata_and_thumbnail,
-                    dst_path, new_cache, is_video,
+                    dst_path,
+                    new_cache,
+                    is_video,
                 )
                 if data:
                     _, _, img.modified_at, img.file_size, is_corrupted = data
@@ -283,10 +304,13 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
         end_scan()
         if processed > 0:
             from utils.folder_tree import invalidate_folder_tree_cache
+
             invalidate_folder_tree_cache()
 
 
-def start_watcher(photos_dir: Path, cache_dir: Path, loop: asyncio.AbstractEventLoop) -> Observer:
+def start_watcher(
+    photos_dir: Path, cache_dir: Path, loop: asyncio.AbstractEventLoop
+) -> Observer:
     """
     启动文件系统监听器。
 

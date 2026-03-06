@@ -1,4 +1,5 @@
 """设置/维护 API"""
+
 import asyncio
 from collections import defaultdict
 
@@ -7,17 +8,17 @@ from sqlmodel import select
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR, SCAN_DUPLICATES_BATCH_SIZE
-from models import Image, get_async_session
-from scanner import run_full_scan
-from utils.images import cache_filename
-from scan_state import begin_scan, end_scan
-from schemas import ScanDuplicatesRequest
-from app_common import templates
-from utils.path_utils import normalize_path, path_filter_for_prefix
-from utils.hash_utils import compute_file_md5
-from utils.stats import stats_folder_count_from_db
-from utils.folder_tree import invalidate_folder_tree_cache
+from app.config import PHOTOS_DIR, CACHE_DIR, SCAN_DUPLICATES_BATCH_SIZE
+from app.models import Image, get_async_session
+from app.services.scanner import run_full_scan
+from app.utils.images import cache_filename
+from app.services.scan_state import begin_scan, end_scan
+from app.schemas import ScanDuplicatesRequest
+from app.app_common import templates
+from app.utils.path_utils import normalize_path, path_filter_for_prefix
+from app.utils.hash_utils import compute_file_md5
+from app.utils.stats import stats_folder_count_from_db
+from app.utils.folder_tree import invalidate_folder_tree_cache
 
 router = APIRouter(tags=["settings"])
 
@@ -44,7 +45,8 @@ async def settings_page(request: Request):
 @router.get("/api/scan-status")
 async def get_scan_status():
     """返回当前是否有扫描任务在进行"""
-    from scan_state import is_scanning
+    from app.services.scan_state import is_scanning
+
     return {"scanning": is_scanning()}
 
 
@@ -95,9 +97,15 @@ async def scan_duplicates(
     session: AsyncSession = Depends(get_async_session),
 ):
     """扫描重复文件（分批加载，支持百万级；仅对同 size 候选组计算 MD5）"""
-    folder_path = normalize_path((body.folder_path if body else None) or "", allow_empty=True)
+    folder_path = normalize_path(
+        (body.folder_path if body else None) or "", allow_empty=True
+    )
     base_stmt = select(
-        Image.id, Image.relative_path, Image.filename, Image.file_size, Image.modified_at
+        Image.id,
+        Image.relative_path,
+        Image.filename,
+        Image.file_size,
+        Image.modified_at,
     )
     if folder_path:
         pf = path_filter_for_prefix(Image.relative_path, folder_path)
@@ -118,14 +126,16 @@ async def scan_duplicates(
         for row in rows:
             img_id, rel_path, filename, file_size, modified_at = row
             last_id = img_id or last_id
-            by_size[file_size or 0].append({
-                "id": img_id,
-                "relative_path": rel_path,
-                "filename": filename,
-                "file_size": file_size,
-                "modified_at": modified_at,
-                "cache_key": cache_filename(rel_path),
-            })
+            by_size[file_size or 0].append(
+                {
+                    "id": img_id,
+                    "relative_path": rel_path,
+                    "filename": filename,
+                    "file_size": file_size,
+                    "modified_at": modified_at,
+                    "cache_key": cache_filename(rel_path),
+                }
+            )
         await asyncio.sleep(0)
     candidate_groups = [g for g in by_size.values() if len(g) > 1]
     if not candidate_groups:
@@ -142,11 +152,13 @@ async def scan_duplicates(
     groups = []
     for content_hash, items in by_hash.items():
         if len(items) > 1:
-            groups.append({
-                "content_hash": content_hash,
-                "file_size": items[0]["file_size"],
-                "items": items,
-            })
+            groups.append(
+                {
+                    "content_hash": content_hash,
+                    "file_size": items[0]["file_size"],
+                    "items": items,
+                }
+            )
     return {"groups": groups}
 
 
@@ -174,12 +186,18 @@ async def get_cache_stats_realtime():
 async def get_stats(session: AsyncSession = Depends(get_async_session)):
     """获取数据库和文件系统统计信息（优先从 DB 统计，支持百万级）"""
     image_count = (
-        await session.execute(select(func.count(Image.id)).where(Image.media_type == "image"))
+        await session.execute(
+            select(func.count(Image.id)).where(Image.media_type == "image")
+        )
     ).scalar() or 0
     video_count = (
-        await session.execute(select(func.count(Image.id)).where(Image.media_type == "video"))
+        await session.execute(
+            select(func.count(Image.id)).where(Image.media_type == "video")
+        )
     ).scalar() or 0
-    total_size_raw = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
+    total_size_raw = (
+        await session.execute(select(func.sum(Image.file_size)))
+    ).scalar() or 0
     total_size = int(total_size_raw) if total_size_raw else 0
     folder_count = await stats_folder_count_from_db(session)
     cache_count = image_count + video_count

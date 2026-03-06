@@ -1,8 +1,9 @@
 """标签相关辅助函数"""
+
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from models import Tag, ImageTag
+from app.models import Tag, ImageTag
 
 
 DAMAGED_TAG_NAME = "损坏"

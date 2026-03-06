@@ -39,12 +39,8 @@ WORKDIR /app
 
 # 从构建阶段拷贝虚拟环境和源码
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/*.py /app/
-COPY --from=builder /app/utils /app/utils
-COPY --from=builder /app/routers /app/routers
+COPY --from=builder /app/app /app/app
 COPY --from=builder /app/pyproject.toml /app/
-COPY --from=builder /app/templates /app/templates
-COPY --from=builder /app/static /app/static
 
 # 创建数据目录并设置权限
 RUN mkdir -p /app/photos /app/cache /app/data \
@@ -66,4 +62,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/')" || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,17 +1,19 @@
 """应用公共对象：模板、供 main 和 routers 共享"""
+
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi.templating import Jinja2Templates
 
-from config import ROOT
-from utils.images import cache_filename
+from app.config import ROOT
+from app.utils.images import cache_filename
 
-templates = Jinja2Templates(directory=str(ROOT / "templates"))
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["cache_key"] = cache_filename
 templates.env.filters["urlencode_path"] = lambda s: quote(s or "", safe="")
-templates.env.filters["urlencode_path_segments"] = (
-    lambda s: "/".join(quote(part, safe="") for part in (s or "").split("/"))
+templates.env.filters["urlencode_path_segments"] = lambda s: "/".join(
+    quote(part, safe="") for part in (s or "").split("/")
 )
 
 

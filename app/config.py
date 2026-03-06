@@ -1,13 +1,14 @@
 """应用配置"""
+
 import os
 import re
 import secrets
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 PHOTOS_DIR = ROOT / "photos"
 CACHE_DIR = ROOT / "cache"
-STATIC_DIR = ROOT / "static"
+STATIC_DIR = ROOT / "app" / "static"
 PER_PAGE = 24
 
 # 数据库批量操作

@@ -1,4 +1,5 @@
 """文件夹 API：移动、删除、合并、创建、搜索"""
+
 import asyncio
 import os
 import shutil
@@ -10,13 +11,16 @@ from sqlmodel import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR, IN_CLAUSE_BATCH_SIZE, FOLDER_OP_BATCH_SIZE
-from models import Image, FolderThumbnail, get_async_session
-from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from utils.images import cache_filename
-from utils.image_path_update import update_image_path_and_regenerate_thumbnail
-from utils.image_batch import iter_images_by_path_prefix, collect_image_items_by_prefix
-from schemas import (
+from app.config import PHOTOS_DIR, CACHE_DIR, IN_CLAUSE_BATCH_SIZE, FOLDER_OP_BATCH_SIZE
+from app.models import Image, FolderThumbnail, get_async_session
+from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.utils.images import cache_filename
+from app.utils.image_path_update import update_image_path_and_regenerate_thumbnail
+from app.utils.image_batch import (
+    iter_images_by_path_prefix,
+    collect_image_items_by_prefix,
+)
+from app.schemas import (
     MoveImagesRequest,
     MoveFoldersRequest,
     DeleteFoldersRequest,
@@ -28,16 +32,20 @@ from schemas import (
     BatchRenameRequest,
     AddFolderThumbnailRequest,
 )
-from utils.path_utils import normalize_path, path_filter_for_prefix, invalid_filename
-from utils.unique_path import unique_path
-from utils.images import delete_image_files
-from utils.folder_tree import (
+from app.utils.path_utils import (
+    normalize_path,
+    path_filter_for_prefix,
+    invalid_filename,
+)
+from app.utils.unique_path import unique_path
+from app.utils.images import delete_image_files
+from app.utils.folder_tree import (
     get_folder_counts_for_search,
     invalidate_folder_tree_cache,
     get_subfolders,
 )
-from utils.search import search_match
-from utils.hash_utils import compute_file_md5
+from app.utils.search import search_match
+from app.utils.hash_utils import compute_file_md5
 
 router = APIRouter(prefix="/api", tags=["folders"])
 
@@ -138,9 +146,15 @@ async def move_folders(
         except OSError as e:
             errors.append(f"{folder_path}: {e}")
             continue
-        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+        async for images in iter_images_by_path_prefix(
+            session, folder_path, FOLDER_OP_BATCH_SIZE
+        ):
             for img in images:
-                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                suffix = (
+                    ""
+                    if img.relative_path == folder_path
+                    else img.relative_path[len(folder_path) :]
+                )
                 new_rel = new_prefix + suffix
                 new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
                 await update_image_path_and_regenerate_thumbnail(
@@ -202,9 +216,15 @@ async def rename_folder(
         return {"ok": False, "error": f"重命名失败: {e}"}
 
     try:
-        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+        async for images in iter_images_by_path_prefix(
+            session, folder_path, FOLDER_OP_BATCH_SIZE
+        ):
             for img in images:
-                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                suffix = (
+                    ""
+                    if img.relative_path == folder_path
+                    else img.relative_path[len(folder_path) :]
+                )
                 new_rel = new_prefix + suffix
                 new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
                 await update_image_path_and_regenerate_thumbnail(
@@ -294,12 +314,14 @@ async def batch_rename_info(
             stmt = select(Image).where(Image.id.in_(batch_ids))
             result = await session.execute(stmt)
             for img in result.scalars().all():
-                images.append({
-                    "id": img.id,
-                    "filename": img.filename,
-                    "relative_path": img.relative_path,
-                    "modified_at": img.modified_at,
-                })
+                images.append(
+                    {
+                        "id": img.id,
+                        "filename": img.filename,
+                        "relative_path": img.relative_path,
+                        "modified_at": img.modified_at,
+                    }
+                )
 
     for folder_path in body.folder_paths or []:
         folder_path = normalize_path(folder_path, allow_empty=False)
@@ -351,7 +373,10 @@ async def batch_rename(
         if not src_path.exists() or not src_path.is_dir():
             errors.append(f"{folder_path}: 文件夹不存在")
             continue
-        if Path(folder_path).name == new_name and (target_dir / new_name).resolve() == src_path.resolve():
+        if (
+            Path(folder_path).name == new_name
+            and (target_dir / new_name).resolve() == src_path.resolve()
+        ):
             folder_count += 1
             continue
         dest_path = target_dir / new_name
@@ -366,9 +391,15 @@ async def batch_rename(
             continue
 
         try:
-            async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+            async for images in iter_images_by_path_prefix(
+                session, folder_path, FOLDER_OP_BATCH_SIZE
+            ):
                 for img in images:
-                    suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path):]
+                    suffix = (
+                        ""
+                        if img.relative_path == folder_path
+                        else img.relative_path[len(folder_path) :]
+                    )
                     new_rel = new_prefix + suffix
                     new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
                     await update_image_path_and_regenerate_thumbnail(
@@ -457,7 +488,9 @@ async def delete_folders(
         folder_path = normalize_path(folder_path, allow_empty=False)
         if folder_path is None:
             continue
-        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+        async for images in iter_images_by_path_prefix(
+            session, folder_path, FOLDER_OP_BATCH_SIZE
+        ):
             for img in images:
                 delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
                 await session.delete(img)
@@ -500,8 +533,12 @@ async def merge_folders(
     def _belongs_to(rel: str, prefix: str) -> bool:
         return rel == prefix or rel.startswith(prefix + "/")
 
-    items_a = await collect_image_items_by_prefix(session, folder_a, "a", FOLDER_OP_BATCH_SIZE)
-    items_b = await collect_image_items_by_prefix(session, folder_b, "b", FOLDER_OP_BATCH_SIZE)
+    items_a = await collect_image_items_by_prefix(
+        session, folder_a, "a", FOLDER_OP_BATCH_SIZE
+    )
+    items_b = await collect_image_items_by_prefix(
+        session, folder_b, "b", FOLDER_OP_BATCH_SIZE
+    )
     count_a, count_b = len(items_a), len(items_b)
     if body.target == "folder_b" or (body.target == "auto" and count_b > count_a):
         target_prefix, source_prefix = folder_b, folder_a
@@ -544,10 +581,7 @@ async def merge_folders(
             for x in from_other:
                 if x[0] != keeper[0]:
                     to_delete.add(x[0])
-    target_hashes = {
-        h for h, k in to_keep.items()
-        if _belongs_to(k[1], target_prefix)
-    }
+    target_hashes = {h for h, k in to_keep.items() if _belongs_to(k[1], target_prefix)}
     to_move: list[tuple[int, str]] = []
     for h, items in by_hash.items():
         for img_id, rel_path, src in items:
@@ -570,7 +604,7 @@ async def merge_folders(
         img = result.scalar_one_or_none()
         if not img:
             continue
-        suffix = rel_path[len(source_prefix):].lstrip("/")
+        suffix = rel_path[len(source_prefix) :].lstrip("/")
         new_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
         new_full = target_path / suffix if suffix else target_path
         new_full.parent.mkdir(parents=True, exist_ok=True)
@@ -578,7 +612,9 @@ async def merge_folders(
             new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
             new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
         try:
-            await asyncio.to_thread(shutil.move, str(photos_dir / rel_path), str(new_full))
+            await asyncio.to_thread(
+                shutil.move, str(photos_dir / rel_path), str(new_full)
+            )
         except OSError as e:
             await session.rollback()
             return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
@@ -597,8 +633,16 @@ async def merge_folders(
     try:
         await session.commit()
         invalidate_folder_tree_cache()
-        print(f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件", flush=True)
-        return {"ok": True, "moved": moved, "deleted": len(to_delete), "target": target_prefix}
+        print(
+            f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
+            flush=True,
+        )
+        return {
+            "ok": True,
+            "moved": moved,
+            "deleted": len(to_delete),
+            "target": target_prefix,
+        }
     except IntegrityError:
         await session.rollback()
         return {"ok": False, "error": "路径冲突，请重试"}
@@ -659,7 +703,11 @@ async def add_folder_thumbnail(
             await session.delete(ft)  # 超出 4 张，移除末尾最旧的
         else:
             session.add(ft)
-    session.add(FolderThumbnail(folder_path=folder_path, image_relative_path=rel_path, display_order=0))
+    session.add(
+        FolderThumbnail(
+            folder_path=folder_path, image_relative_path=rel_path, display_order=0
+        )
+    )
     await session.commit()
     return {"ok": True, "folder_path": folder_path, "relative_path": rel_path}
 
@@ -705,7 +753,11 @@ async def get_subfolders_api(
     subfolders = await get_subfolders(session, PHOTOS_DIR, path, pf)
     return {
         "subfolders": [
-            {"name": s["name"], "full_path": s["full_path"], "image_count": s["image_count"]}
+            {
+                "name": s["name"],
+                "full_path": s["full_path"],
+                "image_count": s["image_count"],
+            }
             for s in subfolders
         ]
     }

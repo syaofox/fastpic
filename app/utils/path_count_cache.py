@@ -1,9 +1,10 @@
 """path count 持久化缓存：减轻百万级 COUNT 查询。含内存 + DB 双层缓存供 gallery 使用。"""
+
 import asyncio
 import time
 from sqlalchemy import text
 
-from models import sync_engine
+from app.models import sync_engine
 
 _PATH_COUNT_DB_TTL = 300.0  # 5 分钟
 _COUNT_CACHE_TTL = 300.0  # 内存 TTL（与 DB 一致）

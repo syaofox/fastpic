@@ -12,11 +12,11 @@ from sqlmodel import select
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Image, async_session_factory
-from utils.images import cache_filename
-from utils.path_count_cache import cleanup_expired_path_count_cache
-from utils.image_records import create_image_record
-from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
+from app.models import Image, async_session_factory
+from app.utils.images import cache_filename
+from app.utils.path_count_cache import cleanup_expired_path_count_cache
+from app.utils.image_records import create_image_record
+from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".ts"}
@@ -126,10 +126,14 @@ def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
         result = subprocess.run(
             [
                 "ffprobe",
-                "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=p=0",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
                 str(full_path),
             ],
             capture_output=True,
@@ -156,9 +160,12 @@ def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
             [
                 "ffmpeg",
                 "-y",
-                "-i", str(full_path),
-                "-vframes", "1",
-                "-q:v", "2",
+                "-i",
+                str(full_path),
+                "-vframes",
+                "1",
+                "-q:v",
+                "2",
                 str(tmp_jpg),
             ],
             capture_output=True,
@@ -192,14 +199,18 @@ def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
             return False
 
 
-def generate_thumbnail_for_media(full_path: Path, cache_path: Path, is_video: bool) -> bool:
+def generate_thumbnail_for_media(
+    full_path: Path, cache_path: Path, is_video: bool
+) -> bool:
     """根据 is_video 选择图片或视频缩略图生成，供 move/rename/merge 等复用"""
     if is_video:
         return _generate_video_thumbnail(full_path, cache_path)
     return _generate_thumbnail(full_path, cache_path)
 
 
-def _collect_media_and_existing(photos_dir: Path) -> tuple[list[Path], list[Path], set[str]]:
+def _collect_media_and_existing(
+    photos_dir: Path,
+) -> tuple[list[Path], list[Path], set[str]]:
     """
     一次 os.walk 遍历收集图片、视频路径及存在的媒体相对路径，
     供 cleanup_database、scan_photos、scan_videos 复用，避免多次磁盘遍历。
@@ -246,7 +257,15 @@ def _process_single_image_sync(
             cache_path = cache_dir / cache_name
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             thumb.save(cache_path, "WEBP", quality=85)
-            return (full_path.name, rel_path, modified_at, file_size, width, height, is_corrupted)
+            return (
+                full_path.name,
+                rel_path,
+                modified_at,
+                file_size,
+                width,
+                height,
+                is_corrupted,
+            )
         finally:
             img.close()
     except Exception as e:
@@ -300,7 +319,9 @@ async def scan_photos(
 
         pending: list[Path] = []
         batch_count = 0
-        seen_in_run: set[str] = set()  # 本轮已添加的 relative_path（小写），避免重复插入
+        seen_in_run: set[str] = (
+            set()
+        )  # 本轮已添加的 relative_path（小写），避免重复插入
         loop = asyncio.get_running_loop()
 
         def _dedupe_image_results(
@@ -315,7 +336,9 @@ async def scan_photos(
                     seen[key] = data
             return list(seen.values())
 
-        async def _process_batch(paths: list[Path]) -> list[tuple[str, str, float, int, int, int]]:
+        async def _process_batch(
+            paths: list[Path],
+        ) -> list[tuple[str, str, float, int, int, int]]:
             """多进程处理一批图片，返回成功的结果列表"""
             if not paths:
                 return []
@@ -335,8 +358,7 @@ async def scan_photos(
         i = 0
         while i < len(image_files):
             check_batch = [
-                p for p in image_files[i : i + _EXISTS_CHECK_BATCH]
-                if p.is_file()
+                p for p in image_files[i : i + _EXISTS_CHECK_BATCH] if p.is_file()
             ]
             i += _EXISTS_CHECK_BATCH
             if not check_batch:
@@ -344,25 +366,38 @@ async def scan_photos(
             rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
             with session.no_autoflush:
                 result = await session.execute(
-                    select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
+                    select(Image.relative_path).where(
+                        Image.relative_path.in_(rel_paths)
+                    )
                 )
                 existing_rows = result.fetchall()
             # MySQL 默认 collation 大小写不敏感，需用小写比较
             existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
+                if (
+                    rel_path.lower() in existing_lower
+                    or rel_path.lower() in seen_in_run
+                ):
                     continue
                 pending.append(full_path)
 
             # 攒够一批则多进程处理
             while len(pending) >= _PROCESS_BATCH_SIZE:
-                batch_to_process = pending[: _PROCESS_BATCH_SIZE]
-                pending = pending[_PROCESS_BATCH_SIZE :]
+                batch_to_process = pending[:_PROCESS_BATCH_SIZE]
+                pending = pending[_PROCESS_BATCH_SIZE:]
                 results = await _process_batch(batch_to_process)
                 results = _dedupe_image_results(results)
                 for data in results:
-                    filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
+                    (
+                        filename,
+                        rel_path,
+                        modified_at,
+                        file_size,
+                        width,
+                        height,
+                        is_corrupted,
+                    ) = data
                     key = rel_path.lower()
                     if key in seen_in_run:
                         continue
@@ -398,7 +433,15 @@ async def scan_photos(
             results = await _process_batch(pending)
             results = _dedupe_image_results(results)
             for data in results:
-                filename, rel_path, modified_at, file_size, width, height, is_corrupted = data
+                (
+                    filename,
+                    rel_path,
+                    modified_at,
+                    file_size,
+                    width,
+                    height,
+                    is_corrupted,
+                ) = data
                 key = rel_path.lower()
                 if key in seen_in_run:
                     continue
@@ -459,10 +502,14 @@ async def scan_videos(
     async with async_session_factory() as session:
         pending: list[Path] = []
         batch_count = 0
-        seen_in_run: set[str] = set()  # 本轮已添加的 relative_path（小写），避免重复插入
+        seen_in_run: set[str] = (
+            set()
+        )  # 本轮已添加的 relative_path（小写），避免重复插入
         loop = asyncio.get_running_loop()
 
-        async def _process_video_batch(paths: list[Path]) -> list[tuple[str, str, float, int, int, int]]:
+        async def _process_video_batch(
+            paths: list[Path],
+        ) -> list[tuple[str, str, float, int, int, int]]:
             """多进程处理一批视频"""
             if not paths:
                 return []
@@ -492,8 +539,7 @@ async def scan_videos(
         vi = 0
         while vi < len(video_files):
             check_batch = [
-                p for p in video_files[vi : vi + _EXISTS_CHECK_BATCH]
-                if p.is_file()
+                p for p in video_files[vi : vi + _EXISTS_CHECK_BATCH] if p.is_file()
             ]
             vi += _EXISTS_CHECK_BATCH
             if not check_batch:
@@ -501,20 +547,25 @@ async def scan_videos(
             rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
             with session.no_autoflush:
                 result = await session.execute(
-                    select(Image.relative_path).where(Image.relative_path.in_(rel_paths))
+                    select(Image.relative_path).where(
+                        Image.relative_path.in_(rel_paths)
+                    )
                 )
                 existing_rows = result.fetchall()
             # MySQL 默认 collation 大小写不敏感，需用小写比较
             existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
+                if (
+                    rel_path.lower() in existing_lower
+                    or rel_path.lower() in seen_in_run
+                ):
                     continue
                 pending.append(full_path)
 
             while len(pending) >= _video_batch_size:
-                batch_to_process = pending[: _video_batch_size]
-                pending = pending[_video_batch_size :]
+                batch_to_process = pending[:_video_batch_size]
+                pending = pending[_video_batch_size:]
                 results = await _process_video_batch(batch_to_process)
                 results = _dedupe_results(results)
                 for data in results:
@@ -541,7 +592,9 @@ async def scan_videos(
                         await session.commit()
                     except (IntegrityError, DataError) as e:
                         await session.rollback()
-                        logger.debug("跳过异常记录 (video batch): %s %s", type(e).__name__, e)
+                        logger.debug(
+                            "跳过异常记录 (video batch): %s %s", type(e).__name__, e
+                        )
                     batch_count = 0
 
                 await asyncio.sleep(0)
@@ -608,7 +661,10 @@ async def run_db_only_validation(photos_dir: Path, cache_dir: Path) -> dict:
                 break
             total_checked += len(batch)
             if total_checked == len(batch):
-                print(f"[scan] 数据库共约 {len(batch)}+ 条记录，校验原图是否存在...", flush=True)
+                print(
+                    f"[scan] 数据库共约 {len(batch)}+ 条记录，校验原图是否存在...",
+                    flush=True,
+                )
 
             batch_count = 0
             for img in batch:
@@ -651,9 +707,7 @@ async def run_full_scan(photos_dir: Path, cache_dir: Path) -> dict:
     images, videos, existing_rel_paths = await asyncio.to_thread(
         _collect_media_and_existing, photos_dir
     )
-    cleanup_result = await cleanup_database(
-        photos_dir, cache_dir, existing_rel_paths
-    )
+    cleanup_result = await cleanup_database(photos_dir, cache_dir, existing_rel_paths)
     n_img = await scan_photos(photos_dir, cache_dir, images)
     n_vid = await scan_videos(photos_dir, cache_dir, videos)
     return {
@@ -719,7 +773,10 @@ async def cleanup_database(
                 break
             total_checked += len(batch)
             if total_checked == len(batch):
-                print(f"[cleanup] 数据库共约 {len(batch)}+ 条记录，分批检查原图是否存在...", flush=True)
+                print(
+                    f"[cleanup] 数据库共约 {len(batch)}+ 条记录，分批检查原图是否存在...",
+                    flush=True,
+                )
 
             batch_count = 0
             for img in batch:
@@ -743,7 +800,9 @@ async def cleanup_database(
             await asyncio.sleep(0)
 
         if stale_removed:
-            print(f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
+            print(
+                f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True
+            )
 
     # ── 第 2 步：清除孤儿缓存文件，同时收集 cache_mtimes 供步骤 3 使用（消除 stat 调用） ──
     async def _remove_orphan_and_collect_mtimes(
@@ -804,10 +863,9 @@ async def cleanup_database(
                 cache_path = cache_dir / cache_name
                 photo_path = photos_dir / img.relative_path
                 # 用 DB modified_at 与 cache_mtimes 比较，无需 stat
-                cache_fresh = (
-                    cache_name in cache_mtimes
-                    and cache_mtimes[cache_name] >= (img.modified_at or 0)
-                )
+                cache_fresh = cache_name in cache_mtimes and cache_mtimes[
+                    cache_name
+                ] >= (img.modified_at or 0)
                 if not cache_fresh:
                     is_video = getattr(img, "media_type", "image") == "video"
                     to_regen.append((photo_path, cache_path, is_video))
@@ -833,7 +891,9 @@ async def cleanup_database(
 
     path_count_expired = cleanup_expired_path_count_cache()
     if path_count_expired:
-        print(f"[cleanup] 清理 {path_count_expired} 条过期 path_count_cache", flush=True)
+        print(
+            f"[cleanup] 清理 {path_count_expired} 条过期 path_count_cache", flush=True
+        )
 
     summary = {
         "stale_removed": stale_removed,

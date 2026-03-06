@@ -1,13 +1,19 @@
 """标签 API"""
+
 from sqlalchemy import delete
 from sqlmodel import select
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from models import Image, Tag, ImageTag, get_async_session
+from app.models import Image, Tag, ImageTag, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
-from schemas import AddTagsRequest, RenameTagRequest, MergeTagRequest, BatchDeleteTagsRequest
-from utils.path_utils import escape_like, LIKE_ESCAPE
+from app.schemas import (
+    AddTagsRequest,
+    RenameTagRequest,
+    MergeTagRequest,
+    BatchDeleteTagsRequest,
+)
+from app.utils.path_utils import escape_like, LIKE_ESCAPE
 
 router = APIRouter(prefix="/api", tags=["tags"])
 
@@ -128,9 +134,7 @@ async def merge_tag(
         ]
         if to_add:
             session.add_all(to_add)
-        await session.execute(
-            delete(ImageTag).where(ImageTag.tag_id == source_tag.id)
-        )
+        await session.execute(delete(ImageTag).where(ImageTag.tag_id == source_tag.id))
     await session.delete(source_tag)
     try:
         await session.commit()
@@ -192,7 +196,7 @@ async def add_image_tags(
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="媒体文件不存在")
     added = 0
-    for name in (body.tags or []):
+    for name in body.tags or []:
         name = (name or "").strip().lstrip("#")
         if not name:
             continue
@@ -210,7 +214,9 @@ async def add_image_tags(
                 if not tag:
                     continue
         existing = await session.execute(
-            select(ImageTag).where(ImageTag.image_id == image_id, ImageTag.tag_id == tag.id)
+            select(ImageTag).where(
+                ImageTag.image_id == image_id, ImageTag.tag_id == tag.id
+            )
         )
         if existing.scalar_one_or_none() is None:
             session.add(ImageTag(image_id=image_id, tag_id=tag.id))

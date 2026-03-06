@@ -1,4 +1,5 @@
 """图片 API：删除、下载、上传、信息"""
+
 import asyncio
 import hashlib
 import json
@@ -14,23 +15,43 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PHOTOS_DIR, CACHE_DIR, MAX_UPLOAD_FILE_SIZE, MAX_UPLOAD_TOTAL_SIZE, IN_CLAUSE_BATCH_SIZE
-from models import Image, Tag, ImageTag, async_session_factory, get_async_session, natural_sort_key
-from scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from utils.hash_utils import compute_file_md5_by_path
-from utils.images import cache_filename
-from utils.folder_tree import invalidate_folder_tree_cache
-from schemas import DeleteImagesRequest, DownloadZipRequest
-from utils.path_utils import escape_like, normalize_path, path_filter_for_prefix, resolve_and_validate_relative_path
-from utils.image_records import create_image_record
-from utils.unique_path import unique_path
-from utils.format import format_file_size
-from utils.images import delete_image_files
+from app.config import (
+    PHOTOS_DIR,
+    CACHE_DIR,
+    MAX_UPLOAD_FILE_SIZE,
+    MAX_UPLOAD_TOTAL_SIZE,
+    IN_CLAUSE_BATCH_SIZE,
+)
+from app.models import (
+    Image,
+    Tag,
+    ImageTag,
+    async_session_factory,
+    get_async_session,
+    natural_sort_key,
+)
+from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.utils.hash_utils import compute_file_md5_by_path
+from app.utils.images import cache_filename
+from app.utils.folder_tree import invalidate_folder_tree_cache
+from app.schemas import DeleteImagesRequest, DownloadZipRequest
+from app.utils.path_utils import (
+    escape_like,
+    normalize_path,
+    path_filter_for_prefix,
+    resolve_and_validate_relative_path,
+)
+from app.utils.image_records import create_image_record
+from app.utils.unique_path import unique_path
+from app.utils.format import format_file_size
+from app.utils.images import delete_image_files
 
 router = APIRouter(prefix="/api", tags=["images"])
 
 
-def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
+def _compute_existing_hashes(
+    target_dir: Path, image_extensions: set[str]
+) -> dict[str, str]:
     """同步计算目标目录中已有图片的 MD5 哈希，返回 hash -> 相对路径（仅根目录直接子文件）"""
     existing_hashes: dict[str, str] = {}
     if not target_dir.is_dir():
@@ -236,7 +257,9 @@ async def get_image_info(
         "full_path": full_path,
         "filename": img.filename,
         "relative_path": img.relative_path,
-        "resolution": f"{img.width} × {img.height}" if (img.width and img.height) else "—",
+        "resolution": f"{img.width} × {img.height}"
+        if (img.width and img.height)
+        else "—",
         "file_size": format_file_size(img.file_size or 0),
         "modified_at": modified_str,
         "tags": tags,
@@ -246,8 +269,8 @@ async def get_image_info(
 @router.post("/upload")
 async def upload_images(request: Request):
     """上传图片或视频到指定路径，支持子目录结构（拖拽/选择文件夹）"""
-    from scanner import get_media_metadata_and_thumbnail
-    from utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
+    from app.services.scanner import get_media_metadata_and_thumbnail
+    from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
     form_data = await request.form(
         max_part_size=MAX_UPLOAD_FILE_SIZE + 1024,
@@ -258,7 +281,11 @@ async def upload_images(request: Request):
     path = raw_path.strip() if isinstance(raw_path, str) else ""
     raw_dup = form_data.get("on_duplicate")
     on_duplicate = (raw_dup or "skip").strip() if isinstance(raw_dup, str) else "skip"
-    files = [f for f in (form_data.getlist("files") or []) if hasattr(f, "read") and hasattr(f, "filename")]
+    files = [
+        f
+        for f in (form_data.getlist("files") or [])
+        if hasattr(f, "read") and hasattr(f, "filename")
+    ]
 
     raw_paths = form_data.get("file_paths")
     try:
@@ -272,22 +299,28 @@ async def upload_images(request: Request):
     file_paths = file_paths[: len(files)]
 
     if not files:
-        return {"uploaded": 0, "skipped": 0, "errors": ["未收到任何文件，请检查是否选择了图片或视频"]}
+        return {
+            "uploaded": 0,
+            "skipped": 0,
+            "errors": ["未收到任何文件，请检查是否选择了图片或视频"],
+        }
 
     target_path = normalize_path(path, allow_empty=True) or ""
-    print(f"[upload] 开始: {len(files)} 个文件 -> {target_path or '根目录'}", flush=True)
+    print(
+        f"[upload] 开始: {len(files)} 个文件 -> {target_path or '根目录'}", flush=True
+    )
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    has_subpath = any(
-        "/" in (fp or "") or "\\" in (fp or "") for fp in file_paths
-    )
+    has_subpath = any("/" in (fp or "") or "\\" in (fp or "") for fp in file_paths)
     media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
     if has_subpath:
         # 仅哈希即将写入的子目录，避免扫描整个图库
         subdirs: set[str] = set()
         for i, f in enumerate(files):
-            display_name = (file_paths[i] if i < len(file_paths) else "") or (getattr(f, "filename", "") or "")
+            display_name = (file_paths[i] if i < len(file_paths) else "") or (
+                getattr(f, "filename", "") or ""
+            )
             sanitized = _sanitize_upload_filename(display_name.strip())
             if sanitized is None:
                 continue
@@ -339,12 +372,16 @@ async def upload_images(request: Request):
                 width, height, modified_at, file_size, is_corrupted = data
                 async with async_session_factory() as sess:
                     existing_record = (
-                        await sess.execute(select(Image).where(Image.relative_path == rel_path))
+                        await sess.execute(
+                            select(Image).where(Image.relative_path == rel_path)
+                        )
                     ).scalar_one_or_none()
                     if existing_record:
                         existing_record.filename = dest.name
                         existing_record.filename_natural = natural_sort_key(dest.name)
-                        existing_record.relative_path_natural = natural_sort_key(rel_path)
+                        existing_record.relative_path_natural = natural_sort_key(
+                            rel_path
+                        )
                         existing_record.modified_at = modified_at
                         existing_record.file_size = file_size
                         existing_record.width = width
@@ -394,13 +431,17 @@ async def upload_images(request: Request):
             errors.append(f"{display_name or '未知'}: 不支持的格式 {ext}")
             continue
         if total_uploaded_bytes >= MAX_UPLOAD_TOTAL_SIZE:
-            errors.append(f"{display_name or '未知'}: 本次上传总大小已达限制 ({MAX_UPLOAD_TOTAL_SIZE // (1024*1024)}MB)")
+            errors.append(
+                f"{display_name or '未知'}: 本次上传总大小已达限制 ({MAX_UPLOAD_TOTAL_SIZE // (1024 * 1024)}MB)"
+            )
             continue
         is_video = ext in VIDEO_EXTENSIONS
         try:
             content = await f.read(MAX_UPLOAD_FILE_SIZE + 1)
             if len(content) > MAX_UPLOAD_FILE_SIZE:
-                errors.append(f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024*1024)}MB)")
+                errors.append(
+                    f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024 * 1024)}MB)"
+                )
                 continue
             if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
                 errors.append(f"{display_name}: 本次上传总大小将超限")
@@ -418,11 +459,19 @@ async def upload_images(request: Request):
             elif on_duplicate == "overwrite":
                 dest = target_dir / existing_hashes[content_hash]
             else:
-                dest_parent = (target_dir / Path(sanitized).parent) if "/" in sanitized else target_dir
+                dest_parent = (
+                    (target_dir / Path(sanitized).parent)
+                    if "/" in sanitized
+                    else target_dir
+                )
                 dest_parent.mkdir(parents=True, exist_ok=True)
                 dest = unique_path(dest_parent, base_name, suffix_style="underscore")
         else:
-            dest_parent = (target_dir / Path(sanitized).parent) if "/" in sanitized else target_dir
+            dest_parent = (
+                (target_dir / Path(sanitized).parent)
+                if "/" in sanitized
+                else target_dir
+            )
             dest_parent.mkdir(parents=True, exist_ok=True)
             dest = dest_parent / base_name
             if dest.exists():
@@ -432,8 +481,12 @@ async def upload_images(request: Request):
                 elif on_duplicate == "overwrite":
                     pass
                 else:
-                    dest = unique_path(dest_parent, base_name, suffix_style="underscore")
-        tasks.append((i, f, display_name, sanitized, content, content_hash, dest, is_video))
+                    dest = unique_path(
+                        dest_parent, base_name, suffix_style="underscore"
+                    )
+        tasks.append(
+            (i, f, display_name, sanitized, content, content_hash, dest, is_video)
+        )
 
     results = await asyncio.gather(
         *[_process_one(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7]) for t in tasks],
@@ -452,5 +505,8 @@ async def upload_images(request: Request):
                 errors.append(err)
     if uploaded > 0:
         invalidate_folder_tree_cache()
-    print(f"[upload] 完成: {uploaded} 成功, {skipped} 跳过, {len(errors)} 失败", flush=True)
+    print(
+        f"[upload] 完成: {uploaded} 成功, {skipped} 跳过, {len(errors)} 失败",
+        flush=True,
+    )
     return {"uploaded": uploaded, "skipped": skipped, "errors": errors}

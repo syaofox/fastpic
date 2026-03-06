@@ -1,17 +1,19 @@
 """认证路由：登录、登出"""
+
 import hmac
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from config import ACCESS_PASSWORD, SESSION_TOKEN
-from app_common import templates
+from app.config import ACCESS_PASSWORD, SESSION_TOKEN
+from app.app_common import templates
 
 router = APIRouter(tags=["auth"])
 
 
 def setup_auth_middleware(app):
     """注册认证中间件到 app"""
+
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         if not ACCESS_PASSWORD:
@@ -40,9 +42,13 @@ async def login_submit(request: Request):
     password = (form.get("password") or "").strip()
     if hmac.compare_digest(password, ACCESS_PASSWORD):
         response = RedirectResponse(url="/", status_code=302)
-        response.set_cookie(key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax")
+        response.set_cookie(
+            key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax"
+        )
         return response
-    return templates.TemplateResponse("login.html", {"request": request, "error": "密码错误，请重试"})
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "error": "密码错误，请重试"}
+    )
 
 
 @router.get("/logout")

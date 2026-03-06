@@ -1,4 +1,5 @@
 """文件夹树：提取、计数、嵌套结构、缓存、子文件夹"""
+
 import asyncio
 import time
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 from sqlmodel import select
 from sqlalchemy import text
 
-from models import FolderThumbnail, natural_sort_key
+from app.models import FolderThumbnail, natural_sort_key
 
 from .path_utils import escape_like, LIKE_ESCAPE
 
@@ -70,12 +71,18 @@ def build_nested_tree(flat_folders: list[list[str]]) -> dict:
     return root
 
 
-async def _get_user_thumbnails(session, folder_paths: list[str], limit: int = 4) -> dict[str, list[str]]:
+async def _get_user_thumbnails(
+    session, folder_paths: list[str], limit: int = 4
+) -> dict[str, list[str]]:
     """获取用户指定的文件夹缩略图，按 display_order 排序，每文件夹最多 limit 张。"""
     if not folder_paths:
         return {}
     stmt = (
-        select(FolderThumbnail.folder_path, FolderThumbnail.image_relative_path, FolderThumbnail.display_order)
+        select(
+            FolderThumbnail.folder_path,
+            FolderThumbnail.image_relative_path,
+            FolderThumbnail.display_order,
+        )
         .where(FolderThumbnail.folder_path.in_(folder_paths))
         .order_by(FolderThumbnail.folder_path, FolderThumbnail.display_order)
     )
@@ -108,7 +115,11 @@ async def _get_direct_layer_thumbnails(
     )
     result = await session.execute(
         sql,
-        {"like_prefix": like_prefix, "like_prefix_sub": like_prefix_sub, "lim": limit + 20},
+        {
+            "like_prefix": like_prefix,
+            "like_prefix_sub": like_prefix_sub,
+            "lim": limit + 20,
+        },
     )
     out: list[str] = []
     for row in result.fetchall():
@@ -192,15 +203,19 @@ async def get_root_subfolders_from_counts(
     for path_key, count in folder_counts.items():
         if path_key == "" or "/" in path_key:
             continue
-        result.append({
-            "name": path_key,
-            "full_path": path_key,
-            "thumbnails": [],
-            "image_count": count,
-        })
+        result.append(
+            {
+                "name": path_key,
+                "full_path": path_key,
+                "thumbnails": [],
+                "image_count": count,
+            }
+        )
     result.sort(key=lambda s: natural_sort_key(s["name"]))
     folder_paths = [sub["full_path"] for sub in result]
-    user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=limit_thumbnails)
+    user_thumbs = await _get_user_thumbnails(
+        session, folder_paths, limit=limit_thumbnails
+    )
     auto_thumbs = await _get_direct_layer_thumbnails_batch(
         session, folder_paths, user_thumbs, limit_per_folder=limit_thumbnails
     )
@@ -229,6 +244,7 @@ def invalidate_folder_tree_cache() -> None:
     _subfolder_cache = {}
     try:
         from utils.path_count_cache import invalidate_path_count_cache
+
         invalidate_path_count_cache()
     except ImportError:
         pass
@@ -357,9 +373,11 @@ async def get_folder_tree_cached(
                     _folder_tree_cache["folder_counts"],
                 )
         if session is not None:
-            folder_tree, nested_tree, folder_counts = await _get_folder_tree_from_db_batched(
-                session, photos_dir
-            )
+            (
+                folder_tree,
+                nested_tree,
+                folder_counts,
+            ) = await _get_folder_tree_from_db_batched(session, photos_dir)
         else:
             folder_tree = await asyncio.to_thread(
                 get_folder_tree, photos_dir, rel_paths or []
@@ -426,7 +444,9 @@ async def get_subfolders(
     db_names = {r[0] for r in agg_rows}
     if fs_dir.is_dir() and len(agg_rows) < _SUBFOLDER_ITERDIR_THRESHOLD:
         children = await asyncio.to_thread(
-            lambda: [c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")]
+            lambda: [
+                c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")
+            ]
         )
         for child in children:
             if child.name not in db_names:
@@ -436,16 +456,18 @@ async def get_subfolders(
     for row in agg_rows:
         name, count, max_mod, max_sz = row
         full_path = f"{path}/{name}" if path else name
-        subfolders.append({
-            "name": name,
-            "full_path": full_path,
-            "thumbnails": [],
-            "image_count": count or 0,
-            "_sort_key_filename": natural_sort_key(name),
-            "_sort_key_folder_filename": natural_sort_key(full_path),
-            "_sort_key_modified_at": float(max_mod or 0.0),
-            "_sort_key_file_size": int(max_sz or 0),
-        })
+        subfolders.append(
+            {
+                "name": name,
+                "full_path": full_path,
+                "thumbnails": [],
+                "image_count": count or 0,
+                "_sort_key_filename": natural_sort_key(name),
+                "_sort_key_folder_filename": natural_sort_key(full_path),
+                "_sort_key_modified_at": float(max_mod or 0.0),
+                "_sort_key_file_size": int(max_sz or 0),
+            }
+        )
 
     folder_paths = [sub["full_path"] for sub in subfolders]
     user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=4)

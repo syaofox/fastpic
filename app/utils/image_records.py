@@ -1,5 +1,6 @@
 """Image 记录创建辅助"""
-from models import Image, natural_sort_key
+
+from app.models import Image, natural_sort_key
 
 
 def create_image_record(
