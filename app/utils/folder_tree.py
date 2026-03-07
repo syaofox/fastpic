@@ -242,22 +242,36 @@ def invalidate_folder_tree_cache() -> None:
         pass
 
 
-def _build_folder_counts_sql(max_depth: int) -> str:
+def _build_folder_counts_sql(max_depth: int, like_filter: str | None = None) -> tuple[str, dict]:
     """生成 folder_counts 聚合 SQL，max_depth 为最大路径深度（不含文件名）。
-    优化：使用带 WHERE 条件的分层查询，避免无效匹配。"""
-    return """
+    like_filter: 可选的 LIKE 过滤条件，如 '%test%'"""
+    params: dict = {}
+    where_clause = ""
+    if like_filter:
+        params["like_filter"] = like_filter
+        where_clause = "AND relative_path LIKE :like_filter"
+
+    wc = where_clause
+    return (
+        f"""
         SELECT prefix, COUNT(*) AS cnt FROM (
-            SELECT SUBSTRING_INDEX(relative_path, '/', 1) AS prefix FROM images WHERE relative_path LIKE '%/%'
+            SELECT SUBSTRING_INDEX(relative_path, '/', 1) AS prefix
+            FROM images WHERE relative_path LIKE '%/%' {wc}
             UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 2) AS prefix FROM images WHERE relative_path LIKE '%/%/%'
+            SELECT SUBSTRING_INDEX(relative_path, '/', 2) AS prefix
+            FROM images WHERE relative_path LIKE '%/%/%' {wc}
             UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 3) AS prefix FROM images WHERE relative_path LIKE '%/%/%/%'
+            SELECT SUBSTRING_INDEX(relative_path, '/', 3) AS prefix
+            FROM images WHERE relative_path LIKE '%/%/%/%' {wc}
             UNION ALL
-            SELECT SUBSTRING_INDEX(relative_path, '/', 4) AS prefix FROM images WHERE relative_path LIKE '%/%/%/%/%'
+            SELECT SUBSTRING_INDEX(relative_path, '/', 4) AS prefix
+            FROM images WHERE relative_path LIKE '%/%/%/%/%' {wc}
         ) t
         WHERE prefix IS NOT NULL AND prefix != ''
         GROUP BY prefix
-    """
+    """,
+        params,
+    )
 
 
 _SEARCH_DIRS_MAX_DEPTH = 10  # 目录搜索支持的最大深度，超过侧边栏树状图
@@ -293,11 +307,15 @@ async def _get_folder_counts_streaming(session, max_depth: int = _FOLDER_TREE_MA
     return folder_counts
 
 
-async def _get_folder_counts_from_sql(session, max_depth: int = _FOLDER_TREE_MAX_DEPTH) -> dict[str, int]:
+async def _get_folder_counts_from_sql(
+    session, max_depth: int = _FOLDER_TREE_MAX_DEPTH, like_filter: str | None = None
+) -> dict[str, int]:
     """用单条 SQL 聚合查询获取各文件夹路径的图片数量，替代分批加载 + Python 累加。
-    max_depth: 最大路径深度，默认 4；search_dirs 等场景可传更大值（如 10）以支持更深目录。"""
-    sql = text(_build_folder_counts_sql(max_depth))
-    result = await session.execute(sql)
+    max_depth: 最大路径深度，默认 4；search_dirs 等场景可传更大值（如 10）以支持更深目录。
+    like_filter: 可选的 LIKE 过滤条件，用于搜索预过滤"""
+    sql_str, params = _build_folder_counts_sql(max_depth, like_filter)
+    sql = text(sql_str)
+    result = await session.execute(sql, params)
     rows = result.fetchall()
     counts: dict[str, int] = {"": 0}
     for row in rows:
@@ -318,9 +336,9 @@ async def get_root_folder_counts_only(session) -> dict[str, int]:
     return {row[0]: int(row[1]) for row in rows}
 
 
-async def get_folder_counts_for_search(session) -> dict[str, int]:
+async def get_folder_counts_for_search(session, like_filter: str | None = None) -> dict[str, int]:
     """获取用于目录搜索的 folder_counts（max_depth=10）"""
-    return await _get_folder_counts_from_sql(session, max_depth=_SEARCH_DIRS_MAX_DEPTH)
+    return await _get_folder_counts_from_sql(session, max_depth=_SEARCH_DIRS_MAX_DEPTH, like_filter=like_filter)
 
 
 def _get_direct_children_from_folder_counts(folder_counts: dict[str, int], path_prefix: str) -> set[str]:

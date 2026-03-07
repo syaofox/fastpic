@@ -75,13 +75,13 @@ class TestSearchDirsEndpoint:
             call_args = mock_async_session.execute.call_args
             sql_query = str(call_args[0][0])
             assert "LIKE" in sql_query
-            assert "ESCAPE" in sql_query
+            assert "like_filter" in sql_query
         finally:
             app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
-    async def test_queries_folder_counts_table(self):
-        """验证查询 folder_counts 表"""
+    async def test_queries_images_table(self):
+        """验证查询 images 表"""
         from fastapi.testclient import TestClient
 
         from app.main import app
@@ -107,13 +107,13 @@ class TestSearchDirsEndpoint:
             mock_async_session.execute.assert_called_once()
             call_args = mock_async_session.execute.call_args
             sql_query = str(call_args[0][0])
-            assert "folder_counts" in sql_query
+            assert "images" in sql_query
         finally:
             app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
-    async def test_uses_order_by(self):
-        """验证结果按路径排序"""
+    async def test_uses_substring_index(self):
+        """验证使用 SUBSTRING_INDEX 提取路径前缀"""
         from fastapi.testclient import TestClient
 
         from app.main import app
@@ -138,7 +138,7 @@ class TestSearchDirsEndpoint:
             assert response.status_code == 200
             call_args = mock_async_session.execute.call_args
             sql_query = str(call_args[0][0])
-            assert "ORDER BY" in sql_query
-            assert "relative_path" in sql_query
+            assert "SUBSTRING_INDEX" in sql_query
+            assert "GROUP BY" in sql_query
         finally:
             app.dependency_overrides.clear()

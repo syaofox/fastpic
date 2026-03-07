@@ -7,7 +7,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import delete, select
@@ -29,6 +28,7 @@ from app.schemas import (
 from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.utils.folder_tree import (
+    get_folder_counts_for_search,
     get_subfolders,
     invalidate_folder_tree_cache,
 )
@@ -783,20 +783,12 @@ async def search_dirs(
         return {"dirs": []}
 
     escaped = escape_like(q)
-    prefix_filter = f"%{escaped}%"
+    like_filter = f"%{escaped}%"
 
-    sql = text("""
-        SELECT relative_path, image_count
-        FROM folder_counts
-        WHERE relative_path LIKE :prefix ESCAPE '!'
-        ORDER BY relative_path
-    """)
-    result = await session.execute(sql, {"prefix": prefix_filter})
-    rows = result.fetchall()
+    full_dir_counts = await get_folder_counts_for_search(session, like_filter=like_filter)
 
     matched = []
-    for row in rows:
-        dir_path, count = row[0], row[1]
+    for dir_path, count in sorted(full_dir_counts.items()):
         if search_match(q, dir_path):
             matched.append({"path": dir_path, "image_count": count})
             if len(matched) >= limit:
