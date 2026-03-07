@@ -63,6 +63,45 @@ async def get_task_status():
     return {"task_type": None, "is_running": False}
 
 
+@router.get("/api/task-events")
+async def task_events(request: Request):
+    """Server-Sent Events 实时推送任务进度"""
+    from fastapi.responses import StreamingResponse
+
+    async def event_generator():
+        queue = task_state.get_queue_for_sse()
+        last_sent_status = None
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            try:
+                data = await asyncio.wait_for(queue.get(), timeout=25)
+
+                status = task_state.get_status()
+                if status:
+                    last_sent_status = status
+                    yield f"data: {status}\n\n"
+                elif last_sent_status and last_sent_status.get("finished_at"):
+                    yield f"data: {last_sent_status}\n\n"
+                    last_sent_status = None
+            except asyncio.TimeoutError:
+                yield "data: \n\n"
+            except Exception:
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/scan")
 async def trigger_scan():
     """手动触发扫描。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""

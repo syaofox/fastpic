@@ -11,6 +11,7 @@ from sqlalchemy.exc import DataError, IntegrityError
 from sqlmodel import select
 
 from app.models import Image, async_session_factory
+from app.services import task_state
 from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
 from app.utils.path_count_cache import cleanup_expired_path_count_cache
@@ -407,6 +408,13 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
                         await session.rollback()
                         logger.debug("跳过异常记录 (batch): %s %s", type(e).__name__, e)
                     batch_count = 0
+                    percent = int((i + len(pending)) / total_files * 100) if total_files > 0 else 0
+                    await task_state.async_update_progress(
+                        current_operation=f"正在处理图片 ({i + len(pending)}/{total_files})...",
+                        progress_percent=percent,
+                        processed_items=i + len(pending),
+                        total_items=total_files,
+                    )
 
                 await asyncio.sleep(0)  # 让出事件循环
 
@@ -559,6 +567,13 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
                         await session.rollback()
                         logger.debug("跳过异常记录 (video batch): %s %s", type(e).__name__, e)
                     batch_count = 0
+                    percent = int((vi + len(pending)) / len(video_files) * 100) if video_files else 0
+                    await task_state.async_update_progress(
+                        current_operation=f"正在处理视频 ({vi + len(pending)}/{len(video_files)})...",
+                        progress_percent=percent,
+                        processed_items=vi + len(pending),
+                        total_items=len(video_files),
+                    )
 
                 await asyncio.sleep(0)
 
@@ -668,10 +683,56 @@ async def run_full_scan(photos_dir: Path, cache_dir: Path) -> dict:
     }
     """
     photos_dir = photos_dir.resolve()
+
+    await task_state.async_update_progress(
+        current_operation="正在扫描文件系统...",
+        progress_percent=0,
+        processed_items=0,
+        total_items=0,
+    )
+
     images, videos, existing_rel_paths = await asyncio.to_thread(_collect_media_and_existing, photos_dir)
+    total_items = len(images) + len(videos)
+
+    await task_state.async_update_progress(
+        current_operation="正在清理数据库...",
+        progress_percent=5,
+        processed_items=0,
+        total_items=total_items,
+    )
+
     cleanup_result = await cleanup_database(photos_dir, cache_dir, existing_rel_paths)
+
+    img_count = len(images)
+    vid_count = len(videos)
+
+    await task_state.async_update_progress(
+        current_operation="正在扫描图片...",
+        progress_percent=30,
+        processed_items=0,
+        total_items=img_count,
+    )
+
     n_img = await scan_photos(photos_dir, cache_dir, images)
-    n_vid = await scan_videos(photos_dir, cache_dir, videos)
+
+    if vid_count > 0:
+        await task_state.async_update_progress(
+            current_operation="正在扫描视频...",
+            progress_percent=60,
+            processed_items=0,
+            total_items=vid_count,
+        )
+        n_vid = await scan_videos(photos_dir, cache_dir, videos)
+    else:
+        n_vid = 0
+
+    await task_state.async_update_progress(
+        current_operation="已完成",
+        progress_percent=100,
+        processed_items=total_items,
+        total_items=total_items,
+    )
+
     return {
         **cleanup_result,
         "images_added": n_img,

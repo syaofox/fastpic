@@ -9,10 +9,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
+from sqlmodel import delete, select
 
 from app.config import CACHE_DIR, FOLDER_OP_BATCH_SIZE, IN_CLAUSE_BATCH_SIZE, PHOTOS_DIR
-from app.models import FolderThumbnail, Image, get_async_session
+from app.models import FolderThumbnail, Image, ImageTag, get_async_session
 from app.schemas import (
     AddFolderThumbnailRequest,
     BatchRenameInfoRequest,
@@ -595,6 +595,7 @@ async def merge_folders(
             img = result.scalar_one_or_none()
             if img:
                 delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
+                await session.execute(delete(ImageTag).where(ImageTag.image_id == img_id))
                 await session.delete(img)
         moved = 0
         for img_id, rel_path in to_move:

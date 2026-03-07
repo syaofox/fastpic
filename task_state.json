@@ -1,7 +1,13 @@
 {
-  "task_type": null,
-  "started_at": null,
-  "finished_at": null,
-  "result": null,
-  "error": null
+  "task_type": "scan-duplicates",
+  "started_at": "2026-03-07T13:55:37.677829",
+  "finished_at": "2026-03-07T13:55:37.683435",
+  "result": {
+    "groups": []
+  },
+  "error": null,
+  "current_operation": "已完成",
+  "progress_percent": 100.0,
+  "total_items": 0,
+  "processed_items": 0
 }

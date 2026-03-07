@@ -12,6 +12,18 @@
     </header>
 
     <div class="max-w-4xl mx-auto px-6 py-6">
+        <!-- 全局任务进度条 -->
+        <div id="global-progress" class="hidden mb-4 bg-white rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-2">
+                <span id="progress-title" class="text-sm font-medium text-slate-700">任务进行中</span>
+                <span id="progress-percent" class="text-sm text-slate-500">0%</span>
+            </div>
+            <div class="w-full bg-slate-200 rounded-full h-2">
+                <div id="progress-bar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div id="progress-operation" class="mt-2 text-xs text-slate-500"></div>
+        </div>
+
         <!-- 标签页导航 -->
         <div class="flex border-b border-slate-200 mb-6" id="settings-tabs">
             <button type="button" data-tab="maintenance"
@@ -732,6 +744,7 @@ function triggerScan() {
     btn.textContent = '扫描中...';
     status.textContent = '';
     status.className = 'text-sm text-slate-500';
+    showGlobalProgress(true, '扫描媒体文件');
 
     fetch('/scan', { method: 'POST' })
         .then(function(r) {
@@ -740,8 +753,10 @@ function triggerScan() {
                 btn.textContent = '开始扫描';
                 status.textContent = '有任务正在进行中，请等待完成后再提交';
                 status.className = 'text-sm text-amber-600';
+                showGlobalProgress(false);
                 return Promise.reject('busy');
             }
+            connectTaskEvents();
             return r.json();
         })
         .then(function(data) {
@@ -753,6 +768,7 @@ function triggerScan() {
                 : '扫描完成，无新增';
             status.className = 'text-sm text-green-600';
             loadStats();
+            showGlobalProgress(false);
         })
         .catch(function(err) {
             if (err === 'busy') return;
@@ -760,6 +776,7 @@ function triggerScan() {
             btn.textContent = '开始扫描';
             status.textContent = '扫描失败: ' + err;
             status.className = 'text-sm text-red-500';
+            showGlobalProgress(false);
         });
 }
 
@@ -773,6 +790,7 @@ function triggerCleanup() {
     status.textContent = '';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
+    showGlobalProgress(true, '清理数据库');
 
     fetch('/api/cleanup', { method: 'POST' })
         .then(function(r) {
@@ -781,8 +799,10 @@ function triggerCleanup() {
                 btn.textContent = '开始清理';
                 status.textContent = '有任务正在进行中，请等待完成后再提交';
                 status.className = 'text-sm text-amber-600';
+                showGlobalProgress(false);
                 return Promise.reject('busy');
             }
+            connectTaskEvents();
             return r.json();
         })
         .then(function(data) {
@@ -802,6 +822,7 @@ function triggerCleanup() {
                     '<div>重新生成缓存：<span class="font-medium text-slate-800">' + data.cache_regenerated + '</span> 个</div>';
             }
             loadStats();
+            showGlobalProgress(false);
         })
         .catch(function(err) {
             if (err === 'busy') return;
@@ -809,6 +830,7 @@ function triggerCleanup() {
             btn.textContent = '开始清理';
             status.textContent = '清理失败: ' + err;
             status.className = 'text-sm text-red-500';
+            showGlobalProgress(false);
         });
 }
 
@@ -822,6 +844,7 @@ function triggerRebuild() {
     status.textContent = '正在执行完整同步...';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
+    showGlobalProgress(true, '完整同步');
 
     fetch('/api/full-sync', { method: 'POST' })
         .then(function(r) {
@@ -830,8 +853,10 @@ function triggerRebuild() {
                 btn.textContent = '完整重建';
                 status.textContent = '有任务正在进行中，请等待完成后再提交';
                 status.className = 'text-sm text-amber-600';
+                showGlobalProgress(false);
                 return Promise.reject('busy');
             }
+            connectTaskEvents();
             return r.json();
         })
         .then(function(data) {
@@ -849,6 +874,7 @@ function triggerRebuild() {
                 '<div class="font-medium text-slate-700 mt-2 mb-1">扫描结果：</div>' +
                 '<div class="ml-3">新增媒体：' + scanned + ' 个</div>';
             loadStats();
+            showGlobalProgress(false);
         })
         .catch(function(err) {
             if (err === 'busy') return;
@@ -856,6 +882,7 @@ function triggerRebuild() {
             btn.textContent = '完整重建';
             status.textContent = '重建失败: ' + err;
             status.className = 'text-sm text-red-500';
+            showGlobalProgress(false);
         });
 }
 
@@ -875,6 +902,7 @@ function triggerScanDuplicates() {
     status.className = 'text-sm text-slate-500';
     emptyEl.classList.add('hidden');
     containerEl.classList.add('hidden');
+    showGlobalProgress(true, '扫描重复文件');
 
     var body = folderPath ? { folder_path: folderPath } : {};
     fetch('/api/scan-duplicates', {
@@ -888,8 +916,10 @@ function triggerScanDuplicates() {
                 btn.textContent = '开始扫描';
                 status.textContent = '有任务正在进行中，请等待完成后再提交';
                 status.className = 'text-sm text-amber-600';
+                showGlobalProgress(false);
                 return Promise.reject('busy');
             }
+            connectTaskEvents();
             return r.json();
         })
         .then(function(data) {
@@ -909,6 +939,7 @@ function triggerScanDuplicates() {
                 renderDuplicateGroups(dupGroupsCache);
                 updateDupDeleteBtn();
             }
+            showGlobalProgress(false);
         })
         .catch(function(err) {
             if (err === 'busy') return;
@@ -916,6 +947,7 @@ function triggerScanDuplicates() {
             btn.textContent = '开始扫描';
             status.textContent = '扫描失败: ' + err;
             status.className = 'text-sm text-red-500';
+            showGlobalProgress(false);
         });
 }
 
@@ -1406,6 +1438,7 @@ function triggerMergeFolders() {
     status.textContent = '合并中...';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
+    showGlobalProgress(true, '合并文件夹');
 
     fetch('/api/merge-folders', {
         method: 'POST',
@@ -1417,8 +1450,10 @@ function triggerMergeFolders() {
                 btn.disabled = false;
                 status.textContent = '有任务正在进行中，请等待完成后再提交';
                 status.className = 'text-sm text-amber-600';
+                showGlobalProgress(false);
                 return Promise.reject('busy');
             }
+            connectTaskEvents();
             return r.json();
         })
         .then(function(data) {
@@ -1426,6 +1461,7 @@ function triggerMergeFolders() {
             if (data.busy) {
                 status.textContent = data.error || '有任务正在进行中，请等待完成后再提交';
                 status.className = 'text-sm text-amber-600';
+                showGlobalProgress(false);
                 return;
             }
             if (data.ok) {
@@ -1437,10 +1473,12 @@ function triggerMergeFolders() {
                     '<div>删除重复：<span class="font-medium text-slate-800">' + (data.deleted || 0) + '</span> 个</div>' +
                     '<div>合并目标：<span class="font-medium text-slate-800">' + (data.target || '') + '</span></div>';
                 loadStats();
+                showGlobalProgress(false);
             } else {
                 status.textContent = '合并失败';
                 status.className = 'text-sm text-red-500';
                 showSettingsAlert(data.error || '合并失败');
+                showGlobalProgress(false);
             }
         })
         .catch(function(err) {
@@ -1449,62 +1487,159 @@ function triggerMergeFolders() {
             status.textContent = '合并失败';
             status.className = 'text-sm text-red-500';
             showSettingsAlert('合并失败: ' + err.message);
+            showGlobalProgress(false);
         });
 }
 
 // 页面加载时获取统计
 loadStats();
 
-// 恢复任务状态（页面刷新后防止重复提交）
-var taskStatusPollInterval = null;
+// 恢复任务状态（使用 SSE 实时推送进度）
+var evtSource = null;
+var currentTaskType = null;
+
+function showGlobalProgress(show, title) {
+    var el = document.getElementById('global-progress');
+    var titleEl = document.getElementById('progress-title');
+    if (show) {
+        el.classList.remove('hidden');
+        if (title) titleEl.textContent = title;
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
+function updateGlobalProgress(data) {
+    var percent = data.progress_percent || 0;
+    var operation = data.current_operation || '处理中...';
+    var titleEl = document.getElementById('progress-title');
+    var percentEl = document.getElementById('progress-percent');
+    var barEl = document.getElementById('progress-bar');
+    var opEl = document.getElementById('progress-operation');
+    
+    if (data.task_type) {
+        var taskTitles = {
+            'scan': '扫描媒体文件',
+            'cleanup': '清理数据库',
+            'full-sync': '完整同步',
+            'scan-duplicates': '扫描重复文件',
+            'merge-folders': '合并文件夹'
+        };
+        titleEl.textContent = taskTitles[data.task_type] || '任务进行中';
+    }
+    
+    percentEl.textContent = Math.round(percent) + '%';
+    barEl.style.width = percent + '%';
+    
+    if (data.total_items && data.processed_items !== undefined) {
+        opEl.textContent = operation + ' (' + data.processed_items + '/' + data.total_items + ')';
+    } else {
+        opEl.textContent = operation;
+    }
+}
+
+function disableTaskButton(taskType) {
+    var taskLabels = {
+        'scan': { btn: 'scan-btn', status: 'scan-status', label: '扫描中...' },
+        'cleanup': { btn: 'cleanup-btn', status: 'cleanup-status', label: '清理中...' },
+        'full-sync': { btn: 'rebuild-btn', status: 'rebuild-status', label: '重建中...' },
+        'scan-duplicates': { btn: 'dup-scan-btn', status: 'dup-scan-status', label: '扫描中...' },
+        'merge-folders': { btn: 'merge-folders-btn', status: 'merge-status', label: '合并中...' }
+    };
+    var cfg = taskLabels[taskType];
+    if (cfg) {
+        var btn = document.getElementById(cfg.btn);
+        var status = document.getElementById(cfg.status);
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = cfg.label;
+        }
+        if (status) {
+            status.textContent = '正在执行...';
+            status.className = 'text-sm text-slate-500';
+        }
+    }
+}
+
+function connectTaskEvents() {
+    if (evtSource) {
+        evtSource.close();
+    }
+    
+    evtSource = new EventSource('/api/task-events');
+    
+    evtSource.onmessage = function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            if (!data || Object.keys(data).length === 0) {
+                return;
+            }
+            
+            if (data.is_running) {
+                currentTaskType = data.task_type;
+                disableTaskButton(data.task_type);
+                updateGlobalProgress(data);
+                showGlobalProgress(true);
+                
+                var tabMap = {
+                    'scan': 'maintenance',
+                    'cleanup': 'maintenance',
+                    'full-sync': 'maintenance',
+                    'scan-duplicates': 'duplicates',
+                    'merge-folders': 'merge'
+                };
+                if (tabMap[data.task_type]) {
+                    switchTab(tabMap[data.task_type]);
+                }
+            } else if (data.finished_at) {
+                showGlobalProgress(false);
+                onTaskComplete(currentTaskType, data.result || data.error);
+                currentTaskType = null;
+                if (evtSource) {
+                    evtSource.close();
+                    evtSource = null;
+                }
+            } else if (data.task_type && data.progress_percent !== undefined) {
+                updateGlobalProgress(data);
+            }
+        } catch (err) {
+            console.error('SSE parse error:', err);
+        }
+    };
+    
+    evtSource.onerror = function(err) {
+        console.log('SSE connection error, will retry...');
+    };
+}
 
 function restoreTaskState() {
     fetch('/api/task-status', { method: 'GET' })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (!data.task_type) {
-                return;
-            }
             if (data.is_running) {
-                var taskLabels = {
-                    'scan': { btn: 'scan-btn', status: 'scan-status', label: '扫描中...', tab: 'tab-maintenance' },
-                    'cleanup': { btn: 'cleanup-btn', status: 'cleanup-status', label: '清理中...', tab: 'tab-maintenance' },
-                    'full-sync': { btn: 'rebuild-btn', status: 'rebuild-status', label: '重建中...', tab: 'tab-maintenance' },
-                    'scan-duplicates': { btn: 'dup-scan-btn', status: 'dup-scan-status', label: '扫描中...', tab: 'tab-duplicates' },
-                    'merge-folders': { btn: 'merge-folders-btn', status: 'merge-status', label: '合并中...', tab: 'tab-merge' }
+                currentTaskType = data.task_type;
+                disableTaskButton(data.task_type);
+                updateGlobalProgress(data);
+                showGlobalProgress(true);
+                var tabMap = {
+                    'scan': 'maintenance',
+                    'cleanup': 'maintenance',
+                    'full-sync': 'maintenance',
+                    'scan-duplicates': 'duplicates',
+                    'merge-folders': 'merge'
                 };
-                var cfg = taskLabels[data.task_type];
-                if (cfg) {
-                    var btn = document.getElementById(cfg.btn);
-                    var status = document.getElementById(cfg.status);
-                    if (btn) {
-                        btn.disabled = true;
-                        btn.textContent = cfg.label;
-                    }
-                    if (status) {
-                        status.textContent = '正在执行...';
-                        status.className = 'text-sm text-slate-500';
-                    }
-                    switchTab(cfg.tab);
-                    taskStatusPollInterval = setInterval(function() {
-                        fetch('/api/task-status', { method: 'GET' })
-                            .then(function(r) { return r.json(); })
-                            .then(function(pollData) {
-                                if (!pollData.is_running && pollData.finished_at) {
-                                    clearInterval(taskStatusPollInterval);
-                                    taskStatusPollInterval = null;
-                                    onTaskComplete(data.task_type, pollData.result || pollData.error);
-                                }
-                            });
-                    }, 3000);
+                if (tabMap[data.task_type]) {
+                    switchTab(tabMap[data.task_type]);
                 }
+                connectTaskEvents();
             } else if (data.finished_at) {
-                onTaskComplete(null, data.result || data.error);
+                onTaskComplete(data.task_type, data.result || data.error);
             }
         });
 }
 
 function onTaskComplete(taskType, result) {
+    showGlobalProgress(false);
     if (!taskType) {
         var taskLabels = {
             'scan': { btn: 'scan-btn', status: 'scan-status' },

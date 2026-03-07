@@ -28,3 +28,4 @@ data-dev/
 Thumbs.db
 
 node_modules/
+task_state.json
