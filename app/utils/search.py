@@ -38,7 +38,7 @@ def to_traditional(s: str) -> str:
 def to_pinyin_lower(s: str) -> str:
     """将中文转为小写无声调拼音并拼接（如 厦门 -> xiamen），非中文保留原样并转小写。"""
     try:
-        from pypinyin import lazy_pinyin, Style
+        from pypinyin import Style, lazy_pinyin
         parts = lazy_pinyin(s, style=Style.NORMAL)
         return "".join(p).lower() if (p := [x.strip() for x in parts if x]) else s.lower()
     except Exception:

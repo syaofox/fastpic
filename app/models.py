@@ -2,9 +2,9 @@ import os
 import re
 import sys
 
-from sqlmodel import Field, SQLModel, create_engine
 from sqlalchemy import BigInteger, Column, String
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import Field, SQLModel, create_engine
 
 # 数据库配置：仅支持 MariaDB，需设置 MYSQL_HOST
 # 检查推迟到 init_db()，便于测试时 mock 或通过 conftest 设置 MYSQL_HOST

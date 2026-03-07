@@ -5,18 +5,18 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
-from PIL import Image as PILImage, ImageFile
-from sqlmodel import select
+from PIL import Image as PILImage
+from PIL import ImageFile
 from sqlalchemy.exc import DataError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.models import Image, async_session_factory
+from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
 from app.utils.path_count_cache import cleanup_expired_path_count_cache
-from app.utils.image_records import create_image_record
 from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
+
+logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".ts"}
@@ -199,9 +199,7 @@ def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:
             return False
 
 
-def generate_thumbnail_for_media(
-    full_path: Path, cache_path: Path, is_video: bool
-) -> bool:
+def generate_thumbnail_for_media(full_path: Path, cache_path: Path, is_video: bool) -> bool:
     """根据 is_video 选择图片或视频缩略图生成，供 move/rename/merge 等复用"""
     if is_video:
         return _generate_video_thumbnail(full_path, cache_path)
@@ -237,7 +235,8 @@ def _collect_media_and_existing(
 def _process_single_image_sync(
     full_path: Path, photos_dir: Path, cache_dir: Path
 ) -> tuple[str, str, float, int, int, int, bool] | None:
-    """同步处理单张图片：读取尺寸、生成缩略图，返回 (filename, rel_path, modified_at, file_size, width, height, is_corrupted)，失败返回 None"""
+    """同步处理单张图片：读取尺寸、生成缩略图，返回
+    (filename, rel_path, modified_at, file_size, width, height, is_corrupted)，失败返回 None"""
     try:
         rel_path = _relative_path(photos_dir, full_path)
         modified_at = os.path.getmtime(full_path)
@@ -292,9 +291,7 @@ def _process_single_video_sync(
         return None
 
 
-async def scan_photos(
-    photos_dir: Path, cache_dir: Path, image_files: list[Path] | None = None
-) -> int:
+async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path] | None = None) -> int:
     """
     异步扫描 photos 目录，生成缩略图并写入数据库。
     返回新扫描的图片数量。
@@ -311,17 +308,13 @@ async def scan_photos(
 
     async with async_session_factory() as session:
         if image_files is None:
-            image_files, _, _ = await asyncio.to_thread(
-                _collect_media_and_existing, photos_dir
-            )
+            image_files, _, _ = await asyncio.to_thread(_collect_media_and_existing, photos_dir)
         total_files = len(image_files)
         print(f"[scan] 发现 {total_files} 个图片文件", flush=True)
 
         pending: list[Path] = []
         batch_count = 0
-        seen_in_run: set[str] = (
-            set()
-        )  # 本轮已添加的 relative_path（小写），避免重复插入
+        seen_in_run: set[str] = set()  # 本轮已添加的 relative_path（小写），避免重复插入
         loop = asyncio.get_running_loop()
 
         def _dedupe_image_results(
@@ -344,9 +337,7 @@ async def scan_photos(
                 return []
             with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
                 tasks = [
-                    loop.run_in_executor(
-                        executor, _process_single_image_sync, fp, photos_dir, cache_dir
-                    )
+                    loop.run_in_executor(executor, _process_single_image_sync, fp, photos_dir, cache_dir)
                     for fp in paths
                 ]
                 raw_results = await asyncio.gather(*tasks)
@@ -357,28 +348,19 @@ async def scan_photos(
         _EXISTS_CHECK_BATCH = 500  # 批量检查是否已存在，减少 DB 往返
         i = 0
         while i < len(image_files):
-            check_batch = [
-                p for p in image_files[i : i + _EXISTS_CHECK_BATCH] if p.is_file()
-            ]
+            check_batch = [p for p in image_files[i : i + _EXISTS_CHECK_BATCH] if p.is_file()]
             i += _EXISTS_CHECK_BATCH
             if not check_batch:
                 continue
             rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
             with session.no_autoflush:
-                result = await session.execute(
-                    select(Image.relative_path).where(
-                        Image.relative_path.in_(rel_paths)
-                    )
-                )
+                result = await session.execute(select(Image.relative_path).where(Image.relative_path.in_(rel_paths)))
                 existing_rows = result.fetchall()
             # MySQL 默认 collation 大小写不敏感，需用小写比较
             existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if (
-                    rel_path.lower() in existing_lower
-                    or rel_path.lower() in seen_in_run
-                ):
+                if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
 
@@ -474,9 +456,7 @@ async def scan_photos(
     return count
 
 
-async def scan_videos(
-    photos_dir: Path, cache_dir: Path, video_files: list[Path] | None = None
-) -> int:
+async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path] | None = None) -> int:
     """
     异步扫描 photos 目录中的视频文件，生成缩略图并写入数据库。
     返回新扫描的视频数量。
@@ -488,9 +468,7 @@ async def scan_videos(
     count = 0
 
     if video_files is None:
-        _, video_files, _ = await asyncio.to_thread(
-            _collect_media_and_existing, photos_dir
-        )
+        _, video_files, _ = await asyncio.to_thread(_collect_media_and_existing, photos_dir)
     if not video_files:
         return 0
 
@@ -502,9 +480,7 @@ async def scan_videos(
     async with async_session_factory() as session:
         pending: list[Path] = []
         batch_count = 0
-        seen_in_run: set[str] = (
-            set()
-        )  # 本轮已添加的 relative_path（小写），避免重复插入
+        seen_in_run: set[str] = set()  # 本轮已添加的 relative_path（小写），避免重复插入
         loop = asyncio.get_running_loop()
 
         async def _process_video_batch(
@@ -515,9 +491,7 @@ async def scan_videos(
                 return []
             with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
                 tasks = [
-                    loop.run_in_executor(
-                        executor, _process_single_video_sync, fp, photos_dir, cache_dir
-                    )
+                    loop.run_in_executor(executor, _process_single_video_sync, fp, photos_dir, cache_dir)
                     for fp in paths
                 ]
                 raw_results = await asyncio.gather(*tasks)
@@ -538,28 +512,19 @@ async def scan_videos(
         _EXISTS_CHECK_BATCH = 500
         vi = 0
         while vi < len(video_files):
-            check_batch = [
-                p for p in video_files[vi : vi + _EXISTS_CHECK_BATCH] if p.is_file()
-            ]
+            check_batch = [p for p in video_files[vi : vi + _EXISTS_CHECK_BATCH] if p.is_file()]
             vi += _EXISTS_CHECK_BATCH
             if not check_batch:
                 continue
             rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
             with session.no_autoflush:
-                result = await session.execute(
-                    select(Image.relative_path).where(
-                        Image.relative_path.in_(rel_paths)
-                    )
-                )
+                result = await session.execute(select(Image.relative_path).where(Image.relative_path.in_(rel_paths)))
                 existing_rows = result.fetchall()
             # MySQL 默认 collation 大小写不敏感，需用小写比较
             existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
                 rel_path = _relative_path(photos_dir, full_path)
-                if (
-                    rel_path.lower() in existing_lower
-                    or rel_path.lower() in seen_in_run
-                ):
+                if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
 
@@ -592,9 +557,7 @@ async def scan_videos(
                         await session.commit()
                     except (IntegrityError, DataError) as e:
                         await session.rollback()
-                        logger.debug(
-                            "跳过异常记录 (video batch): %s %s", type(e).__name__, e
-                        )
+                        logger.debug("跳过异常记录 (video batch): %s %s", type(e).__name__, e)
                     batch_count = 0
 
                 await asyncio.sleep(0)
@@ -649,12 +612,7 @@ async def run_db_only_validation(photos_dir: Path, cache_dir: Path) -> dict:
         last_id = 0
         total_checked = 0
         while True:
-            stmt = (
-                select(Image)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_CLEANUP_BATCH_SIZE)
-            )
+            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(_CLEANUP_BATCH_SIZE)
             result = await session.execute(stmt)
             batch = list(result.scalars().all())
             if not batch:
@@ -701,12 +659,16 @@ async def run_full_scan(photos_dir: Path, cache_dir: Path) -> dict:
     """
     完整扫描：一次 os.walk 遍历，依次执行 cleanup + scan_photos + scan_videos，
     消除 3 次独立遍历，供启动与手动「完整同步」使用。
-    返回 {"stale_removed": int, "orphan_cache_removed": int, "cache_regenerated": int, "images_added": int, "videos_added": int}
+    返回 {
+        "stale_removed": int,
+        "orphan_cache_removed": int,
+        "cache_regenerated": int,
+        "images_added": int,
+        "videos_added": int
+    }
     """
     photos_dir = photos_dir.resolve()
-    images, videos, existing_rel_paths = await asyncio.to_thread(
-        _collect_media_and_existing, photos_dir
-    )
+    images, videos, existing_rel_paths = await asyncio.to_thread(_collect_media_and_existing, photos_dir)
     cleanup_result = await cleanup_database(photos_dir, cache_dir, existing_rel_paths)
     n_img = await scan_photos(photos_dir, cache_dir, images)
     n_vid = await scan_videos(photos_dir, cache_dir, videos)
@@ -728,9 +690,7 @@ def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
 _CLEANUP_BATCH_SIZE = 5000  # 分批处理，避免百万级全表加载 OOM
 
 
-async def cleanup_database(
-    photos_dir: Path, cache_dir: Path, existing_rel_paths: set[str] | None = None
-) -> dict:
+async def cleanup_database(photos_dir: Path, cache_dir: Path, existing_rel_paths: set[str] | None = None) -> dict:
     """
     数据库清理同步，处理三种不一致：
     1. 幽灵记录：原图已被外部删除 → 移除数据库记录 + 对应缓存
@@ -751,9 +711,7 @@ async def cleanup_database(
     print("[cleanup] 开始数据库清理...", flush=True)
 
     if existing_rel_paths is None:
-        _, _, existing_rel_paths = await asyncio.to_thread(
-            _collect_media_and_existing, photos_dir
-        )
+        _, _, existing_rel_paths = await asyncio.to_thread(_collect_media_and_existing, photos_dir)
 
     # ── 第 1 步：清除幽灵记录（分批加载，避免 OOM） ──
     valid_cache_names: set[str] = set()
@@ -761,12 +719,7 @@ async def cleanup_database(
         last_id = 0
         total_checked = 0
         while True:
-            stmt = (
-                select(Image)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_CLEANUP_BATCH_SIZE)
-            )
+            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(_CLEANUP_BATCH_SIZE)
             result = await session.execute(stmt)
             batch = list(result.scalars().all())
             if not batch:
@@ -800,14 +753,10 @@ async def cleanup_database(
             await asyncio.sleep(0)
 
         if stale_removed:
-            print(
-                f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True
-            )
+            print(f"[cleanup] 清除 {stale_removed} 条幽灵记录（原图已删除）", flush=True)
 
     # ── 第 2 步：清除孤儿缓存文件，同时收集 cache_mtimes 供步骤 3 使用（消除 stat 调用） ──
-    async def _remove_orphan_and_collect_mtimes(
-        cache_dir: Path, valid: set[str]
-    ) -> tuple[int, dict[str, float]]:
+    async def _remove_orphan_and_collect_mtimes(cache_dir: Path, valid: set[str]) -> tuple[int, dict[str, float]]:
         count = 0
         cache_mtimes: dict[str, float] = {}
         if not cache_dir.exists():
@@ -833,9 +782,7 @@ async def cleanup_database(
             await asyncio.sleep(0)
         return count, cache_mtimes
 
-    orphan_cache_removed, cache_mtimes = await _remove_orphan_and_collect_mtimes(
-        cache_dir, valid_cache_names
-    )
+    orphan_cache_removed, cache_mtimes = await _remove_orphan_and_collect_mtimes(cache_dir, valid_cache_names)
     if orphan_cache_removed:
         print(f"[cleanup] 清除 {orphan_cache_removed} 个孤儿缓存文件", flush=True)
 
@@ -844,12 +791,7 @@ async def cleanup_database(
         last_id = 0
         loop = asyncio.get_running_loop()
         while True:
-            stmt = (
-                select(Image)
-                .where(Image.id > last_id)
-                .order_by(Image.id)
-                .limit(_CLEANUP_BATCH_SIZE)
-            )
+            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(_CLEANUP_BATCH_SIZE)
             result = await session.execute(stmt)
             batch = list(result.scalars().all())
             if not batch:
@@ -863,9 +805,7 @@ async def cleanup_database(
                 cache_path = cache_dir / cache_name
                 photo_path = photos_dir / img.relative_path
                 # 用 DB modified_at 与 cache_mtimes 比较，无需 stat
-                cache_fresh = cache_name in cache_mtimes and cache_mtimes[
-                    cache_name
-                ] >= (img.modified_at or 0)
+                cache_fresh = cache_name in cache_mtimes and cache_mtimes[cache_name] >= (img.modified_at or 0)
                 if not cache_fresh:
                     is_video = getattr(img, "media_type", "image") == "video"
                     to_regen.append((photo_path, cache_path, is_video))
@@ -876,10 +816,7 @@ async def cleanup_database(
                 with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
                     for i in range(0, len(to_regen), regen_batch_size):
                         regen_batch = to_regen[i : i + regen_batch_size]
-                        tasks = [
-                            loop.run_in_executor(executor, _regenerate_one, item)
-                            for item in regen_batch
-                        ]
+                        tasks = [loop.run_in_executor(executor, _regenerate_one, item) for item in regen_batch]
                         results = await asyncio.gather(*tasks)
                         cache_regenerated += sum(1 for ok in results if ok)
                         await asyncio.sleep(0)
@@ -891,9 +828,7 @@ async def cleanup_database(
 
     path_count_expired = cleanup_expired_path_count_cache()
     if path_count_expired:
-        print(
-            f"[cleanup] 清理 {path_count_expired} 条过期 path_count_cache", flush=True
-        )
+        print(f"[cleanup] 清理 {path_count_expired} 条过期 path_count_cache", flush=True)
 
     summary = {
         "stale_removed": stale_removed,

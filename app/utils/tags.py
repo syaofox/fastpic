@@ -3,8 +3,7 @@
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.models import Tag, ImageTag
-
+from app.models import ImageTag, Tag
 
 DAMAGED_TAG_NAME = "损坏"
 

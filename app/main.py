@@ -6,63 +6,62 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request, Depends
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlmodel import select
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
+from app.app_common import templates
 from app.config import (
-    PHOTOS_DIR,
-    CACHE_DIR,
-    STATIC_DIR,
-    PER_PAGE,
     APP_VERSION,
+    CACHE_DIR,
+    PER_PAGE,
+    PHOTOS_DIR,
     SKIP_FULL_SCAN_ON_STARTUP,
+    STATIC_DIR,
+)
+from app.models import (
+    Image,
+    ImageTag,
+    Tag,
+    async_session_factory,
+    get_async_session,
+    init_db,
+)
+from app.routers import auth, folders, images, settings, tags
+from app.services.scan_state import begin_scan, end_scan
+from app.services.scanner import run_db_only_validation, run_full_scan
+from app.services.watcher import start_watcher
+from app.utils.folder_tree import (
+    get_folder_tree_cached,
+    get_root_folder_counts_only,
+    get_root_subfolders_from_counts,
+    get_subfolders,
+)
+from app.utils.path_count_cache import (
+    get_cached_count,
+    get_path_count_from_db,
+    set_cached_count,
+    set_path_count_to_db,
+)
+from app.utils.path_utils import normalize_path, path_filter_for_prefix
+from app.utils.query_builder import (
+    apply_image_filters,
+    apply_image_filters_to_count,
+    get_sort_column,
+    parse_filter_params,
 )
 
 # favicon 启动时检查一次，避免每次请求 stat
 _favicon_path = STATIC_DIR / "favicon.ico"
 _FAVICON_PATH: Path | None = _favicon_path if _favicon_path.exists() else None
-from app.models import (
-    Image,
-    Tag,
-    ImageTag,
-    init_db,
-    get_async_session,
-    async_session_factory,
-    sync_engine,
-)
-from app.app_common import templates
-from app.routers import auth, tags, images, folders, settings
-from app.utils.path_utils import normalize_path, path_filter_for_prefix
-from app.utils.path_count_cache import (
-    get_cached_count,
-    set_cached_count,
-    get_path_count_from_db,
-    set_path_count_to_db,
-)
-from app.utils.folder_tree import (
-    get_folder_tree_cached,
-    get_subfolders,
-    get_root_subfolders_from_counts,
-    get_root_folder_counts_only,
-    _FOLDER_TREE_MAX_DEPTH,
-)
-from app.utils.query_builder import (
-    get_sort_column,
-    parse_filter_params,
-    apply_image_filters,
-    apply_image_filters_to_count,
-)
-from app.services.scanner import run_full_scan, run_db_only_validation
-from app.services.scan_state import begin_scan, end_scan
-from app.services.watcher import start_watcher
 
 
 async def _background_scan():
-    """后台扫描包装：SKIP_FULL_SCAN 时仅做 DB 校验，否则一次 os.walk 完成 cleanup + scan。扫描完成后预热 folder_tree 缓存。"""
+    """后台扫描包装：SKIP_FULL_SCAN 时仅做 DB 校验，否则一次 os.walk 完成
+    cleanup + scan。扫描完成后预热 folder_tree 缓存。"""
     begin_scan()
     try:
         if SKIP_FULL_SCAN_ON_STARTUP:
@@ -70,9 +69,7 @@ async def _background_scan():
             print(f"[scan] DB 校验完成，清除 {result['stale_removed']} 条幽灵记录")
         else:
             result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
-            print(
-                f"[scan] 扫描完成，新增 {result['images_added']} 张图片、{result['videos_added']} 个视频"
-            )
+            print(f"[scan] 扫描完成，新增 {result['images_added']} 张图片、{result['videos_added']} 个视频")
     except Exception as e:
         import traceback
 
@@ -180,9 +177,7 @@ async def api_gallery_subfolders(
         subfolders = await get_root_subfolders_from_counts(folder_counts, session)
     else:
         async with async_session_factory() as s:
-            subfolders = await get_subfolders(
-                s, PHOTOS_DIR, path, pf, sort_by, sort_order
-            )
+            subfolders = await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
     return templates.TemplateResponse(
         "partials/gallery_subfolders.html",
         {
@@ -248,9 +243,7 @@ async def gallery(
     sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
-    stmt = select(Image).order_by(
-        order_clause, Image.id.asc() if sort_order == "asc" else Image.id.desc()
-    )
+    stmt = select(Image).order_by(order_clause, Image.id.asc() if sort_order == "asc" else Image.id.desc())
     parsed = parse_filter_params(
         filter_filename,
         filter_size_min,
@@ -260,18 +253,14 @@ async def gallery(
         filter_tag,
     )
     stmt, pf, has_filters = apply_image_filters(stmt, path, search, mode, parsed)
-    count_stmt = apply_image_filters_to_count(
-        select(func.count(Image.id)), path, search, mode, parsed, pf
-    )
+    count_stmt = apply_image_filters_to_count(select(func.count(Image.id)), path, search, mode, parsed, pf)
 
     use_keyset = bool(cursor) and page > 1 and sort_by in ("modified_at", "file_size")
     cursor_val, cursor_id = _parse_cursor(cursor, sort_by) if cursor else (None, None)
     if use_keyset and cursor_val is not None and cursor_id is not None:
         from sqlalchemy import or_
 
-        sort_col_raw = (
-            Image.modified_at if sort_by == "modified_at" else Image.file_size
-        )
+        sort_col_raw = Image.modified_at if sort_by == "modified_at" else Image.file_size
         if sort_order == "desc":
             stmt = stmt.where(
                 or_(
@@ -290,18 +279,9 @@ async def gallery(
         offset = (page - 1) * per_page
         stmt = stmt.offset(offset)
     stmt_paged = stmt.limit(per_page + 1)
-    need_count = (
-        search
-        or has_filters
-        or parsed["filter_tag"]
-        or get_cached_count(path, mode) is None
-    )
+    need_count = search or has_filters or parsed["filter_tag"] or get_cached_count(path, mode) is None
     need_subfolders = (
-        mode in ("folder", "list")
-        and page == 1
-        and not search
-        and not has_filters
-        and not parsed["filter_tag"]
+        mode in ("folder", "list") and page == 1 and not search and not has_filters and not parsed["filter_tag"]
     )
     if defer_subfolders and path == "" and page == 1:
         need_count = False
@@ -338,9 +318,7 @@ async def gallery(
             return list(result.scalars().all())
 
     if need_count and need_subfolders:
-        total, subfolders, images_list = await asyncio.gather(
-            _run_count(), _run_subfolders(), _run_images()
-        )
+        total, subfolders, images_list = await asyncio.gather(_run_count(), _run_subfolders(), _run_images())
     elif need_count:
         total, images_list = await asyncio.gather(_run_count(), _run_images())
         subfolders = []
@@ -357,11 +335,7 @@ async def gallery(
     next_cursor = ""
     if images_list and has_next and sort_by in ("modified_at", "file_size"):
         last_img = images_list[-1]
-        val = (
-            last_img.modified_at
-            if sort_by == "modified_at"
-            else (last_img.file_size or 0)
-        )
+        val = last_img.modified_at if sort_by == "modified_at" else (last_img.file_size or 0)
         next_cursor = f"{val}_{last_img.id}"
     image_tags_map: dict[int, list[str]] = {}
     if images_list:
@@ -436,11 +410,7 @@ async def api_folder_images(
     sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
-    stmt = (
-        select(Image.id, Image.relative_path, Image.media_type)
-        .order_by(order_clause)
-        .limit(_FOLDER_IMAGES_MAX + 1)
-    )
+    stmt = select(Image.id, Image.relative_path, Image.media_type).order_by(order_clause).limit(_FOLDER_IMAGES_MAX + 1)
     parsed = parse_filter_params(
         filter_filename,
         filter_size_min,
@@ -456,11 +426,7 @@ async def api_folder_images(
     if truncated:
         rows = rows[:_FOLDER_IMAGES_MAX]
     return {
-        "urls": [
-            "/photos/"
-            + "/".join(quote(p, safe="") for p in (r.relative_path or "").split("/"))
-            for r in rows
-        ],
+        "urls": ["/photos/" + "/".join(quote(p, safe="") for p in (r.relative_path or "").split("/")) for r in rows],
         "ids": [r.id for r in rows],
         "media_types": [getattr(r, "media_type", "image") for r in rows],
         "truncated": truncated,
@@ -478,9 +444,7 @@ async def debug_path_count(
         total = (await session.execute(select(func.count(Image.id)))).scalar() or 0
         return {"path": "", "total": total, "note": "path 为空时返回全部"}
     pf = path_filter_for_prefix(Image.relative_path, path)
-    total = (
-        await session.execute(select(func.count(Image.id)).where(pf))
-    ).scalar() or 0
+    total = (await session.execute(select(func.count(Image.id)).where(pf))).scalar() or 0
     result = await session.execute(select(Image.relative_path).where(pf).limit(5))
     sample_paths = [r[0] for r in result.fetchall()]
     return {"path": path, "total": total, "sample_paths": sample_paths}

@@ -9,42 +9,40 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
-from sqlalchemy.exc import IntegrityError
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from sqlmodel import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.config import (
-    PHOTOS_DIR,
     CACHE_DIR,
+    IN_CLAUSE_BATCH_SIZE,
     MAX_UPLOAD_FILE_SIZE,
     MAX_UPLOAD_TOTAL_SIZE,
-    IN_CLAUSE_BATCH_SIZE,
+    PHOTOS_DIR,
 )
 from app.models import (
     Image,
-    Tag,
     ImageTag,
+    Tag,
     async_session_factory,
     get_async_session,
     natural_sort_key,
 )
-from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from app.utils.hash_utils import compute_file_md5_by_path
-from app.utils.images import cache_filename
-from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.schemas import DeleteImagesRequest, DownloadZipRequest
+from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.utils.folder_tree import invalidate_folder_tree_cache
+from app.utils.format import format_file_size
+from app.utils.hash_utils import compute_file_md5_by_path
+from app.utils.image_records import create_image_record
+from app.utils.images import cache_filename, delete_image_files
 from app.utils.path_utils import (
-    escape_like,
     normalize_path,
     path_filter_for_prefix,
     resolve_and_validate_relative_path,
 )
-from app.utils.image_records import create_image_record
 from app.utils.unique_path import unique_path
-from app.utils.format import format_file_size
-from app.utils.images import delete_image_files
 
 router = APIRouter(prefix="/api", tags=["images"])
 

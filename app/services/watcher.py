@@ -11,37 +11,30 @@
 
 import asyncio
 import logging
-import os
 import time
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-from queue import Queue, Empty
-from threading import Thread
+from queue import Empty, Queue
 
 from sqlalchemy.exc import IntegrityError
-from watchdog.observers import Observer
+from sqlmodel import select
 from watchdog.events import (
     FileSystemEventHandler,
-    FileCreatedEvent,
-    FileDeletedEvent,
-    FileMovedEvent,
 )
+from watchdog.observers import Observer
 
+from app.models import Image, async_session_factory, natural_sort_key
+from app.services.scan_state import begin_scan, end_scan, is_scanning
 from app.services.scanner import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
     _relative_path,
     get_media_metadata_and_thumbnail,
 )
-from app.utils.images import cache_filename
-from app.models import Image, async_session_factory, natural_sort_key
 from app.utils.image_records import create_image_record
+from app.utils.images import cache_filename
 from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
-from app.services.scan_state import begin_scan, end_scan, is_scanning
 
-from sqlmodel import select
-
+logger = logging.getLogger(__name__)
 
 # 去抖动间隔：收集事件后等待这么久再处理（秒）
 DEBOUNCE_SECONDS = 3.0
@@ -79,9 +72,7 @@ class _PhotoEventHandler(FileSystemEventHandler):
             src_media = _is_media(event.src_path)
             dst_media = _is_media(event.dest_path)
             if src_media or dst_media:
-                self._queue.put(
-                    ("moved", event.src_path, event.dest_path, time.monotonic())
-                )
+                self._queue.put(("moved", event.src_path, event.dest_path, time.monotonic()))
 
 
 async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
@@ -92,9 +83,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
     rel_path = _relative_path(photos_dir, full_path)
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Image).where(Image.relative_path == rel_path)
-        )
+        result = await session.execute(select(Image).where(Image.relative_path == rel_path))
         if result.scalar_one_or_none():
             return
 
@@ -116,11 +105,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
             width, height, modified_at, file_size, is_corrupted = data
             media_type = "video" if is_vid else "image"
 
-            damaged_tag = (
-                await ensure_tag_exists(session, DAMAGED_TAG_NAME)
-                if is_corrupted
-                else None
-            )
+            damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME) if is_corrupted else None
 
             record = create_image_record(
                 filename=full_path.name,
@@ -153,9 +138,7 @@ async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
     rel_path = _relative_path(photos_dir, full_path)
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Image).where(Image.relative_path == rel_path)
-        )
+        result = await session.execute(select(Image).where(Image.relative_path == rel_path))
         img = result.scalar_one_or_none()
         if not img:
             return
@@ -171,17 +154,13 @@ async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
         print(f"[watcher] 删除: {rel_path}", flush=True)
 
 
-async def _process_moved(
-    photos_dir: Path, cache_dir: Path, src_path: Path, dst_path: Path
-):
+async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_path: Path):
     """处理移动/重命名：更新数据库记录路径 + 缓存"""
     src_rel = _relative_path(photos_dir, src_path)
     dst_rel = _relative_path(photos_dir, dst_path)
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Image).where(Image.relative_path == src_rel)
-        )
+        result = await session.execute(select(Image).where(Image.relative_path == src_rel))
         img = result.scalar_one_or_none()
 
         if img:
@@ -191,9 +170,7 @@ async def _process_moved(
                 old_cache.unlink(missing_ok=True)
 
             # 若 dst_rel 已有记录（文件被覆盖），先删除旧记录
-            dst_result = await session.execute(
-                select(Image).where(Image.relative_path == dst_rel)
-            )
+            dst_result = await session.execute(select(Image).where(Image.relative_path == dst_rel))
             dst_img = dst_result.scalar_one_or_none()
             if dst_img is not None and dst_img.id != img.id:
                 await session.delete(dst_img)
@@ -308,9 +285,7 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
             invalidate_folder_tree_cache()
 
 
-def start_watcher(
-    photos_dir: Path, cache_dir: Path, loop: asyncio.AbstractEventLoop
-) -> Observer:
+def start_watcher(photos_dir: Path, cache_dir: Path, loop: asyncio.AbstractEventLoop) -> Observer:
     """
     启动文件系统监听器。
 

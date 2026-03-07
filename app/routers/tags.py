@@ -1,19 +1,19 @@
 """标签 API"""
 
-from sqlalchemy import delete
-from sqlmodel import select
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
-
-from app.models import Image, Tag, ImageTag, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+
+from app.models import Image, ImageTag, Tag, get_async_session
 from app.schemas import (
     AddTagsRequest,
-    RenameTagRequest,
-    MergeTagRequest,
     BatchDeleteTagsRequest,
+    MergeTagRequest,
+    RenameTagRequest,
 )
-from app.utils.path_utils import escape_like, LIKE_ESCAPE
+from app.utils.path_utils import LIKE_ESCAPE, escape_like
 
 router = APIRouter(prefix="/api", tags=["tags"])
 

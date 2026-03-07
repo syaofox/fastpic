@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+
 from sqlalchemy import text
 
 from app.models import sync_engine

@@ -2,11 +2,10 @@
 
 from datetime import datetime as _dt
 
-from sqlmodel import select
-from sqlalchemy import case, func, text
+from sqlalchemy import case, text
 
 from app.models import Image, ImageTag, Tag
-from app.utils.path_utils import escape_like, LIKE_ESCAPE, path_filter_for_prefix
+from app.utils.path_utils import LIKE_ESCAPE, escape_like, path_filter_for_prefix
 
 
 def _fulltext_search_condition(search: str):

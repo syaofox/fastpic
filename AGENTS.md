@@ -88,9 +88,46 @@ uv run pytest tests/test_db.py::test_db_connection -v
 - 使用 pytest + pytest-asyncio
 - 配置文件: `pyproject.toml` 中 `[tool.pytest.ini_options]`
 
+### 代码检查
+
+```bash
+# 运行 ruff 检查
+uv run ruff check .
+
+# 自动修复可自动修复的问题
+uv run ruff check . --fix
+```
+
+- 使用 ruff 进行代码检查
+- 配置文件: `pyproject.toml` 中 `[tool.ruff]`
+
 ## 代码风格指南
 
 ### 后端 (Python)
+
+#### 导入组织
+
+```python
+# 标准库 → 第三方库 → 本地模块
+import asyncio
+import mimetypes
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request, Depends
+from sqlmodel import select
+
+from app.config import (...)
+from app.models import (...)
+from app.routers import auth, tags, images
+from app.utils.path_utils import normalize_path
+```
+
+#### 类型注解
+
+- 使用 Python 3.13+ 原生类型注解 (`int | None` 而非 `Optional[int]`)
+- 函数参数和返回值尽量添加类型注解
+- 复杂泛型使用 `typing` 模块
 
 #### 异步/同步
 
@@ -173,14 +210,6 @@ uv run pytest tests/test_db.py::test_db_connection -v
 - 静态资源: `app/static/`
 - CSS 源文件: `src/input.css`
 - 数据库: MariaDB（生产 `data/`，本地 `data-dev/`）
-
-## Cursor Rules 集成
-
-项目包含以下 Cursor 规则文件（已内置于本指南）:
-
-- `.cursor/rules/backend.mdc`: 后端代码风格与公共函数复用
-- `.cursor/rules/frontend.mdc`: 前端风格与公共模式
-- `.cursor/rules/dev-commands.mdc`: 开发环境与常用命令
 
 ## 注意事项
 

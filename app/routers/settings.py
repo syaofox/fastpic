@@ -4,21 +4,21 @@ import asyncio
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, Request
-from sqlmodel import select
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
-from app.config import PHOTOS_DIR, CACHE_DIR, SCAN_DUPLICATES_BATCH_SIZE
-from app.models import Image, get_async_session
-from app.services.scanner import run_full_scan
-from app.utils.images import cache_filename
-from app.services.scan_state import begin_scan, end_scan
-from app.schemas import ScanDuplicatesRequest
 from app.app_common import templates
-from app.utils.path_utils import normalize_path, path_filter_for_prefix
-from app.utils.hash_utils import compute_file_md5
-from app.utils.stats import stats_folder_count_from_db
+from app.config import CACHE_DIR, PHOTOS_DIR, SCAN_DUPLICATES_BATCH_SIZE
+from app.models import Image, get_async_session
+from app.schemas import ScanDuplicatesRequest
+from app.services.scan_state import begin_scan, end_scan
+from app.services.scanner import run_full_scan
 from app.utils.folder_tree import invalidate_folder_tree_cache
+from app.utils.hash_utils import compute_file_md5
+from app.utils.images import cache_filename
+from app.utils.path_utils import normalize_path, path_filter_for_prefix
+from app.utils.stats import stats_folder_count_from_db
 
 router = APIRouter(tags=["settings"])
 

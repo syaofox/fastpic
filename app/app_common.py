@@ -6,7 +6,6 @@ from urllib.parse import quote
 
 from fastapi.templating import Jinja2Templates
 
-from app.config import ROOT
 from app.utils.images import cache_filename
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))

@@ -4,12 +4,12 @@ import asyncio
 import time
 from pathlib import Path
 
-from sqlmodel import select
 from sqlalchemy import text
+from sqlmodel import select
 
 from app.models import FolderThumbnail, natural_sort_key
 
-from .path_utils import escape_like, LIKE_ESCAPE
+from .path_utils import LIKE_ESCAPE, escape_like
 
 _FOLDER_TREE_MAX_DEPTH = 4  # 缓存深度限制，减少百万级时内存；更深层按需加载
 

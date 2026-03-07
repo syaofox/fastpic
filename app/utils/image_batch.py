@@ -2,10 +2,11 @@
 
 from collections.abc import AsyncIterator
 
-from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.models import Image
+
 from .path_utils import path_filter_for_prefix
 
 

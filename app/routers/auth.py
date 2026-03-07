@@ -5,8 +5,8 @@ import hmac
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from app.config import ACCESS_PASSWORD, SESSION_TOKEN
 from app.app_common import templates
+from app.config import ACCESS_PASSWORD, SESSION_TOKEN
 
 router = APIRouter(tags=["auth"])
 
