@@ -38,7 +38,7 @@ from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.format import format_file_size
 from app.utils.hash_utils import compute_file_md5_by_path
 from app.utils.image_records import create_image_record
-from app.utils.images import cache_filename, delete_image_files
+from app.utils.images import cache_filename
 from app.utils.path_utils import (
     normalize_path,
     path_filter_for_prefix,
@@ -178,21 +178,39 @@ async def delete_images(
     try:
         if not body.ids:
             return {"deleted": 0}
-        deleted = 0
+
+        all_images = []
         for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
             batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
             stmt = select(Image).where(Image.id.in_(batch_ids))
             result = await session.execute(stmt)
-            images = list(result.scalars().all())
-            for img in images:
-                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-                await session.delete(img)
-                deleted += 1
-            await session.commit()
-        if deleted > 0:
+            all_images.extend(result.scalars().all())
+
+        photo_paths = []
+        cache_paths = []
+        for img in all_images:
+            photo_paths.append(PHOTOS_DIR / img.relative_path)
+            cache_name = cache_filename(img.relative_path)
+            cache_paths.append(CACHE_DIR / cache_name)
+
+        def _delete_files(paths: list[Path]):
+            for p in paths:
+                if p.exists():
+                    p.unlink(missing_ok=True)
+
+        await asyncio.gather(
+            asyncio.to_thread(_delete_files, photo_paths),
+            asyncio.to_thread(_delete_files, cache_paths),
+        )
+
+        for img in all_images:
+            await session.delete(img)
+        await session.commit()
+
+        if len(all_images) > 0:
             invalidate_folder_tree_cache()
-        task_state.end_task({"deleted": deleted})
-        return {"deleted": deleted}
+        task_state.end_task({"deleted": len(all_images)})
+        return {"deleted": len(all_images)}
     except Exception as e:
         task_state.fail_task(str(e))
         raise
