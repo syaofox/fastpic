@@ -243,18 +243,19 @@ def invalidate_folder_tree_cache() -> None:
 
 
 def _build_folder_counts_sql(max_depth: int) -> str:
-    """生成 folder_counts 聚合 SQL，max_depth 为最大路径深度（不含文件名）。"""
-    parts = ["SELECT '' AS prefix FROM images"]
-    for i in range(1, max_depth + 1):
-        like_pattern = "%" + "/%" * i
-        parts.append(
-            f"SELECT SUBSTRING_INDEX(relative_path, '/', {i}) FROM images WHERE relative_path LIKE '{like_pattern}'"
-        )
-    union_sql = " UNION ALL ".join(parts)
-    return f"""
+    """生成 folder_counts 聚合 SQL，max_depth 为最大路径深度（不含文件名）。
+    优化：使用带 WHERE 条件的分层查询，避免无效匹配。"""
+    return """
         SELECT prefix, COUNT(*) AS cnt FROM (
-            {union_sql}
+            SELECT SUBSTRING_INDEX(relative_path, '/', 1) AS prefix FROM images WHERE relative_path LIKE '%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 2) AS prefix FROM images WHERE relative_path LIKE '%/%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 3) AS prefix FROM images WHERE relative_path LIKE '%/%/%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 4) AS prefix FROM images WHERE relative_path LIKE '%/%/%/%/%'
         ) t
+        WHERE prefix IS NOT NULL AND prefix != ''
         GROUP BY prefix
     """
 

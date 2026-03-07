@@ -24,8 +24,8 @@ else:
     ASYNC_DATABASE_URL = "mysql+aiomysql://fake:fake@127.0.0.1:3306/fake"
 
 # 连接池：可通过环境变量调优，生产环境建议 pool_size=20, max_overflow=40
-_db_pool_size = int(os.environ.get("DB_POOL_SIZE", "10"))
-_db_max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+_db_pool_size = int(os.environ.get("DB_POOL_SIZE", "20"))
+_db_max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "40"))
 _db_pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "3600"))  # 1 小时，避免 MariaDB wait_timeout 关闭后复用
 
 # 自然排序：数字按数值排（1,2,10,100），非数字按字典序。用于生成可比较的 sort key
@@ -78,6 +78,7 @@ class ImageTag(SQLModel, table=True):
 
 class PathCountCache(SQLModel, table=True):
     """path 下图片数量持久化缓存，减轻百万级 COUNT 查询"""
+
     __tablename__ = "path_count_cache"
 
     path: str = Field(primary_key=True)
@@ -88,6 +89,7 @@ class PathCountCache(SQLModel, table=True):
 
 class FolderThumbnail(SQLModel, table=True):
     """用户指定的文件夹缩略图，优先于自动选取。同一文件夹最多 4 张。"""
+
     __tablename__ = "folder_thumbnails"
 
     folder_path: str = Field(primary_key=True)
@@ -103,9 +105,7 @@ async_engine = create_async_engine(
     max_overflow=_db_max_overflow,
     pool_recycle=_db_pool_recycle,
 )
-async_session_factory = async_sessionmaker(
-    async_engine, class_=AsyncSession, expire_on_commit=False
-)
+async_session_factory = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
 
 
 def _run_natural_sort_index_migration() -> None:
@@ -114,9 +114,7 @@ def _run_natural_sort_index_migration() -> None:
 
     with sync_engine.connect() as conn:
         try:
-            conn.execute(text(
-                "CREATE INDEX ix_images_relative_path_natural ON images(relative_path_natural(512))"
-            ))
+            conn.execute(text("CREATE INDEX ix_images_relative_path_natural ON images(relative_path_natural(512))"))
         except Exception:
             pass
         conn.commit()
@@ -127,11 +125,13 @@ def _run_fulltext_migration() -> None:
     from sqlalchemy import text
 
     with sync_engine.connect() as conn:
-        r = conn.execute(text(
-            "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' "
-            "AND INDEX_TYPE = 'FULLTEXT' AND COLUMN_NAME = 'filename'"
-        ))
+        r = conn.execute(
+            text(
+                "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' "
+                "AND INDEX_TYPE = 'FULLTEXT' AND COLUMN_NAME = 'filename'"
+            )
+        )
         if r.fetchone() is None:
             try:
                 conn.execute(text("CREATE FULLTEXT INDEX ft_images_filename ON images(filename)"))

@@ -31,8 +31,8 @@ from app.models import (
     natural_sort_key,
 )
 from app.schemas import DeleteImagesRequest, DownloadZipRequest
-from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.services import task_state
+from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.format import format_file_size
 from app.utils.hash_utils import compute_file_md5_by_path

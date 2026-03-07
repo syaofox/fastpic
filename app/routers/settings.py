@@ -12,9 +12,9 @@ from app.app_common import templates
 from app.config import CACHE_DIR, PHOTOS_DIR, SCAN_DUPLICATES_BATCH_SIZE
 from app.models import Image, get_async_session
 from app.schemas import ScanDuplicatesRequest
+from app.services import task_state
 from app.services.scan_state import begin_scan, end_scan
 from app.services.scanner import run_full_scan
-from app.services import task_state
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.hash_utils import compute_file_md5
 from app.utils.images import cache_filename
@@ -86,7 +86,7 @@ async def task_events(request: Request):
                 elif last_sent_status and last_sent_status.get("finished_at"):
                     yield f"data: {last_sent_status}\n\n"
                     last_sent_status = None
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield "data: \n\n"
             except Exception:
                 break

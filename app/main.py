@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
@@ -97,6 +98,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 auth.setup_auth_middleware(app)
 
 app.include_router(auth.router)
@@ -469,7 +471,7 @@ mimetypes.add_type("video/mp2t", ".ts")
 mimetypes.add_type("image/avif", ".avif")
 app.mount(
     "/photos",
-    CachedStaticFiles(directory=str(PHOTOS_DIR), cache_control="public, max-age=3600"),
+    CachedStaticFiles(directory=str(PHOTOS_DIR), cache_control="public, max-age=86400"),
     name="photos",
 )
 app.mount(

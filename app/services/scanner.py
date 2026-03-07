@@ -142,7 +142,6 @@ def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
             timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
-            # ffprobe 可能输出 "width,height" 或 "width\nheight"（部分 .ts 等格式）
             raw = result.stdout.strip().replace(",", " ").replace("\n", " ")
             parts = [p for p in raw.split() if p.isdigit()]
             if len(parts) >= 2:
@@ -150,6 +149,11 @@ def _get_video_dimensions(full_path: Path) -> tuple[int, int]:
     except (subprocess.TimeoutExpired, FileNotFoundError, ValueError) as e:
         print(f"[cache] ffprobe 失败 {full_path}: {e}", flush=True)
     return 1920, 1080
+
+
+async def _get_video_dimensions_async(full_path: Path) -> tuple[int, int]:
+    """异步获取视频宽高"""
+    return await asyncio.to_thread(_get_video_dimensions, full_path)
 
 
 def _generate_video_thumbnail(full_path: Path, cache_path: Path) -> bool:

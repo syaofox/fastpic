@@ -9,10 +9,11 @@
 import asyncio
 import json
 import threading
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 STATE_FILE = Path("task_state.json")
 _lock = threading.Lock()
@@ -87,7 +88,7 @@ def _read_state() -> TaskState:
     if not STATE_FILE.exists():
         return TaskState()
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
+        with open(STATE_FILE, encoding="utf-8") as f:
             data = json.load(f)
             return TaskState(
                 task_type=data.get("task_type"),
@@ -100,7 +101,7 @@ def _read_state() -> TaskState:
                 total_items=data.get("total_items", 0),
                 processed_items=data.get("processed_items", 0),
             )
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return TaskState()
 
 

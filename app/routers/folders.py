@@ -25,8 +25,8 @@ from app.schemas import (
     RenameFolderRequest,
     RenameImageRequest,
 )
-from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.services import task_state
+from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.utils.folder_tree import (
     get_folder_counts_for_search,
     get_subfolders,
