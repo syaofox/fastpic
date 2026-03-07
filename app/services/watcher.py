@@ -210,6 +210,9 @@ async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_
                 await _process_created(photos_dir, cache_dir, dst_path)
 
 
+_watcher_lock = asyncio.Lock()
+
+
 async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
     """消费事件队列，去抖动后批量处理"""
     # 收集所有积压事件
@@ -259,24 +262,42 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
             queue.put(ev)
         return
 
+    # 分类事件
+    created_events: list[Path] = []
+    deleted_events: list[Path] = []
+    moved_events: list[tuple[Path, Path]] = []
+
+    for key, ev in path_events.items():
+        event_type, src, dst, ts = ev
+        if event_type == "created":
+            created_events.append(Path(src))
+        elif event_type == "deleted":
+            deleted_events.append(Path(src))
+        elif event_type == "moved":
+            moved_events.append((Path(src), Path(dst)))
+
+    # 并行处理所有事件
+    tasks = []
+    for src in created_events:
+        tasks.append(_process_created(photos_dir, cache_dir, src))
+    for src in deleted_events:
+        tasks.append(_process_deleted(photos_dir, cache_dir, src))
+    for src, dst in moved_events:
+        tasks.append(_process_moved(photos_dir, cache_dir, src, dst))
+
+    processed = 0
     begin_scan()
     try:
-        processed = 0
-        for key, ev in path_events.items():
-            event_type, src, dst, ts = ev
-            try:
-                if event_type == "created":
-                    await _process_created(photos_dir, cache_dir, Path(src))
-                elif event_type == "deleted":
-                    await _process_deleted(photos_dir, cache_dir, Path(src))
-                elif event_type == "moved":
-                    await _process_moved(photos_dir, cache_dir, Path(src), Path(dst))
-                processed += 1
-            except Exception as e:
-                print(f"[watcher] 处理事件失败 ({event_type} {src}): {e}", flush=True)
+        async with _watcher_lock:
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                processed = sum(1 for r in results if not isinstance(r, Exception))
+                for r in results:
+                    if isinstance(r, Exception):
+                        print(f"[watcher] 处理事件失败: {r}", flush=True)
 
-        if processed:
-            print(f"[watcher] 批量处理 {processed} 个文件变化", flush=True)
+            if processed:
+                print(f"[watcher] 批量处理 {processed} 个文件变化", flush=True)
     finally:
         end_scan()
         if processed > 0:
