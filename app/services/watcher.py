@@ -280,7 +280,7 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
     finally:
         end_scan()
         if processed > 0:
-            from utils.folder_tree import invalidate_folder_tree_cache
+            from app.utils.folder_tree import invalidate_folder_tree_cache
 
             invalidate_folder_tree_cache()
 
