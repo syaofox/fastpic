@@ -17,7 +17,7 @@
 #   SKIP_FULL_SCAN_ON_STARTUP 启动时是否跳过完整扫描，默认 false
 #
 # 系统限制（通过 docker-compose.yml 设置）
-#   inotify max_user_watches  文件监控数量，默认 8192，十万级图片建议 524288
+#   inotify max_user_watches  文件监控数量，默认 8192，十万级图片建议 524288（需要宿主机设置，容器内无法修改）
 #
 # MariaDB 数据库
 #   MYSQL_ROOT_PASSWORD       root 密码，默认 fastpic
@@ -69,8 +69,6 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8000:8000"
-    sysctls:
-      - fs.inotify.max_user_watches=524288
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - ACCESS_PASSWORD=${ACCESS_PASSWORD:-0928}
