@@ -41,6 +41,8 @@ show_help() {
     echo "  stop            Stop MariaDB and FastPic"
     echo "  restart         Restart the environment"
     echo "  status          Check service status"
+    echo "  build:css       Build CSS (Tailwind)"
+    echo "  watch:css       Watch and build CSS in development"
     echo "  help            Show this help message"
     echo ""
     echo "Options:"
@@ -51,6 +53,8 @@ show_help() {
     echo "  $0 start -d            # Start DB and run app in background"
     echo "  $0 stop                # Stop everything"
     echo "  $0 restart -d          # Restart in daemon mode"
+    echo "  $0 build:css           # Build Tailwind CSS"
+    echo "  $0 watch:css           # Watch mode for CSS development"
 }
 
 stop_services() {
@@ -62,6 +66,18 @@ stop_services() {
     echo -e "${YELLOW}[2/2]${NC} Stopping MariaDB..."
     docker compose -f docker-compose.dev.yml down 2>/dev/null || true
     echo -e "${GREEN}MariaDB stopped${NC}"
+}
+
+build_css() {
+    echo -e "${YELLOW}Building CSS...${NC}"
+    npm run build:css
+    echo -e "${GREEN}CSS built successfully!${NC}"
+}
+
+watch_css() {
+    echo -e "${YELLOW}Watching CSS changes...${NC}"
+    echo "Press Ctrl+C to stop"
+    npm run watch:css
 }
 
 check_status() {
@@ -160,6 +176,12 @@ case "$COMMAND" in
         ;;
     status)
         check_status
+        ;;
+    build:css)
+        build_css
+        ;;
+    watch:css)
+        watch_css
         ;;
     help|--help|-h)
         show_help

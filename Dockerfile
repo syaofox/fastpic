@@ -5,6 +5,11 @@
 # ---------- 阶段 1: 构建依赖 ----------
 FROM python:3.13-slim AS builder
 
+# 安装 Node.js（用于构建 CSS）
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
 # 安装 uv（极速 Python 包管理器）
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -19,6 +24,17 @@ RUN uv sync --frozen --no-install-project --no-dev
 
 # 拷贝应用源码
 COPY . .
+
+# 复制 package.json 等以安装 npm 依赖并构建 CSS
+COPY package.json package-lock.json tailwind.config.js ./
+COPY src ./src
+
+# 安装 npm 依赖并构建 CSS（仅构建阶段）
+RUN if [ -f package.json ]; then \
+        npm install; \
+        npx tailwindcss -i ./src/input.css -o ./app/static/assets/styles.css --minify; \
+    fi
+
 # 确保 static 目录存在（favicon.ico 等静态资源）
 RUN mkdir -p /app/static
 
@@ -40,6 +56,7 @@ WORKDIR /app
 # 从构建阶段拷贝虚拟环境和源码
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/app /app/app
+COPY --from=builder /app/app/static /app/app/static
 COPY --from=builder /app/pyproject.toml /app/
 
 # 创建数据目录并设置权限
