@@ -71,9 +71,7 @@ def build_nested_tree(flat_folders: list[list[str]]) -> dict:
     return root
 
 
-async def _get_user_thumbnails(
-    session, folder_paths: list[str], limit: int = 4
-) -> dict[str, list[str]]:
+async def _get_user_thumbnails(session, folder_paths: list[str], limit: int = 4) -> dict[str, list[str]]:
     """获取用户指定的文件夹缩略图，按 display_order 排序，每文件夹最多 limit 张。"""
     if not folder_paths:
         return {}
@@ -168,11 +166,7 @@ async def _get_direct_layer_thumbnails_batch(
         10000,
     )
     params["lim"] = total_limit
-    sql = text(
-        "SELECT relative_path FROM images "
-        f"WHERE {' OR '.join(conditions)} "
-        "ORDER BY modified_at DESC LIMIT :lim"
-    )
+    sql = text(f"SELECT relative_path FROM images WHERE {' OR '.join(conditions)} ORDER BY modified_at DESC LIMIT :lim")
     result = await session.execute(sql, params)
     rows = result.fetchall()
 
@@ -213,9 +207,7 @@ async def get_root_subfolders_from_counts(
         )
     result.sort(key=lambda s: natural_sort_key(s["name"]))
     folder_paths = [sub["full_path"] for sub in result]
-    user_thumbs = await _get_user_thumbnails(
-        session, folder_paths, limit=limit_thumbnails
-    )
+    user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=limit_thumbnails)
     auto_thumbs = await _get_direct_layer_thumbnails_batch(
         session, folder_paths, user_thumbs, limit_per_folder=limit_thumbnails
     )
@@ -243,7 +235,7 @@ def invalidate_folder_tree_cache() -> None:
     _folder_tree_cache = None
     _subfolder_cache = {}
     try:
-        from utils.path_count_cache import invalidate_path_count_cache
+        from app.utils.path_count_cache import invalidate_path_count_cache
 
         invalidate_path_count_cache()
     except ImportError:
@@ -256,8 +248,7 @@ def _build_folder_counts_sql(max_depth: int) -> str:
     for i in range(1, max_depth + 1):
         like_pattern = "%" + "/%" * i
         parts.append(
-            f"SELECT SUBSTRING_INDEX(relative_path, '/', {i}) FROM images "
-            f"WHERE relative_path LIKE '{like_pattern}'"
+            f"SELECT SUBSTRING_INDEX(relative_path, '/', {i}) FROM images WHERE relative_path LIKE '{like_pattern}'"
         )
     union_sql = " UNION ALL ".join(parts)
     return f"""
@@ -271,9 +262,7 @@ def _build_folder_counts_sql(max_depth: int) -> str:
 _SEARCH_DIRS_MAX_DEPTH = 10  # 目录搜索支持的最大深度，超过侧边栏树状图
 
 
-async def _get_folder_counts_from_sql(
-    session, max_depth: int = _FOLDER_TREE_MAX_DEPTH
-) -> dict[str, int]:
+async def _get_folder_counts_from_sql(session, max_depth: int = _FOLDER_TREE_MAX_DEPTH) -> dict[str, int]:
     """用单条 SQL 聚合查询获取各文件夹路径的图片数量，替代分批加载 + Python 累加。
     max_depth: 最大路径深度，默认 4；search_dirs 等场景可传更大值（如 10）以支持更深目录。"""
     sql = text(_build_folder_counts_sql(max_depth))
@@ -303,9 +292,7 @@ async def get_folder_counts_for_search(session) -> dict[str, int]:
     return await _get_folder_counts_from_sql(session, max_depth=_SEARCH_DIRS_MAX_DEPTH)
 
 
-def _get_direct_children_from_folder_counts(
-    folder_counts: dict[str, int], path_prefix: str
-) -> set[str]:
+def _get_direct_children_from_folder_counts(folder_counts: dict[str, int], path_prefix: str) -> set[str]:
     """从 folder_counts 解析 path_prefix 下的直接子目录名，无需 iterdir。"""
     if not path_prefix.endswith("/"):
         path_prefix = path_prefix + "/"
@@ -336,9 +323,7 @@ async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
         # 深度达到限制前一层时，从 DB folder_counts 解析子目录，跳过 iterdir
         if len(prefix) >= _FOLDER_TREE_MAX_DEPTH - 1:
             path_prefix = "/".join(prefix)
-            for child_name in _get_direct_children_from_folder_counts(
-                folder_counts, path_prefix
-            ):
+            for child_name in _get_direct_children_from_folder_counts(folder_counts, path_prefix):
                 if not child_name.startswith("."):
                     folders.add(prefix + (child_name,))
             return
@@ -379,9 +364,7 @@ async def get_folder_tree_cached(
                 folder_counts,
             ) = await _get_folder_tree_from_db_batched(session, photos_dir)
         else:
-            folder_tree = await asyncio.to_thread(
-                get_folder_tree, photos_dir, rel_paths or []
-            )
+            folder_tree = await asyncio.to_thread(get_folder_tree, photos_dir, rel_paths or [])
             nested_tree = build_nested_tree(folder_tree)
             folder_counts = compute_folder_counts(rel_paths or [])
         _folder_tree_cache = {
@@ -444,9 +427,7 @@ async def get_subfolders(
     db_names = {r[0] for r in agg_rows}
     if fs_dir.is_dir() and len(agg_rows) < _SUBFOLDER_ITERDIR_THRESHOLD:
         children = await asyncio.to_thread(
-            lambda: [
-                c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")
-            ]
+            lambda: [c for c in fs_dir.iterdir() if c.is_dir() and not c.name.startswith(".")]
         )
         for child in children:
             if child.name not in db_names:
@@ -471,9 +452,7 @@ async def get_subfolders(
 
     folder_paths = [sub["full_path"] for sub in subfolders]
     user_thumbs = await _get_user_thumbnails(session, folder_paths, limit=4)
-    auto_thumbs = await _get_direct_layer_thumbnails_batch(
-        session, folder_paths, user_thumbs, limit_per_folder=4
-    )
+    auto_thumbs = await _get_direct_layer_thumbnails_batch(session, folder_paths, user_thumbs, limit_per_folder=4)
     for sub in subfolders:
         fp = sub["full_path"]
         ut = user_thumbs.get(fp, [])
