@@ -158,9 +158,9 @@ async def index(request: Request, session: AsyncSession = Depends(get_async_sess
     """返回主页框架。侧边栏文件夹树通过 hx-get 懒加载，减轻首屏负担。"""
     all_tags = await _get_hot_tags_cached(session)
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "all_tags": all_tags,
             "version": APP_VERSION,
         },
@@ -203,9 +203,9 @@ async def api_gallery_subfolders(
         async with async_session_factory() as s:
             subfolders = await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
     return templates.TemplateResponse(
+        request,
         "partials/gallery_subfolders.html",
         {
-            "request": request,
             "subfolders": subfolders,
             "path": path,
             "mode": mode,
@@ -218,6 +218,110 @@ async def api_gallery_subfolders(
             "filter_date_from": filter_date_from,
             "filter_date_to": filter_date_to,
             "filter_tag": filter_tag,
+        },
+    )
+
+
+@app.get("/api/gallery-data")
+async def api_gallery_data(
+    request: Request,
+    path: str = "",
+    search: str = "",
+    mode: str = "folder",
+    sort_by: str = "modified_at",
+    sort_order: str = "desc",
+    cols: int = 4,
+    filter_filename: str = "",
+    filter_size_min: str = "",
+    filter_size_max: str = "",
+    filter_date_from: str = "",
+    filter_date_to: str = "",
+    filter_tag: str = "",
+    session: AsyncSession = Depends(get_async_session),
+):
+    """组合 API：返回图片和子文件夹数据，合并减少请求数。"""
+    path = normalize_path(path, allow_empty=True) or ""
+    valid_modes = ("folder", "list", "waterfall")
+    mode = mode if mode in valid_modes else "folder"
+    parsed = parse_filter_params(
+        filter_filename,
+        filter_size_min,
+        filter_size_max,
+        filter_date_from,
+        filter_date_to,
+        filter_tag,
+    )
+    stmt = select(Image).order_by(
+        get_sort_column(sort_by).asc() if sort_order == "asc" else get_sort_column(sort_by).desc(),
+        Image.id.asc() if sort_order == "asc" else Image.id.desc(),
+    )
+    stmt, pf, has_filters = apply_image_filters(stmt, path, search, mode, parsed)
+    per_page = _per_page_for_cols(cols)
+    stmt = stmt.limit(per_page + 1)
+
+    async def _get_images():
+        async with async_session_factory() as s:
+            result = await s.execute(stmt)
+            return list(result.scalars().all())
+
+    async def _get_subfolders():
+        need_subfolders = mode in ("folder", "list") and not search and not has_filters and not parsed["filter_tag"]
+        if not need_subfolders:
+            return []
+        _, pf_inner, _ = apply_image_filters(select(Image), path, "", mode, parsed)
+        if path == "":
+            folder_counts = await get_root_folder_counts_only(session)
+            return await get_root_subfolders_from_counts(folder_counts, session)
+        async with async_session_factory() as s:
+            return await get_subfolders(s, PHOTOS_DIR, path, pf_inner, sort_by, sort_order)
+
+    subfolders, images_list = await asyncio.gather(_get_subfolders(), _get_images())
+
+    breadcrumb_parts = path.split("/") if path else []
+    image_tags_map: dict[int, list[str]] = {}
+    if images_list:
+        image_ids = [img.id for img in images_list if img.id]
+        if image_ids:
+            tag_stmt = (
+                select(ImageTag.image_id, Tag.name)
+                .join(Tag, Tag.id == ImageTag.tag_id)
+                .where(ImageTag.image_id.in_(image_ids))
+                .order_by(Tag.name)
+            )
+            tag_result = await session.execute(tag_stmt)
+            for img_id, tag_name in tag_result.fetchall():
+                if img_id not in image_tags_map:
+                    image_tags_map[img_id] = []
+                image_tags_map[img_id].append(tag_name)
+
+    return templates.TemplateResponse(
+        request,
+        "gallery.html",
+        {
+            "images": images_list,
+            "path": path,
+            "search": search,
+            "mode": mode,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+            "page": 1,
+            "per_page": per_page,
+            "has_next": len(images_list) > per_page,
+            "total": len(images_list),
+            "append": False,
+            "subfolders": subfolders,
+            "defer_subfolders": False,
+            "breadcrumb_parts": breadcrumb_parts,
+            "filter_filename": filter_filename,
+            "filter_size_min": filter_size_min,
+            "filter_size_max": filter_size_max,
+            "filter_date_from": filter_date_from,
+            "filter_date_to": filter_date_to,
+            "filter_tag": filter_tag,
+            "has_filters": has_filters,
+            "cols": cols,
+            "image_tags_map": image_tags_map,
+            "next_cursor": "",
         },
     )
 
@@ -378,9 +482,9 @@ async def gallery(
                 image_tags_map[img_id].append(tag_name)
     breadcrumb_parts = path.split("/") if path else []
     return templates.TemplateResponse(
+        request,
         "gallery.html",
         {
-            "request": request,
             "images": images_list,
             "path": path,
             "search": search,

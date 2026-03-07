@@ -32,7 +32,7 @@ async def login_page(request: Request):
     """显示登录页面"""
     if not ACCESS_PASSWORD:
         return RedirectResponse(url="/", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request, "error": ""})
+    return templates.TemplateResponse(request, "login.html", {"error": ""})
 
 
 @router.post("/login")
@@ -44,7 +44,7 @@ async def login_submit(request: Request):
         response = RedirectResponse(url="/", status_code=302)
         response.set_cookie(key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax")
         return response
-    return templates.TemplateResponse("login.html", {"request": request, "error": "密码错误，请重试"})
+    return templates.TemplateResponse(request, "login.html", {"error": "密码错误，请重试"})
 
 
 @router.get("/logout")

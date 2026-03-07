@@ -38,8 +38,9 @@ def _estimate_thumb_bytes(width: int, height: int) -> int:
 async def settings_page(request: Request):
     """设置页面"""
     return templates.TemplateResponse(
+        request,
         "settings.html",
-        {"request": request, "db_display": "MariaDB"},
+        {"db_display": "MariaDB"},
     )
 
 
