@@ -263,6 +263,36 @@ def _build_folder_counts_sql(max_depth: int) -> str:
 _SEARCH_DIRS_MAX_DEPTH = 10  # 目录搜索支持的最大深度，超过侧边栏树状图
 
 
+async def _get_folder_counts_streaming(session, max_depth: int = _FOLDER_TREE_MAX_DEPTH) -> dict[str, int]:
+    """流式获取 folder_counts，分批处理避免百万级时内存压力。"""
+    folder_counts: dict[str, int] = {"": 0}
+    batch_size = 10000
+    last_id = 0
+
+    while True:
+        sql = text("SELECT id, relative_path FROM images WHERE id > :last_id ORDER BY id LIMIT :batch_size")
+        result = await session.execute(sql, {"last_id": last_id, "batch_size": batch_size})
+        rows = result.fetchall()
+
+        if not rows:
+            break
+
+        for row in rows:
+            row_id, path = row[0], row[1]
+            last_id = row_id
+            if not path or "/" not in path:
+                folder_counts[""] = folder_counts.get("", 0) + 1
+                continue
+            parts = path.split("/")
+            for depth in range(1, min(len(parts), max_depth + 1)):
+                prefix = "/".join(parts[:depth])
+                folder_counts[prefix] = folder_counts.get(prefix, 0) + 1
+
+        await asyncio.sleep(0)
+
+    return folder_counts
+
+
 async def _get_folder_counts_from_sql(session, max_depth: int = _FOLDER_TREE_MAX_DEPTH) -> dict[str, int]:
     """用单条 SQL 聚合查询获取各文件夹路径的图片数量，替代分批加载 + Python 累加。
     max_depth: 最大路径深度，默认 4；search_dirs 等场景可传更大值（如 10）以支持更深目录。"""
@@ -307,8 +337,8 @@ def _get_direct_children_from_folder_counts(folder_counts: dict[str, int], path_
 
 
 async def _get_folder_tree_from_db_batched(session, photos_dir: Path):
-    """从数据库 SQL 聚合获取 folder_counts，再构建 folder_tree 和 nested_tree。"""
-    folder_counts = await _get_folder_counts_from_sql(session)
+    """从数据库流式获取 folder_counts，再构建 folder_tree 和 nested_tree。"""
+    folder_counts = await _get_folder_counts_streaming(session)
 
     folders: set[tuple[str, ...]] = set()
     for path_key in folder_counts.keys():
