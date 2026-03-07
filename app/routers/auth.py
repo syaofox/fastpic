@@ -19,7 +19,7 @@ def setup_auth_middleware(app):
         if not ACCESS_PASSWORD:
             return await call_next(request)
         path = request.url.path
-        if path in ("/login", "/favicon.ico", "/api/scan-status"):
+        if path in ("/login", "/favicon.ico", "/api/scan-status") or path.startswith("/static/"):
             return await call_next(request)
         token = request.cookies.get("fp_session")
         if not token or not hmac.compare_digest(token, SESSION_TOKEN):
@@ -42,13 +42,9 @@ async def login_submit(request: Request):
     password = (form.get("password") or "").strip()
     if hmac.compare_digest(password, ACCESS_PASSWORD):
         response = RedirectResponse(url="/", status_code=302)
-        response.set_cookie(
-            key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax"
-        )
+        response.set_cookie(key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax")
         return response
-    return templates.TemplateResponse(
-        "login.html", {"request": request, "error": "密码错误，请重试"}
-    )
+    return templates.TemplateResponse("login.html", {"request": request, "error": "密码错误，请重试"})
 
 
 @router.get("/logout")
