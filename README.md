@@ -88,16 +88,69 @@ docker compose logs -f
 
 ```
 fastpic/
-├── app/
-│   ├── main.py          # FastAPI 应用、路由
-│   ├── models.py        # 数据模型
-│   ├── config.py        # 配置
-│   ├── templates/       # Jinja2 模板
-│   ├── static/          # 静态资源（CSS/JS/图片）
-│   └── utils/           # 工具函数
+├── app/                          # 应用主目录
+│   ├── __init__.py
+│   ├── main.py                   # FastAPI 应用入口、路由挂载
+│   ├── config.py                 # 配置（路径、环境变量解析）
+│   ├── models.py                 # SQLModel 数据模型
+│   ├── schemas.py                # Pydantic 请求/响应模型
+│   ├── app_common.py             # 公共依赖、依赖注入
+│   ├── routers/                  # 路由模块
+│   │   ├── __init__.py
+│   │   ├── auth.py               # 登录认证
+│   │   ├── folders.py            # 文件夹相关 API
+│   │   ├── images.py             # 图片/视频 API
+│   │   ├── settings.py           # 设置页面
+│   │   └── tags.py               # 标签管理
+│   ├── services/                 # 业务服务
+│   │   ├── scanner.py            # 异步扫描与缩略图生成
+│   │   ├── scan_state.py         # 扫描状态管理
+│   │   └── watcher.py            # 文件监控（热重载）
+│   ├── utils/                    # 工具函数
+│   │   ├── path_utils.py         # 路径规范化与安全检查
+│   │   ├── hash_utils.py         # 文件哈希计算
+│   │   ├── image_records.py      # 数据库记录操作
+│   │   ├── images.py             # 图片处理
+│   │   ├── image_batch.py        # 批量图片处理
+│   │   ├── query_builder.py      # SQL 查询构建
+│   │   ├── folder_tree.py        # 文件夹树结构
+│   │   ├── search.py             # 搜索（简繁转换、拼音）
+│   │   ├── tags.py               # 标签处理
+│   │   ├── format.py             # 格式化（文件大小、日期）
+│   │   └── stats.py              # 统计信息
+│   ├── templates/                # Jinja2 模板
+│   │   ├── base.html             # 基础模板
+│   │   ├── index.html            # 首页（登录后重定向）
+│   │   ├── gallery.html          # 图片画廊
+│   │   ├── login.html            # 登录页
+│   │   ├── settings.html         # 设置页
+│   │   ├── macros/               # 可复用宏
+│   │   └── partials/             # 公共片段
+│   └── static/                   # 静态资源
+│       ├── assets/
+│       │   └── styles.css        # 编译后的 Tailwind CSS
+│       ├── js/
+│       │   ├── htmx.min.js       # HTMX 库
+│       │   ├── mpegts.min.js     # 视频播放库
+│       │   ├── utils.js          # 公共 JS 工具
+│       │   ├── gallery.js        # 画廊交互逻辑
+│       │   └── folder-browser.js # 文件夹浏览逻辑
+│       └── favicon.ico
 ├── src/
-│   └── input.css        # Tailwind CSS 源文件
-├── photos/              # 图片根目录
-├── cache/               # 缩略图缓存
-└── dev-run.sh          # 开发脚本
+│   └── input.css                 # Tailwind CSS 源文件
+├── photos/                       # 图片根目录（挂载外部存储）
+├── cache/                        # 缩略图缓存（三层结构）
+├── data/                         # MariaDB 数据目录
+├── tests/                        # 测试文件
+│   ├── conftest.py               # pytest 配置
+│   ├── test_db.py                # 数据库测试
+│   └── test_filter_media_type.py # 媒体类型筛选测试
+├── dev-run.sh                    # 开发脚本
+├── Dockerfile                     # Docker 构建文件
+├── docker-compose.yml            # 生产环境编排
+├── docker-compose.dev.yml        # 开发环境编排
+├── tailwind.config.js            # Tailwind 配置
+├── package.json                  # npm 依赖
+├── pyproject.toml                # Python 项目配置
+└── uv.lock                       # uv 锁文件
 ```
