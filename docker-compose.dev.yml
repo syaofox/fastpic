@@ -36,7 +36,7 @@ services:
       - --innodb-buffer-pool-size=256M
       - --transaction-isolation=READ-COMMITTED
     volumes:
-      - ./data-dev:/var/lib/mysql
+      - ./data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
