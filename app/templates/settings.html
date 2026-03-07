@@ -734,7 +734,16 @@ function triggerScan() {
     status.className = 'text-sm text-slate-500';
 
     fetch('/scan', { method: 'POST' })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.status === 409) {
+                btn.disabled = false;
+                btn.textContent = '开始扫描';
+                status.textContent = '有任务正在进行中，请等待完成后再提交';
+                status.className = 'text-sm text-amber-600';
+                return Promise.reject('busy');
+            }
+            return r.json();
+        })
         .then(function(data) {
             btn.disabled = false;
             btn.textContent = '开始扫描';
@@ -746,6 +755,7 @@ function triggerScan() {
             loadStats();
         })
         .catch(function(err) {
+            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '开始扫描';
             status.textContent = '扫描失败: ' + err;
@@ -765,7 +775,16 @@ function triggerCleanup() {
     resultEl.classList.add('hidden');
 
     fetch('/api/cleanup', { method: 'POST' })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.status === 409) {
+                btn.disabled = false;
+                btn.textContent = '开始清理';
+                status.textContent = '有任务正在进行中，请等待完成后再提交';
+                status.className = 'text-sm text-amber-600';
+                return Promise.reject('busy');
+            }
+            return r.json();
+        })
         .then(function(data) {
             btn.disabled = false;
             btn.textContent = '开始清理';
@@ -785,6 +804,7 @@ function triggerCleanup() {
             loadStats();
         })
         .catch(function(err) {
+            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '开始清理';
             status.textContent = '清理失败: ' + err;
@@ -804,7 +824,16 @@ function triggerRebuild() {
     resultEl.classList.add('hidden');
 
     fetch('/api/full-sync', { method: 'POST' })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.status === 409) {
+                btn.disabled = false;
+                btn.textContent = '完整重建';
+                status.textContent = '有任务正在进行中，请等待完成后再提交';
+                status.className = 'text-sm text-amber-600';
+                return Promise.reject('busy');
+            }
+            return r.json();
+        })
         .then(function(data) {
             btn.disabled = false;
             btn.textContent = '完整重建';
@@ -822,6 +851,7 @@ function triggerRebuild() {
             loadStats();
         })
         .catch(function(err) {
+            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '完整重建';
             status.textContent = '重建失败: ' + err;
@@ -852,7 +882,16 @@ function triggerScanDuplicates() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.status === 409) {
+                btn.disabled = false;
+                btn.textContent = '开始扫描';
+                status.textContent = '有任务正在进行中，请等待完成后再提交';
+                status.className = 'text-sm text-amber-600';
+                return Promise.reject('busy');
+            }
+            return r.json();
+        })
         .then(function(data) {
             btn.disabled = false;
             btn.textContent = '开始扫描';
@@ -872,6 +911,7 @@ function triggerScanDuplicates() {
             }
         })
         .catch(function(err) {
+            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '开始扫描';
             status.textContent = '扫描失败: ' + err;
@@ -1372,9 +1412,22 @@ function triggerMergeFolders() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder_a: folderA, folder_b: folderB, target: target })
     })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.status === 409) {
+                btn.disabled = false;
+                status.textContent = '有任务正在进行中，请等待完成后再提交';
+                status.className = 'text-sm text-amber-600';
+                return Promise.reject('busy');
+            }
+            return r.json();
+        })
         .then(function(data) {
             btn.disabled = false;
+            if (data.busy) {
+                status.textContent = data.error || '有任务正在进行中，请等待完成后再提交';
+                status.className = 'text-sm text-amber-600';
+                return;
+            }
             if (data.ok) {
                 status.textContent = '合并完成';
                 status.className = 'text-sm text-green-600';
@@ -1391,6 +1444,7 @@ function triggerMergeFolders() {
             }
         })
         .catch(function(err) {
+            if (err === 'busy') return;
             btn.disabled = false;
             status.textContent = '合并失败';
             status.className = 'text-sm text-red-500';
@@ -1400,6 +1454,196 @@ function triggerMergeFolders() {
 
 // 页面加载时获取统计
 loadStats();
+
+// 恢复任务状态（页面刷新后防止重复提交）
+var taskStatusPollInterval = null;
+
+function restoreTaskState() {
+    fetch('/api/task-status', { method: 'GET' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.task_type) {
+                return;
+            }
+            if (data.is_running) {
+                var taskLabels = {
+                    'scan': { btn: 'scan-btn', status: 'scan-status', label: '扫描中...', tab: 'tab-maintenance' },
+                    'cleanup': { btn: 'cleanup-btn', status: 'cleanup-status', label: '清理中...', tab: 'tab-maintenance' },
+                    'full-sync': { btn: 'rebuild-btn', status: 'rebuild-status', label: '重建中...', tab: 'tab-maintenance' },
+                    'scan-duplicates': { btn: 'dup-scan-btn', status: 'dup-scan-status', label: '扫描中...', tab: 'tab-duplicates' },
+                    'merge-folders': { btn: 'merge-folders-btn', status: 'merge-status', label: '合并中...', tab: 'tab-merge' }
+                };
+                var cfg = taskLabels[data.task_type];
+                if (cfg) {
+                    var btn = document.getElementById(cfg.btn);
+                    var status = document.getElementById(cfg.status);
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = cfg.label;
+                    }
+                    if (status) {
+                        status.textContent = '正在执行...';
+                        status.className = 'text-sm text-slate-500';
+                    }
+                    switchTab(cfg.tab);
+                    taskStatusPollInterval = setInterval(function() {
+                        fetch('/api/task-status', { method: 'GET' })
+                            .then(function(r) { return r.json(); })
+                            .then(function(pollData) {
+                                if (!pollData.is_running && pollData.finished_at) {
+                                    clearInterval(taskStatusPollInterval);
+                                    taskStatusPollInterval = null;
+                                    onTaskComplete(data.task_type, pollData.result || pollData.error);
+                                }
+                            });
+                    }, 3000);
+                }
+            } else if (data.finished_at) {
+                onTaskComplete(null, data.result || data.error);
+            }
+        });
+}
+
+function onTaskComplete(taskType, result) {
+    if (!taskType) {
+        var taskLabels = {
+            'scan': { btn: 'scan-btn', status: 'scan-status' },
+            'cleanup': { btn: 'cleanup-btn', status: 'cleanup-status' },
+            'full-sync': { btn: 'rebuild-btn', status: 'rebuild-status' },
+            'scan-duplicates': { btn: 'dup-scan-btn', status: 'dup-scan-status' },
+            'merge-folders': { btn: 'merge-folders-btn', status: 'merge-status' }
+        };
+        for (var t in taskLabels) {
+            var cfg = taskLabels[t];
+            var btn = document.getElementById(cfg.btn);
+            if (btn && btn.disabled) {
+                taskType = t;
+                break;
+            }
+        }
+    }
+    if (!taskType) return;
+    var handlers = {
+        'scan': function(res) {
+            var btn = document.getElementById('scan-btn');
+            var status = document.getElementById('scan-status');
+            btn.disabled = false;
+            btn.textContent = '开始扫描';
+            if (res && res.scanned !== undefined) {
+                var nImg = res.images || 0, nVid = res.videos || 0;
+                status.textContent = res.scanned > 0
+                    ? '扫描完成，新增 ' + res.scanned + ' 个媒体文件（图片 ' + nImg + ' 张、视频 ' + nVid + ' 个）'
+                    : '扫描完成，无新增';
+                status.className = 'text-sm text-green-600';
+            } else if (res && res.error) {
+                status.textContent = '扫描失败: ' + res.error;
+                status.className = 'text-sm text-red-500';
+            }
+            loadStats();
+        },
+        'cleanup': function(res) {
+            var btn = document.getElementById('cleanup-btn');
+            var status = document.getElementById('cleanup-status');
+            var resultEl = document.getElementById('cleanup-result');
+            btn.disabled = false;
+            btn.textContent = '开始清理';
+            if (res && res.stale_removed !== undefined) {
+                var total = res.stale_removed + res.orphan_cache_removed + res.cache_regenerated;
+                if (total === 0) {
+                    status.textContent = '清理完成，数据已一致，无需处理';
+                    status.className = 'text-sm text-green-600';
+                } else {
+                    status.textContent = '清理完成';
+                    status.className = 'text-sm text-green-600';
+                    resultEl.classList.remove('hidden');
+                    resultEl.innerHTML =
+                        '<div>清除幽灵记录：<span class="font-medium text-slate-800">' + res.stale_removed + '</span> 条</div>' +
+                        '<div>清除孤儿缓存：<span class="font-medium text-slate-800">' + res.orphan_cache_removed + '</span> 个</div>' +
+                        '<div>重新生成缓存：<span class="font-medium text-slate-800">' + res.cache_regenerated + '</span> 个</div>';
+                }
+            } else if (res && res.error) {
+                status.textContent = '清理失败: ' + res.error;
+                status.className = 'text-sm text-red-500';
+            }
+            loadStats();
+        },
+        'full-sync': function(res) {
+            var btn = document.getElementById('rebuild-btn');
+            var status = document.getElementById('rebuild-status');
+            var resultEl = document.getElementById('rebuild-result');
+            btn.disabled = false;
+            btn.textContent = '完整重建';
+            if (res && res.images_added !== undefined) {
+                status.textContent = '重建完成';
+                status.className = 'text-sm text-green-600';
+                resultEl.classList.remove('hidden');
+                var scanned = (res.images_added || 0) + (res.videos_added || 0);
+                resultEl.innerHTML =
+                    '<div class="font-medium text-slate-700 mb-1">清理结果：</div>' +
+                    '<div class="ml-3">清除幽灵记录：' + (res.stale_removed || 0) + ' 条</div>' +
+                    '<div class="ml-3">清除孤儿缓存：' + (res.orphan_cache_removed || 0) + ' 个</div>' +
+                    '<div class="ml-3">重新生成缓存：' + (res.cache_regenerated || 0) + ' 个</div>' +
+                    '<div class="font-medium text-slate-700 mt-2 mb-1">扫描结果：</div>' +
+                    '<div class="ml-3">新增媒体：' + scanned + ' 个</div>';
+            } else if (res && res.error) {
+                status.textContent = '重建失败: ' + res.error;
+                status.className = 'text-sm text-red-500';
+            }
+            loadStats();
+        },
+        'scan-duplicates': function(res) {
+            var btn = document.getElementById('dup-scan-btn');
+            var status = document.getElementById('dup-scan-status');
+            var emptyEl = document.getElementById('dup-result-empty');
+            var containerEl = document.getElementById('dup-result-container');
+            btn.disabled = false;
+            btn.textContent = '开始扫描';
+            if (res && res.groups) {
+                dupGroupsCache = res.groups || [];
+                if (dupGroupsCache.length === 0) {
+                    status.textContent = '扫描完成，未发现重复文件';
+                    status.className = 'text-sm text-green-600';
+                    emptyEl.classList.remove('hidden');
+                } else {
+                    var totalDup = dupGroupsCache.reduce(function(sum, g) { return sum + g.items.length; }, 0);
+                    status.textContent = '扫描完成，发现 ' + dupGroupsCache.length + ' 组重复，共 ' + totalDup + ' 个文件';
+                    status.className = 'text-sm text-amber-600';
+                    containerEl.classList.remove('hidden');
+                    document.getElementById('dup-result-summary').textContent = '共 ' + dupGroupsCache.length + ' 组重复，勾选要删除的项';
+                    renderDuplicateGroups();
+                }
+            } else if (res && res.error) {
+                status.textContent = '扫描失败: ' + res.error;
+                status.className = 'text-sm text-red-500';
+            }
+        },
+        'merge-folders': function(res) {
+            var btn = document.getElementById('merge-folders-btn');
+            var status = document.getElementById('merge-status');
+            var resultEl = document.getElementById('merge-result');
+            btn.disabled = false;
+            if (res && res.ok) {
+                status.textContent = '合并完成';
+                status.className = 'text-sm text-green-600';
+                resultEl.classList.remove('hidden');
+                resultEl.innerHTML =
+                    '<div>移动文件：<span class="font-medium text-slate-800">' + (res.moved || 0) + '</span> 个</div>' +
+                    '<div>删除重复：<span class="font-medium text-slate-800">' + (res.deleted || 0) + '</span> 个</div>' +
+                    '<div>合并目标：<span class="font-medium text-slate-800">' + (res.target || '') + '</span></div>';
+                loadStats();
+            } else if (res && res.error) {
+                status.textContent = '合并失败';
+                status.className = 'text-sm text-red-500';
+                showSettingsAlert(res.error);
+            }
+        }
+    };
+    var handler = handlers[taskType];
+    if (handler) handler(result);
+}
+
+// 页面加载时恢复任务状态
+restoreTaskState();
 
 // 合并文件夹标签页：初始化搜索下拉
 if (document.getElementById('merge-folder-a')) {

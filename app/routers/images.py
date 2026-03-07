@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.schemas import DeleteImagesRequest, DownloadZipRequest
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.services import task_state
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.format import format_file_size
 from app.utils.hash_utils import compute_file_md5_by_path
@@ -47,9 +48,7 @@ from app.utils.unique_path import unique_path
 router = APIRouter(prefix="/api", tags=["images"])
 
 
-def _compute_existing_hashes(
-    target_dir: Path, image_extensions: set[str]
-) -> dict[str, str]:
+def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
     """同步计算目标目录中已有图片的 MD5 哈希，返回 hash -> 相对路径（仅根目录直接子文件）"""
     existing_hashes: dict[str, str] = {}
     if not target_dir.is_dir():
@@ -62,9 +61,7 @@ def _compute_existing_hashes(
     return existing_hashes
 
 
-def _compute_existing_hashes_recursive(
-    target_dir: Path, media_extensions: set[str]
-) -> dict[str, str]:
+def _compute_existing_hashes_recursive(target_dir: Path, media_extensions: set[str]) -> dict[str, str]:
     """递归计算目标目录及子目录中已有媒体文件的 MD5 哈希，返回 hash -> 相对路径（相对 target_dir）"""
     existing_hashes: dict[str, str] = {}
     if not target_dir.is_dir():
@@ -127,22 +124,29 @@ async def delete_images(
     session: AsyncSession = Depends(get_async_session),
 ):
     """删除指定 ID 的图片（数据库记录 + 原图 + 缓存），分批处理支持大批量"""
-    if not body.ids:
-        return {"deleted": 0}
-    deleted = 0
-    for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
-        batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
-        stmt = select(Image).where(Image.id.in_(batch_ids))
-        result = await session.execute(stmt)
-        images = list(result.scalars().all())
-        for img in images:
-            delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-            await session.delete(img)
-            deleted += 1
-        await session.commit()
-    if deleted > 0:
-        invalidate_folder_tree_cache()
-    return {"deleted": deleted}
+    if not task_state.start_task("delete-images"):
+        return {"deleted": 0, "error": "有任务正在进行中，请等待完成后再操作"}
+    try:
+        if not body.ids:
+            return {"deleted": 0}
+        deleted = 0
+        for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
+            batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
+            stmt = select(Image).where(Image.id.in_(batch_ids))
+            result = await session.execute(stmt)
+            images = list(result.scalars().all())
+            for img in images:
+                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
+                await session.delete(img)
+                deleted += 1
+            await session.commit()
+        if deleted > 0:
+            invalidate_folder_tree_cache()
+        task_state.end_task({"deleted": deleted})
+        return {"deleted": deleted}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
 
 
 @router.get("/download/image")
@@ -189,9 +193,7 @@ async def download_zip(
     if body.image_ids:
         for i in range(0, len(body.image_ids), IN_CLAUSE_BATCH_SIZE):
             batch_ids = body.image_ids[i : i + IN_CLAUSE_BATCH_SIZE]
-            result = await session.execute(
-                select(Image.relative_path).where(Image.id.in_(batch_ids))
-            )
+            result = await session.execute(select(Image.relative_path).where(Image.id.in_(batch_ids)))
             for row in result.fetchall():
                 rel_paths.add(row[0])
     for raw_path in body.folder_paths or []:
@@ -255,9 +257,7 @@ async def get_image_info(
         "full_path": full_path,
         "filename": img.filename,
         "relative_path": img.relative_path,
-        "resolution": f"{img.width} × {img.height}"
-        if (img.width and img.height)
-        else "—",
+        "resolution": f"{img.width} × {img.height}" if (img.width and img.height) else "—",
         "file_size": format_file_size(img.file_size or 0),
         "modified_at": modified_str,
         "tags": tags,
@@ -279,11 +279,7 @@ async def upload_images(request: Request):
     path = raw_path.strip() if isinstance(raw_path, str) else ""
     raw_dup = form_data.get("on_duplicate")
     on_duplicate = (raw_dup or "skip").strip() if isinstance(raw_dup, str) else "skip"
-    files = [
-        f
-        for f in (form_data.getlist("files") or [])
-        if hasattr(f, "read") and hasattr(f, "filename")
-    ]
+    files = [f for f in (form_data.getlist("files") or []) if hasattr(f, "read") and hasattr(f, "filename")]
 
     raw_paths = form_data.get("file_paths")
     try:
@@ -304,9 +300,7 @@ async def upload_images(request: Request):
         }
 
     target_path = normalize_path(path, allow_empty=True) or ""
-    print(
-        f"[upload] 开始: {len(files)} 个文件 -> {target_path or '根目录'}", flush=True
-    )
+    print(f"[upload] 开始: {len(files)} 个文件 -> {target_path or '根目录'}", flush=True)
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -316,9 +310,7 @@ async def upload_images(request: Request):
         # 仅哈希即将写入的子目录，避免扫描整个图库
         subdirs: set[str] = set()
         for i, f in enumerate(files):
-            display_name = (file_paths[i] if i < len(file_paths) else "") or (
-                getattr(f, "filename", "") or ""
-            )
+            display_name = (file_paths[i] if i < len(file_paths) else "") or (getattr(f, "filename", "") or "")
             sanitized = _sanitize_upload_filename(display_name.strip())
             if sanitized is None:
                 continue
@@ -331,9 +323,7 @@ async def upload_images(request: Request):
             _compute_existing_hashes_for_subdirs, target_dir, subdirs, media_extensions
         )
     else:
-        existing_hashes = await asyncio.to_thread(
-            _compute_existing_hashes, target_dir, media_extensions
-        )
+        existing_hashes = await asyncio.to_thread(_compute_existing_hashes, target_dir, media_extensions)
 
     _UPLOAD_PARALLEL = 4
     uploaded = 0
@@ -361,25 +351,19 @@ async def upload_images(request: Request):
                 existing_hashes[content_hash] = dest_rel
                 cache_name = cache_filename(rel_path)
                 cache_path = CACHE_DIR / cache_name
-                data = await asyncio.to_thread(
-                    get_media_metadata_and_thumbnail, dest, cache_path, is_video
-                )
+                data = await asyncio.to_thread(get_media_metadata_and_thumbnail, dest, cache_path, is_video)
                 if data is None:
                     print(f"[upload] 处理失败: {display_name}", flush=True)
                     return False, False, f"{display_name}: 处理失败"
                 width, height, modified_at, file_size, is_corrupted = data
                 async with async_session_factory() as sess:
                     existing_record = (
-                        await sess.execute(
-                            select(Image).where(Image.relative_path == rel_path)
-                        )
+                        await sess.execute(select(Image).where(Image.relative_path == rel_path))
                     ).scalar_one_or_none()
                     if existing_record:
                         existing_record.filename = dest.name
                         existing_record.filename_natural = natural_sort_key(dest.name)
-                        existing_record.relative_path_natural = natural_sort_key(
-                            rel_path
-                        )
+                        existing_record.relative_path_natural = natural_sort_key(rel_path)
                         existing_record.modified_at = modified_at
                         existing_record.file_size = file_size
                         existing_record.width = width
@@ -437,9 +421,7 @@ async def upload_images(request: Request):
         try:
             content = await f.read(MAX_UPLOAD_FILE_SIZE + 1)
             if len(content) > MAX_UPLOAD_FILE_SIZE:
-                errors.append(
-                    f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024 * 1024)}MB)"
-                )
+                errors.append(f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024 * 1024)}MB)")
                 continue
             if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
                 errors.append(f"{display_name}: 本次上传总大小将超限")
@@ -457,19 +439,11 @@ async def upload_images(request: Request):
             elif on_duplicate == "overwrite":
                 dest = target_dir / existing_hashes[content_hash]
             else:
-                dest_parent = (
-                    (target_dir / Path(sanitized).parent)
-                    if "/" in sanitized
-                    else target_dir
-                )
+                dest_parent = (target_dir / Path(sanitized).parent) if "/" in sanitized else target_dir
                 dest_parent.mkdir(parents=True, exist_ok=True)
                 dest = unique_path(dest_parent, base_name, suffix_style="underscore")
         else:
-            dest_parent = (
-                (target_dir / Path(sanitized).parent)
-                if "/" in sanitized
-                else target_dir
-            )
+            dest_parent = (target_dir / Path(sanitized).parent) if "/" in sanitized else target_dir
             dest_parent.mkdir(parents=True, exist_ok=True)
             dest = dest_parent / base_name
             if dest.exists():
@@ -479,12 +453,8 @@ async def upload_images(request: Request):
                 elif on_duplicate == "overwrite":
                     pass
                 else:
-                    dest = unique_path(
-                        dest_parent, base_name, suffix_style="underscore"
-                    )
-        tasks.append(
-            (i, f, display_name, sanitized, content, content_hash, dest, is_video)
-        )
+                    dest = unique_path(dest_parent, base_name, suffix_style="underscore")
+        tasks.append((i, f, display_name, sanitized, content, content_hash, dest, is_video))
 
     results = await asyncio.gather(
         *[_process_one(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7]) for t in tasks],

@@ -26,6 +26,7 @@ from app.schemas import (
     RenameImageRequest,
 )
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.services import task_state
 from app.utils.folder_tree import (
     get_folder_counts_for_search,
     get_subfolders,
@@ -55,55 +56,62 @@ async def move_images(
     session: AsyncSession = Depends(get_async_session),
 ):
     """将指定图片移动到目标文件夹"""
-    if not body.ids:
-        return {"moved": 0, "errors": []}
-    target_path = normalize_path(body.target_path, allow_empty=True)
-    if target_path is None:
-        return {"moved": 0, "errors": ["目标路径不合法"]}
-    target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-    images: list[Image] = []
-    for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
-        batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
-        stmt = select(Image).where(Image.id.in_(batch_ids))
-        result = await session.execute(stmt)
-        images.extend(result.scalars().all())
-    moved = 0
-    errors = []
-    for img in images:
-        src_path = PHOTOS_DIR / img.relative_path
-        if not src_path.exists():
-            errors.append(f"{img.filename}: 文件不存在")
-            continue
-        ext = Path(img.filename).suffix.lower()
-        if ext not in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
-            errors.append(f"{img.filename}: 不支持的格式")
-            continue
-        new_rel = f"{target_path}/{img.filename}" if target_path else img.filename
-        if new_rel == img.relative_path:
-            continue
-        dest_path = target_dir / img.filename
-        if dest_path.exists() and dest_path.resolve() != src_path.resolve():
-            dest_path = unique_path(target_dir, img.filename, suffix_style="underscore")
-            new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
-        try:
-            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
-        except OSError as e:
-            errors.append(f"{img.filename}: {e}")
-            continue
-        await update_image_path_and_regenerate_thumbnail(
-            img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
-        )
-        session.add(img)
-        moved += 1
+    if not task_state.start_task("move-images"):
+        return {"moved": 0, "errors": ["有任务正在进行中，请等待完成后再操作"]}
     try:
-        await session.commit()
-    except IntegrityError:
-        await session.rollback()
-        errors.append("路径冲突（可能与已有文件重复），请重试")
-    if moved > 0:
-        invalidate_folder_tree_cache()
-    return {"moved": moved, "errors": errors}
+        if not body.ids:
+            return {"moved": 0, "errors": []}
+        target_path = normalize_path(body.target_path, allow_empty=True)
+        if target_path is None:
+            return {"moved": 0, "errors": ["目标路径不合法"]}
+        target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
+        target_dir.mkdir(parents=True, exist_ok=True)
+        images: list[Image] = []
+        for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
+            batch_ids = body.ids[i : i + IN_CLAUSE_BATCH_SIZE]
+            stmt = select(Image).where(Image.id.in_(batch_ids))
+            result = await session.execute(stmt)
+            images.extend(result.scalars().all())
+        moved = 0
+        errors = []
+        for img in images:
+            src_path = PHOTOS_DIR / img.relative_path
+            if not src_path.exists():
+                errors.append(f"{img.filename}: 文件不存在")
+                continue
+            ext = Path(img.filename).suffix.lower()
+            if ext not in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
+                errors.append(f"{img.filename}: 不支持的格式")
+                continue
+            new_rel = f"{target_path}/{img.filename}" if target_path else img.filename
+            if new_rel == img.relative_path:
+                continue
+            dest_path = target_dir / img.filename
+            if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+                dest_path = unique_path(target_dir, img.filename, suffix_style="underscore")
+                new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
+            try:
+                await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
+            except OSError as e:
+                errors.append(f"{img.filename}: {e}")
+                continue
+            await update_image_path_and_regenerate_thumbnail(
+                img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+            )
+            session.add(img)
+            moved += 1
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            errors.append("路径冲突（可能与已有文件重复），请重试")
+        if moved > 0:
+            invalidate_folder_tree_cache()
+        task_state.end_task({"moved": moved})
+        return {"moved": moved, "errors": errors}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
 
 
 @router.post("/move-folders")
@@ -112,64 +120,71 @@ async def move_folders(
     session: AsyncSession = Depends(get_async_session),
 ):
     """将指定文件夹（含子文件夹和图片）移动到目标父目录"""
-    if not body.paths:
-        return {"moved": 0, "errors": []}
-    target_path = normalize_path(body.target_path, allow_empty=True)
-    if target_path is None:
-        return {"moved": 0, "errors": ["目标路径不合法"]}
-    target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-    moved = 0
-    errors = []
-    for folder_path in body.paths:
-        folder_path = normalize_path(folder_path, allow_empty=False)
-        if folder_path is None:
-            continue
-        if target_path == folder_path or target_path.startswith(folder_path + "/"):
-            errors.append(f"{folder_path}: 不能移动到自身或子文件夹内")
-            continue
-        folder_name = Path(folder_path).name
-        would_be_path = f"{target_path}/{folder_name}" if target_path else folder_name
-        if would_be_path == folder_path:
-            continue
-        src_path = PHOTOS_DIR / folder_path
-        if not src_path.exists() or not src_path.is_dir():
-            errors.append(f"{folder_path}: 文件夹不存在")
-            continue
-        dest_path = unique_path(target_dir, folder_name, is_folder=True)
-        new_prefix = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
-        if src_path.resolve() == dest_path.resolve():
-            continue
-        try:
-            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
-        except OSError as e:
-            errors.append(f"{folder_path}: {e}")
-            continue
-        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
-            for img in images:
-                suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path) :]
-                new_rel = new_prefix + suffix
-                new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
-                await update_image_path_and_regenerate_thumbnail(
-                    img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
-                )
-                session.add(img)
-                moved += 1
-            try:
-                await session.commit()
-            except IntegrityError:
-                await session.rollback()
-                errors.append(f"{folder_path}: 路径冲突，请重试")
-                break
-            await asyncio.sleep(0)
-        print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
+    if not task_state.start_task("move-folders"):
+        return {"moved": 0, "errors": ["有任务正在进行中，请等待完成后再操作"]}
     try:
-        await session.commit()
-    except IntegrityError:
-        await session.rollback()
-        if not any("路径冲突" in e for e in errors):
-            errors.append("路径冲突，请重试")
-    return {"moved": moved, "errors": errors}
+        if not body.paths:
+            return {"moved": 0, "errors": []}
+        target_path = normalize_path(body.target_path, allow_empty=True)
+        if target_path is None:
+            return {"moved": 0, "errors": ["目标路径不合法"]}
+        target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
+        target_dir.mkdir(parents=True, exist_ok=True)
+        moved = 0
+        errors = []
+        for folder_path in body.paths:
+            folder_path = normalize_path(folder_path, allow_empty=False)
+            if folder_path is None:
+                continue
+            if target_path == folder_path or target_path.startswith(folder_path + "/"):
+                errors.append(f"{folder_path}: 不能移动到自身或子文件夹内")
+                continue
+            folder_name = Path(folder_path).name
+            would_be_path = f"{target_path}/{folder_name}" if target_path else folder_name
+            if would_be_path == folder_path:
+                continue
+            src_path = PHOTOS_DIR / folder_path
+            if not src_path.exists() or not src_path.is_dir():
+                errors.append(f"{folder_path}: 文件夹不存在")
+                continue
+            dest_path = unique_path(target_dir, folder_name, is_folder=True)
+            new_prefix = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
+            if src_path.resolve() == dest_path.resolve():
+                continue
+            try:
+                await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
+            except OSError as e:
+                errors.append(f"{folder_path}: {e}")
+                continue
+            async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+                for img in images:
+                    suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path) :]
+                    new_rel = new_prefix + suffix
+                    new_full = dest_path / suffix.lstrip("/") if suffix else dest_path
+                    await update_image_path_and_regenerate_thumbnail(
+                        img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+                    )
+                    session.add(img)
+                    moved += 1
+                try:
+                    await session.commit()
+                except IntegrityError:
+                    await session.rollback()
+                    errors.append(f"{folder_path}: 路径冲突，请重试")
+                    break
+                await asyncio.sleep(0)
+            print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            if not any("路径冲突" in e for e in errors):
+                errors.append("路径冲突，请重试")
+        task_state.end_task({"moved": moved})
+        return {"moved": moved, "errors": errors}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
 
 
 @router.post("/rename-folder")
@@ -456,29 +471,36 @@ async def delete_folders(
     session: AsyncSession = Depends(get_async_session),
 ):
     """删除指定文件夹路径下所有图片（数据库 + 文件系统），并删除文件夹目录"""
-    if not body.paths:
-        return {"deleted_images": 0, "deleted_folders": 0}
-    total_images = 0
-    total_folders = 0
-    for folder_path in body.paths:
-        folder_path = normalize_path(folder_path, allow_empty=False)
-        if folder_path is None:
-            continue
-        async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
-            for img in images:
-                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-                await session.delete(img)
-                total_images += 1
-            await session.commit()
-            await asyncio.sleep(0)
-        folder_fs_path = PHOTOS_DIR / folder_path
-        if folder_fs_path.exists() and folder_fs_path.is_dir():
-            await asyncio.to_thread(shutil.rmtree, folder_fs_path, ignore_errors=True)
-            total_folders += 1
-    await session.commit()
-    if total_folders > 0:
-        invalidate_folder_tree_cache()
-    return {"deleted_images": total_images, "deleted_folders": total_folders}
+    if not task_state.start_task("delete-folders"):
+        return {"deleted_images": 0, "deleted_folders": 0, "error": "有任务正在进行中，请等待完成后再操作"}
+    try:
+        if not body.paths:
+            return {"deleted_images": 0, "deleted_folders": 0}
+        total_images = 0
+        total_folders = 0
+        for folder_path in body.paths:
+            folder_path = normalize_path(folder_path, allow_empty=False)
+            if folder_path is None:
+                continue
+            async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
+                for img in images:
+                    delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
+                    await session.delete(img)
+                    total_images += 1
+                await session.commit()
+                await asyncio.sleep(0)
+            folder_fs_path = PHOTOS_DIR / folder_path
+            if folder_fs_path.exists() and folder_fs_path.is_dir():
+                await asyncio.to_thread(shutil.rmtree, folder_fs_path, ignore_errors=True)
+                total_folders += 1
+        await session.commit()
+        if total_folders > 0:
+            invalidate_folder_tree_cache()
+        task_state.end_task({"deleted_images": total_images, "deleted_folders": total_folders})
+        return {"deleted_images": total_images, "deleted_folders": total_folders}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
 
 
 @router.post("/merge-folders")
@@ -487,131 +509,152 @@ async def merge_folders(
     session: AsyncSession = Depends(get_async_session),
 ):
     """合并两个文件夹：通过 MD5 去重"""
-    folder_a = normalize_path(body.folder_a, allow_empty=False)
-    folder_b = normalize_path(body.folder_b, allow_empty=False)
-    if folder_a is None or folder_b is None:
-        return {"ok": False, "error": "路径不合法"}
-    if folder_a == folder_b:
-        return {"ok": False, "error": "不能选择相同的文件夹"}
-    if folder_a.startswith(folder_b + "/") or folder_b.startswith(folder_a + "/"):
-        return {"ok": False, "error": "不能合并互为父子关系的文件夹"}
-    path_a = PHOTOS_DIR / folder_a
-    path_b = PHOTOS_DIR / folder_b
-    if not path_a.exists() or not path_a.is_dir():
-        return {"ok": False, "error": f"文件夹不存在: {folder_a}"}
-    if not path_b.exists() or not path_b.is_dir():
-        return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
-    photos_dir = PHOTOS_DIR.resolve()
-    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
-
-    def _belongs_to(rel: str, prefix: str) -> bool:
-        return rel == prefix or rel.startswith(prefix + "/")
-
-    items_a = await collect_image_items_by_prefix(session, folder_a, "a", FOLDER_OP_BATCH_SIZE)
-    items_b = await collect_image_items_by_prefix(session, folder_b, "b", FOLDER_OP_BATCH_SIZE)
-    count_a, count_b = len(items_a), len(items_b)
-    if body.target == "folder_b" or (body.target == "auto" and count_b > count_a):
-        target_prefix, source_prefix = folder_b, folder_a
-        source_letter = "a"
-        source_path, target_path = path_a, path_b
-    else:
-        target_prefix, source_prefix = folder_a, folder_b
-        source_letter = "b"
-        source_path, target_path = path_b, path_a
-
-    preferred = "a" if count_a >= count_b else "b"
-    by_hash: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
-    for item in items_a + items_b:
-        img_id, rel_path, src = item
-        full = photos_dir / rel_path
-        if not full.is_file() or full.suffix.lower() not in media_extensions:
-            continue
-        h = await asyncio.to_thread(compute_file_md5, photos_dir, rel_path)
-        if h is None:
-            continue
-        by_hash[h].append(item)
-    to_keep: dict[str, tuple[int, str, str]] = {}
-    to_delete: set[int] = set()
-    for h, items in by_hash.items():
-        from_preferred = [x for x in items if x[2] == preferred]
-        from_other = [x for x in items if x[2] != preferred]
-        if from_preferred:
-            keeper = min(from_preferred, key=lambda x: x[1])
-            to_keep[h] = keeper
-            for x in from_preferred:
-                if x[0] != keeper[0]:
-                    to_delete.add(x[0])
-            for x in from_other:
-                to_delete.add(x[0])
-        else:
-            keeper = min(from_other, key=lambda x: x[1])
-            to_keep[h] = keeper
-            for x in from_other:
-                if x[0] != keeper[0]:
-                    to_delete.add(x[0])
-    target_hashes = {h for h, k in to_keep.items() if _belongs_to(k[1], target_prefix)}
-    to_move: list[tuple[int, str]] = []
-    for h, items in by_hash.items():
-        for img_id, rel_path, src in items:
-            if img_id in to_delete or src != source_letter:
-                continue
-            if h not in target_hashes:
-                to_move.append((img_id, rel_path))
-            elif h in target_hashes:
-                delete_image_files(rel_path, PHOTOS_DIR, CACHE_DIR)
-                to_delete.add(img_id)
-    for img_id in to_delete:
-        result = await session.execute(select(Image).where(Image.id == img_id))
-        img = result.scalar_one_or_none()
-        if img:
-            delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-            await session.delete(img)
-    moved = 0
-    for img_id, rel_path in to_move:
-        result = await session.execute(select(Image).where(Image.id == img_id))
-        img = result.scalar_one_or_none()
-        if not img:
-            continue
-        suffix = rel_path[len(source_prefix) :].lstrip("/")
-        new_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
-        new_full = target_path / suffix if suffix else target_path
-        new_full.parent.mkdir(parents=True, exist_ok=True)
-        if new_full.exists():
-            new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
-            new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
-        try:
-            await asyncio.to_thread(shutil.move, str(photos_dir / rel_path), str(new_full))
-        except OSError as e:
-            await session.rollback()
-            return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
-        await update_image_path_and_regenerate_thumbnail(
-            img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
-        )
-        session.add(img)
-        moved += 1
-    if source_path.exists():
-        for root, dirs, files in os.walk(str(source_path), topdown=False):
-            if not dirs and not files:
-                try:
-                    os.rmdir(root)
-                except OSError:
-                    pass
+    if not task_state.start_task("merge-folders"):
+        return {"ok": False, "error": "有任务正在进行中，请等待完成后再提交新任务", "busy": True}
     try:
-        await session.commit()
-        invalidate_folder_tree_cache()
-        print(
-            f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
-            flush=True,
-        )
-        return {
-            "ok": True,
-            "moved": moved,
-            "deleted": len(to_delete),
-            "target": target_prefix,
-        }
-    except IntegrityError:
-        await session.rollback()
-        return {"ok": False, "error": "路径冲突，请重试"}
+        folder_a = normalize_path(body.folder_a, allow_empty=False)
+        folder_b = normalize_path(body.folder_b, allow_empty=False)
+        if folder_a is None or folder_b is None:
+            task_state.end_task({"ok": False, "error": "路径不合法"})
+            return {"ok": False, "error": "路径不合法"}
+        if folder_a == folder_b:
+            task_state.end_task({"ok": False, "error": "不能选择相同的文件夹"})
+            return {"ok": False, "error": "不能选择相同的文件夹"}
+        if folder_a.startswith(folder_b + "/") or folder_b.startswith(folder_a + "/"):
+            task_state.end_task({"ok": False, "error": "不能合并互为父子关系的文件夹"})
+            return {"ok": False, "error": "不能合并互为父子关系的文件夹"}
+        path_a = PHOTOS_DIR / folder_a
+        path_b = PHOTOS_DIR / folder_b
+        if not path_a.exists() or not path_a.is_dir():
+            task_state.end_task({"ok": False, "error": f"文件夹不存在: {folder_a}"})
+            return {"ok": False, "error": f"文件夹不存在: {folder_a}"}
+        if not path_b.exists() or not path_b.is_dir():
+            task_state.end_task({"ok": False, "error": f"文件夹不存在: {folder_b}"})
+            return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
+        photos_dir = PHOTOS_DIR.resolve()
+        media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+
+        def _belongs_to(rel: str, prefix: str) -> bool:
+            return rel == prefix or rel.startswith(prefix + "/")
+
+        items_a = await collect_image_items_by_prefix(session, folder_a, "a", FOLDER_OP_BATCH_SIZE)
+        items_b = await collect_image_items_by_prefix(session, folder_b, "b", FOLDER_OP_BATCH_SIZE)
+        count_a, count_b = len(items_a), len(items_b)
+        if body.target == "folder_b" or (body.target == "auto" and count_b > count_a):
+            target_prefix, source_prefix = folder_b, folder_a
+            source_letter = "a"
+            source_path, target_path = path_a, path_b
+        else:
+            target_prefix, source_prefix = folder_a, folder_b
+            source_letter = "b"
+            source_path, target_path = path_b, path_a
+
+        preferred = "a" if count_a >= count_b else "b"
+        by_hash: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+        for item in items_a + items_b:
+            img_id, rel_path, src = item
+            full = photos_dir / rel_path
+            if not full.is_file() or full.suffix.lower() not in media_extensions:
+                continue
+            h = await asyncio.to_thread(compute_file_md5, photos_dir, rel_path)
+            if h is None:
+                continue
+            by_hash[h].append(item)
+        to_keep: dict[str, tuple[int, str, str]] = {}
+        to_delete: set[int] = set()
+        for h, items in by_hash.items():
+            from_preferred = [x for x in items if x[2] == preferred]
+            from_other = [x for x in items if x[2] != preferred]
+            if from_preferred:
+                keeper = min(from_preferred, key=lambda x: x[1])
+                to_keep[h] = keeper
+                for x in from_preferred:
+                    if x[0] != keeper[0]:
+                        to_delete.add(x[0])
+                for x in from_other:
+                    to_delete.add(x[0])
+            else:
+                keeper = min(from_other, key=lambda x: x[1])
+                to_keep[h] = keeper
+                for x in from_other:
+                    if x[0] != keeper[0]:
+                        to_delete.add(x[0])
+        target_hashes = {h for h, k in to_keep.items() if _belongs_to(k[1], target_prefix)}
+        to_move: list[tuple[int, str]] = []
+        for h, items in by_hash.items():
+            for img_id, rel_path, src in items:
+                if img_id in to_delete or src != source_letter:
+                    continue
+                if h not in target_hashes:
+                    to_move.append((img_id, rel_path))
+                elif h in target_hashes:
+                    delete_image_files(rel_path, PHOTOS_DIR, CACHE_DIR)
+                    to_delete.add(img_id)
+        for img_id in to_delete:
+            result = await session.execute(select(Image).where(Image.id == img_id))
+            img = result.scalar_one_or_none()
+            if img:
+                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
+                await session.delete(img)
+        moved = 0
+        for img_id, rel_path in to_move:
+            result = await session.execute(select(Image).where(Image.id == img_id))
+            img = result.scalar_one_or_none()
+            if not img:
+                continue
+            suffix = rel_path[len(source_prefix) :].lstrip("/")
+            new_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
+            new_full = target_path / suffix if suffix else target_path
+            new_full.parent.mkdir(parents=True, exist_ok=True)
+            if new_full.exists():
+                new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
+                new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
+            try:
+                await asyncio.to_thread(shutil.move, str(photos_dir / rel_path), str(new_full))
+            except OSError as e:
+                await session.rollback()
+                task_state.fail_task(f"移动文件失败 {rel_path}: {e}")
+                return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
+            await update_image_path_and_regenerate_thumbnail(
+                img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+            )
+            session.add(img)
+            moved += 1
+        if source_path.exists():
+            for root, dirs, files in os.walk(str(source_path), topdown=False):
+                if not dirs and not files:
+                    try:
+                        os.rmdir(root)
+                    except OSError:
+                        pass
+        try:
+            await session.commit()
+            invalidate_folder_tree_cache()
+            print(
+                f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
+                flush=True,
+            )
+            task_state.end_task(
+                {
+                    "ok": True,
+                    "moved": moved,
+                    "deleted": len(to_delete),
+                    "target": target_prefix,
+                }
+            )
+            return {
+                "ok": True,
+                "moved": moved,
+                "deleted": len(to_delete),
+                "target": target_prefix,
+            }
+        except IntegrityError:
+            await session.rollback()
+            task_state.fail_task("路径冲突，请重试")
+            return {"ok": False, "error": "路径冲突，请重试"}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
 
 
 @router.post("/create-folder")

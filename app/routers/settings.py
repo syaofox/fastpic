@@ -14,6 +14,7 @@ from app.models import Image, get_async_session
 from app.schemas import ScanDuplicatesRequest
 from app.services.scan_state import begin_scan, end_scan
 from app.services.scanner import run_full_scan
+from app.services import task_state
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.hash_utils import compute_file_md5
 from app.utils.images import cache_filename
@@ -50,15 +51,35 @@ async def get_scan_status():
     return {"scanning": is_scanning()}
 
 
+@router.get("/api/task-status")
+async def get_task_status():
+    """返回当前进行中的任务状态，用于页面刷新后恢复 UI"""
+    status = task_state.get_status()
+    if status:
+        return status
+    last_result = task_state.get_last_result()
+    if last_result:
+        return last_result
+    return {"task_type": None, "is_running": False}
+
+
 @router.post("/scan")
 async def trigger_scan():
     """手动触发扫描。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""
+    if not task_state.start_task("scan"):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
     begin_scan()
     try:
         result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
         n_img = result.get("images_added", 0)
         n_vid = result.get("videos_added", 0)
+        task_state.end_task({"scanned": n_img + n_vid, "images": n_img, "videos": n_vid})
         return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
@@ -67,14 +88,28 @@ async def trigger_scan():
 @router.post("/api/cleanup")
 async def trigger_cleanup():
     """手动触发数据库清理同步。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""
+    if not task_state.start_task("cleanup"):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
     begin_scan()
     try:
         result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        task_state.end_task(
+            {
+                "stale_removed": result.get("stale_removed", 0),
+                "orphan_cache_removed": result.get("orphan_cache_removed", 0),
+                "cache_regenerated": result.get("cache_regenerated", 0),
+            }
+        )
         return {
             "stale_removed": result.get("stale_removed", 0),
             "orphan_cache_removed": result.get("orphan_cache_removed", 0),
             "cache_regenerated": result.get("cache_regenerated", 0),
         }
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
@@ -83,9 +118,18 @@ async def trigger_cleanup():
 @router.post("/api/full-sync")
 async def trigger_full_sync():
     """完整同步：一次 os.walk 完成 cleanup + scan，供「完整重建」等场景使用。"""
+    if not task_state.start_task("full-sync"):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
     begin_scan()
     try:
-        return await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        task_state.end_task(result)
+        return result
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
@@ -97,69 +141,71 @@ async def scan_duplicates(
     session: AsyncSession = Depends(get_async_session),
 ):
     """扫描重复文件（分批加载，支持百万级；仅对同 size 候选组计算 MD5）"""
-    folder_path = normalize_path(
-        (body.folder_path if body else None) or "", allow_empty=True
-    )
-    base_stmt = select(
-        Image.id,
-        Image.relative_path,
-        Image.filename,
-        Image.file_size,
-        Image.modified_at,
-    )
-    if folder_path:
-        pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        base_stmt = base_stmt.where(pf)
-    photos_dir = PHOTOS_DIR.resolve()
-    by_size: dict[int, list[dict]] = defaultdict(list)
-    last_id = 0
-    while True:
-        stmt = (
-            base_stmt.where(Image.id > last_id)
-            .order_by(Image.id)
-            .limit(SCAN_DUPLICATES_BATCH_SIZE)
+    if not task_state.start_task("scan-duplicates"):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
+    try:
+        folder_path = normalize_path((body.folder_path if body else None) or "", allow_empty=True)
+        base_stmt = select(
+            Image.id,
+            Image.relative_path,
+            Image.filename,
+            Image.file_size,
+            Image.modified_at,
         )
-        result = await session.execute(stmt)
-        rows = result.fetchall()
-        if not rows:
-            break
-        for row in rows:
-            img_id, rel_path, filename, file_size, modified_at = row
-            last_id = img_id or last_id
-            by_size[file_size or 0].append(
-                {
-                    "id": img_id,
-                    "relative_path": rel_path,
-                    "filename": filename,
-                    "file_size": file_size,
-                    "modified_at": modified_at,
-                    "cache_key": cache_filename(rel_path),
-                }
-            )
-        await asyncio.sleep(0)
-    candidate_groups = [g for g in by_size.values() if len(g) > 1]
-    if not candidate_groups:
-        return {"groups": []}
-    by_hash: dict[str, list[dict]] = defaultdict(list)
-    for group in candidate_groups:
-        for item in group:
-            h = await asyncio.to_thread(
-                compute_file_md5, photos_dir, item["relative_path"]
-            )
-            if h is None:
-                continue
-            by_hash[h].append(item)
-    groups = []
-    for content_hash, items in by_hash.items():
-        if len(items) > 1:
-            groups.append(
-                {
-                    "content_hash": content_hash,
-                    "file_size": items[0]["file_size"],
-                    "items": items,
-                }
-            )
-    return {"groups": groups}
+        if folder_path:
+            pf = path_filter_for_prefix(Image.relative_path, folder_path)
+            base_stmt = base_stmt.where(pf)
+        photos_dir = PHOTOS_DIR.resolve()
+        by_size: dict[int, list[dict]] = defaultdict(list)
+        last_id = 0
+        while True:
+            stmt = base_stmt.where(Image.id > last_id).order_by(Image.id).limit(SCAN_DUPLICATES_BATCH_SIZE)
+            result = await session.execute(stmt)
+            rows = result.fetchall()
+            if not rows:
+                break
+            for row in rows:
+                img_id, rel_path, filename, file_size, modified_at = row
+                last_id = img_id or last_id
+                by_size[file_size or 0].append(
+                    {
+                        "id": img_id,
+                        "relative_path": rel_path,
+                        "filename": filename,
+                        "file_size": file_size,
+                        "modified_at": modified_at,
+                        "cache_key": cache_filename(rel_path),
+                    }
+                )
+            await asyncio.sleep(0)
+        candidate_groups = [g for g in by_size.values() if len(g) > 1]
+        if not candidate_groups:
+            task_state.end_task({"groups": []})
+            return {"groups": []}
+        by_hash: dict[str, list[dict]] = defaultdict(list)
+        for group in candidate_groups:
+            for item in group:
+                h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
+                if h is None:
+                    continue
+                by_hash[h].append(item)
+        groups = []
+        for content_hash, items in by_hash.items():
+            if len(items) > 1:
+                groups.append(
+                    {
+                        "content_hash": content_hash,
+                        "file_size": items[0]["file_size"],
+                        "items": items,
+                    }
+                )
+        task_state.end_task({"groups": groups})
+        return {"groups": groups}
+    except Exception as e:
+        task_state.fail_task(str(e))
+        raise
 
 
 def _stats_cache_realtime_sync() -> tuple[int, int]:
@@ -185,19 +231,9 @@ async def get_cache_stats_realtime():
 @router.get("/api/stats")
 async def get_stats(session: AsyncSession = Depends(get_async_session)):
     """获取数据库和文件系统统计信息（优先从 DB 统计，支持百万级）"""
-    image_count = (
-        await session.execute(
-            select(func.count(Image.id)).where(Image.media_type == "image")
-        )
-    ).scalar() or 0
-    video_count = (
-        await session.execute(
-            select(func.count(Image.id)).where(Image.media_type == "video")
-        )
-    ).scalar() or 0
-    total_size_raw = (
-        await session.execute(select(func.sum(Image.file_size)))
-    ).scalar() or 0
+    image_count = (await session.execute(select(func.count(Image.id)).where(Image.media_type == "image"))).scalar() or 0
+    video_count = (await session.execute(select(func.count(Image.id)).where(Image.media_type == "video"))).scalar() or 0
+    total_size_raw = (await session.execute(select(func.sum(Image.file_size)))).scalar() or 0
     total_size = int(total_size_raw) if total_size_raw else 0
     folder_count = await stats_folder_count_from_db(session)
     cache_count = image_count + video_count
