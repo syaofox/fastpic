@@ -109,7 +109,7 @@ async_session_factory = async_sessionmaker(async_engine, class_=AsyncSession, ex
 
 
 def _run_natural_sort_index_migration() -> None:
-    """为 relative_path_natural 创建前缀索引（VARCHAR(2048) 超索引键长，需前缀）"""
+    """为 relative_path_natural 添加自然排序索引"""
     from sqlalchemy import text
 
     with sync_engine.connect() as conn:
@@ -117,6 +117,38 @@ def _run_natural_sort_index_migration() -> None:
             conn.execute(text("CREATE INDEX ix_images_relative_path_natural ON images(relative_path_natural(512))"))
         except Exception:
             pass
+        conn.commit()
+
+
+def _run_performance_indexes_migration() -> None:
+    """添加性能优化索引"""
+    from sqlalchemy import text
+
+    indexes = [
+        ("ix_images_path_media", "CREATE INDEX ix_images_path_media ON images(relative_path(255), media_type)"),
+        ("ix_image_tags_tag_id", "CREATE INDEX ix_image_tags_tag_id ON image_tags(tag_id)"),
+        (
+            "ix_folder_thumbnails_folder",
+            "CREATE INDEX ix_folder_thumbnails_folder ON folder_thumbnails(folder_path(255), display_order)",
+        ),
+        ("ix_images_mod_size", "CREATE INDEX ix_images_mod_size ON images(modified_at, file_size)"),
+        ("ix_images_filename_media", "CREATE INDEX ix_images_filename_media ON images(filename(255), media_type)"),
+    ]
+
+    with sync_engine.connect() as conn:
+        for index_name, create_sql in indexes:
+            r = conn.execute(
+                text(
+                    f"SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
+                    f"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('images', 'image_tags', 'folder_thumbnails') "
+                    f"AND INDEX_NAME = '{index_name}'"
+                )
+            )
+            if r.fetchone() is None:
+                try:
+                    conn.execute(text(create_sql))
+                except Exception:
+                    pass
         conn.commit()
 
 
@@ -147,6 +179,7 @@ def init_db() -> None:
         sys.exit(1)
     SQLModel.metadata.create_all(sync_engine)
     _run_natural_sort_index_migration()
+    _run_performance_indexes_migration()
     _run_fulltext_migration()
 
 
