@@ -1,7 +1,8 @@
 """API 合并优化测试：/api/gallery-data 组合 API"""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestApiGalleryDataEndpoint:
@@ -9,7 +10,6 @@ class TestApiGalleryDataEndpoint:
 
     def test_endpoint_exists(self):
         """验证 API 端点已注册"""
-        from fastapi import FastAPI
         from app.main import app
 
         routes = [r.path for r in app.routes]
@@ -17,8 +17,9 @@ class TestApiGalleryDataEndpoint:
 
     def test_params_default_values(self):
         """验证默认参数值"""
-        from app.main import api_gallery_data
         import inspect
+
+        from app.main import api_gallery_data
 
         sig = inspect.signature(api_gallery_data)
         params = sig.parameters
@@ -76,10 +77,11 @@ class TestGalleryDataResponse:
     @pytest.mark.asyncio
     async def test_response_template_name(self):
         """验证返回的模板名称"""
-        from app.main import app
         from fastapi.testclient import TestClient
 
-        with patch("app.main.get_async_session") as mock_session:
+        from app.main import app
+
+        with patch("app.main.get_async_session"):
             with patch("app.main.async_session_factory") as mock_factory:
                 with patch("app.main.get_root_folder_counts_only") as mock_counts:
                     with patch("app.main.get_root_subfolders_from_counts") as mock_subfolders:
@@ -115,7 +117,7 @@ class TestAsyncGatherOptimization:
         from app.main import api_gallery_data
 
         with patch("app.main.asyncio.gather") as mock_gather:
-            with patch("app.main.get_async_session") as mock_session:
+            with patch("app.main.get_async_session"):
                 with patch("app.main.async_session_factory"):
                     with patch("app.main.get_root_folder_counts_only", new_callable=AsyncMock):
                         with patch("app.main.get_root_subfolders_from_counts", new_callable=AsyncMock):
@@ -123,7 +125,6 @@ class TestAsyncGatherOptimization:
                                 mock_gather.return_value = AsyncMock(return_value=([], []))
 
                                 try:
-                                    from fastapi import Request
                                     from unittest.mock import MagicMock as MockRequest
 
                                     mock_req = MockRequest()

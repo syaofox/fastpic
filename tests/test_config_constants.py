@@ -1,6 +1,5 @@
 """配置参数测试：验证新增的配置常量"""
 
-import pytest
 
 
 class TestConfigConstants:
