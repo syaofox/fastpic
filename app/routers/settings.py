@@ -193,6 +193,7 @@ async def scan_duplicates(
             Image.filename,
             Image.file_size,
             Image.modified_at,
+            Image.md5_hash,
         )
         if folder_path:
             pf = path_filter_for_prefix(Image.relative_path, folder_path)
@@ -207,7 +208,7 @@ async def scan_duplicates(
             if not rows:
                 break
             for row in rows:
-                img_id, rel_path, filename, file_size, modified_at = row
+                img_id, rel_path, filename, file_size, modified_at, md5_hash = row
                 last_id = img_id or last_id
                 by_size[file_size or 0].append(
                     {
@@ -216,6 +217,7 @@ async def scan_duplicates(
                         "filename": filename,
                         "file_size": file_size,
                         "modified_at": modified_at,
+                        "md5_hash": md5_hash,
                         "cache_key": cache_filename(rel_path),
                     }
                 )
@@ -227,7 +229,9 @@ async def scan_duplicates(
         by_hash: dict[str, list[dict]] = defaultdict(list)
         for group in candidate_groups:
             for item in group:
-                h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
+                h = item.get("md5_hash")
+                if h is None:
+                    h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
                 if h is None:
                     continue
                 by_hash[h].append(item)
@@ -292,3 +296,26 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
         "photos_dir": str(PHOTOS_DIR.resolve()),
         "cache_dir": str(CACHE_DIR.resolve()),
     }
+
+
+@router.post("/api/fix-md5-hashes")
+async def fix_md5_hashes(session: AsyncSession = Depends(get_async_session)):
+    """补全数据库中缺失的 MD5 哈希（扫描已有文件计算）"""
+    result = await session.execute(
+        select(Image.id, Image.relative_path).where(Image.md5_hash == None)  # noqa: E711
+    )
+    rows = result.fetchall()
+    if not rows:
+        return {"updated": 0, "message": "无需补全"}
+
+    updated = 0
+    for image_id, rel_path in rows:
+        md5 = await asyncio.to_thread(compute_file_md5, PHOTOS_DIR, rel_path)
+        if md5:
+            await session.execute(Image.__table__.update().where(Image.id == image_id).values(md5_hash=md5))
+            updated += 1
+        if updated % 100 == 0:
+            await session.commit()
+
+    await session.commit()
+    return {"updated": updated, "message": f"已补全 {updated} 条记录"}

@@ -29,6 +29,7 @@ from app.services.scanner import (
     VIDEO_EXTENSIONS,
     get_media_metadata_and_thumbnail,
 )
+from app.utils.hash_utils import compute_file_md5_by_path
 from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
 from app.utils.path_utils import relative_path
@@ -104,6 +105,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
 
             width, height, modified_at, file_size, is_corrupted = data
             media_type = "video" if is_vid else "image"
+            md5_hash = compute_file_md5_by_path(full_path)
 
             damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME) if is_corrupted else None
 
@@ -115,6 +117,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
                 width=width,
                 height=height,
                 media_type=media_type,
+                md5_hash=md5_hash,
             )
             session.add(record)
             await session.flush()

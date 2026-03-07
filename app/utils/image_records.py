@@ -11,6 +11,7 @@ def create_image_record(
     width: int,
     height: int,
     media_type: str = "image",
+    md5_hash: str | None = None,
 ) -> Image:
     """创建 Image 记录，统一 natural_sort_key 等字段"""
     return Image(
@@ -23,4 +24,5 @@ def create_image_record(
         filename_natural=natural_sort_key(filename),
         relative_path_natural=natural_sort_key(relative_path),
         media_type=media_type,
+        md5_hash=md5_hash,
     )

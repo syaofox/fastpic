@@ -62,6 +62,41 @@ class DuplicateFileError(UploadError):
 router = APIRouter(prefix="/api", tags=["images"])
 
 
+async def _get_existing_hashes_from_db(target_dir: Path, subdirs: set[str] | None = None) -> dict[str, str]:
+    """从数据库获取已有图片的 MD5 哈希，返回 hash -> relative_path。
+    比读取所有文件计算哈希快得多。"""
+    existing_hashes: dict[str, str] = {}
+    prefix = str(target_dir.relative_to(PHOTOS_DIR)).replace("\\", "/").strip("/")
+    if prefix:
+        prefix += "/"
+
+    async with async_session_factory() as sess:
+        if subdirs:
+            for subdir in subdirs:
+                subdir = (subdir or "").strip().replace("\\", "/").strip("/")
+                if subdir:
+                    search_prefix = f"{prefix}{subdir}/"
+                else:
+                    search_prefix = prefix
+                if search_prefix:
+                    result = await sess.execute(
+                        select(Image.md5_hash, Image.relative_path).where(Image.relative_path.like(f"{search_prefix}%"))
+                    )
+                else:
+                    result = await sess.execute(select(Image.md5_hash, Image.relative_path))
+                for md5_hash, rel_path in result.all():
+                    if md5_hash:
+                        existing_hashes[md5_hash] = rel_path
+        else:
+            result = await sess.execute(
+                select(Image.md5_hash, Image.relative_path).where(Image.relative_path.like(f"{prefix}%"))
+            )
+            for md5_hash, rel_path in result.all():
+                if md5_hash:
+                    existing_hashes[md5_hash] = rel_path
+    return existing_hashes
+
+
 def _compute_existing_hashes(target_dir: Path, image_extensions: set[str]) -> dict[str, str]:
     """同步计算目标目录中已有图片的 MD5 哈希，返回 hash -> 相对路径（仅根目录直接子文件）"""
     existing_hashes: dict[str, str] = {}
@@ -319,7 +354,6 @@ async def upload_images(request: Request):
     target_dir.mkdir(parents=True, exist_ok=True)
 
     has_subpath = any("/" in (fp or "") or "\\" in (fp or "") for fp in file_paths)
-    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
     if has_subpath:
         # 仅哈希即将写入的子目录，避免扫描整个图库
         subdirs: set[str] = set()
@@ -333,11 +367,9 @@ async def upload_images(request: Request):
                 subdirs.add("")
             else:
                 subdirs.add("/".join(parts[:-1]))
-        existing_hashes = await asyncio.to_thread(
-            _compute_existing_hashes_for_subdirs, target_dir, subdirs, media_extensions
-        )
+        existing_hashes = await _get_existing_hashes_from_db(target_dir, subdirs)
     else:
-        existing_hashes = await asyncio.to_thread(_compute_existing_hashes, target_dir, media_extensions)
+        existing_hashes = await _get_existing_hashes_from_db(target_dir)
 
     uploaded = 0
     skipped = 0
@@ -388,6 +420,7 @@ async def upload_images(request: Request):
                         existing_record.width = width
                         existing_record.height = height
                         existing_record.media_type = "video" if is_video else "image"
+                        existing_record.md5_hash = content_hash
                         sess.add(existing_record)
                         record = existing_record
                     else:
@@ -399,6 +432,7 @@ async def upload_images(request: Request):
                             width=width,
                             height=height,
                             media_type="video" if is_video else "image",
+                            md5_hash=content_hash,
                         )
                         sess.add(record)
                     if is_corrupted:

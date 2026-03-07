@@ -14,6 +14,7 @@ from app.config import CLEANUP_BATCH_SIZE
 from app.models import Image, async_session_factory
 from app.services import task_state
 from app.services.scan_state import begin_scan, end_scan
+from app.utils.hash_utils import compute_file_md5_by_path
 from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
 from app.utils.path_count_cache import cleanup_expired_path_count_cache
@@ -236,9 +237,9 @@ def _collect_media_and_existing(
 
 def _process_single_image_sync(
     full_path: Path, photos_dir: Path, cache_dir: Path
-) -> tuple[str, str, float, int, int, int, bool] | None:
+) -> tuple[str, str, float, int, int, int, bool, str | None] | None:
     """同步处理单张图片：读取尺寸、生成缩略图，返回
-    (filename, rel_path, modified_at, file_size, width, height, is_corrupted)，失败返回 None"""
+    (filename, rel_path, modified_at, file_size, width, height, is_corrupted, md5_hash)，失败返回 None"""
     try:
         rel_path = relative_path(photos_dir, full_path)
         cache_name = cache_filename(rel_path)
@@ -247,6 +248,7 @@ def _process_single_image_sync(
         if data is None:
             return None
         width, height, modified_at, file_size, is_corrupted = data
+        md5_hash = compute_file_md5_by_path(full_path)
         return (
             full_path.name,
             rel_path,
@@ -255,6 +257,7 @@ def _process_single_image_sync(
             width,
             height,
             is_corrupted,
+            md5_hash,
         )
     except Exception as e:
         print(f"[scan] 处理失败 {full_path}: {e}", flush=True)
@@ -263,8 +266,8 @@ def _process_single_image_sync(
 
 def _process_single_video_sync(
     full_path: Path, photos_dir: Path, cache_dir: Path
-) -> tuple[str, str, float, int, int, int] | None:
-    """同步处理单个视频：获取尺寸、生成缩略图，返回入库所需数据，失败返回 None"""
+) -> tuple[str, str, float, int, int, int, str | None] | None:
+    """同步处理单个视频：获取尺寸、生成缩略图，返回入库所需数据（含 md5_hash），失败返回 None"""
     try:
         rel_path = relative_path(photos_dir, full_path)
         modified_at = os.path.getmtime(full_path)
@@ -274,7 +277,8 @@ def _process_single_video_sync(
         cache_path = cache_dir / cache_name
         if not _generate_video_thumbnail(full_path, cache_path):
             return None
-        return (full_path.name, rel_path, modified_at, file_size, width, height)
+        md5_hash = compute_file_md5_by_path(full_path)
+        return (full_path.name, rel_path, modified_at, file_size, width, height, md5_hash)
     except Exception as e:
         print(f"[scan] 视频处理失败 {full_path}: {e}", flush=True)
         return None
@@ -307,8 +311,8 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
         loop = asyncio.get_running_loop()
 
         def _dedupe_image_results(
-            results: list[tuple[str, str, float, int, int, int, bool]],
-        ) -> list[tuple[str, str, float, int, int, int, bool]]:
+            results: list[tuple[str, str, float, int, int, int, bool, str | None]],
+        ) -> list[tuple[str, str, float, int, int, int, bool, str | None]]:
             """按 relative_path 去重（MySQL 默认 collation 大小写不敏感）"""
             seen: dict[str, tuple] = {}
             for data in results:
@@ -320,8 +324,8 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
 
         async def _process_batch(
             paths: list[Path],
-        ) -> list[tuple[str, str, float, int, int, int]]:
-            """多进程处理一批图片，返回成功的结果列表"""
+        ) -> list[tuple[str, str, float, int, int, int, bool, str | None]]:
+            """多进程处理一批图片，返回成功的结果列表（含 md5_hash）"""
             if not paths:
                 return []
             with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
@@ -334,7 +338,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
 
         async def _process_batch_safe(
             paths: list[Path],
-        ) -> list[tuple[str, str, float, int, int, int]]:
+        ) -> list[tuple[str, str, float, int, int, int, bool, str | None]]:
             """包装 _process_batch，捕获异常避免中断整体流程"""
             try:
                 return await _process_batch(paths)
@@ -378,6 +382,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
                         width,
                         height,
                         is_corrupted,
+                        md5_hash,
                     ) = data
                     key = rel_path.lower()
                     if key in seen_in_run:
@@ -391,6 +396,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
                         width=width,
                         height=height,
                         media_type="image",
+                        md5_hash=md5_hash,
                     )
                     session.add(record)
                     await session.flush()
@@ -429,6 +435,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
                     width,
                     height,
                     is_corrupted,
+                    md5_hash,
                 ) = data
                 key = rel_path.lower()
                 if key in seen_in_run:
@@ -441,6 +448,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
                     file_size=file_size,
                     width=width,
                     height=height,
+                    md5_hash=md5_hash,
                     media_type="image",
                 )
                 session.add(record)
@@ -491,8 +499,8 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
 
         async def _process_video_batch(
             paths: list[Path],
-        ) -> list[tuple[str, str, float, int, int, int]]:
-            """多进程处理一批视频"""
+        ) -> list[tuple[str, str, float, int, int, int, str | None]]:
+            """多进程处理一批视频（含 md5_hash）"""
             if not paths:
                 return []
             with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
@@ -504,8 +512,8 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
             return [r for r in raw_results if r is not None]
 
         def _dedupe_results(
-            results: list[tuple[str, str, float, int, int, int]],
-        ) -> list[tuple[str, str, float, int, int, int]]:
+            results: list[tuple[str, str, float, int, int, int, str | None]],
+        ) -> list[tuple[str, str, float, int, int, int, str | None]]:
             """按 relative_path 去重（MySQL 默认 collation 大小写不敏感，需统一）"""
             seen: dict[str, tuple] = {}
             for data in results:
@@ -540,7 +548,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
                 results = await _process_video_batch(batch_to_process)
                 results = _dedupe_results(results)
                 for data in results:
-                    filename, rel_path, modified_at, file_size, width, height = data
+                    filename, rel_path, modified_at, file_size, width, height, md5_hash = data
                     key = rel_path.lower()
                     if key in seen_in_run:
                         continue
@@ -553,6 +561,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
                         width=width,
                         height=height,
                         media_type="video",
+                        md5_hash=md5_hash,
                     )
                     session.add(record)
                     count += 1
@@ -579,7 +588,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
             results = await _process_video_batch(pending)
             results = _dedupe_results(results)
             for data in results:
-                filename, rel_path, modified_at, file_size, width, height = data
+                filename, rel_path, modified_at, file_size, width, height, md5_hash = data
                 key = rel_path.lower()
                 if key in seen_in_run:
                     continue
@@ -592,6 +601,7 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
                     width=width,
                     height=height,
                     media_type="video",
+                    md5_hash=md5_hash,
                 )
                 session.add(record)
                 count += 1

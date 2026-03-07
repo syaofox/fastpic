@@ -2,7 +2,7 @@ import os
 import re
 import sys
 
-from sqlalchemy import BigInteger, Column, String
+from sqlalchemy import BigInteger, Column, String, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import Field, SQLModel, create_engine
 
@@ -60,6 +60,10 @@ class Image(SQLModel, table=True):
         sa_column=Column(String(_RELATIVE_PATH_NATURAL_LEN), index=False),
     )
     media_type: str = Field(default="image", index=True)  # "image" | "video"
+    md5_hash: str | None = Field(
+        default=None,
+        sa_column=Column(String(32), index=True),
+    )
 
 
 class Tag(SQLModel, table=True):
@@ -172,6 +176,21 @@ def _run_fulltext_migration() -> None:
                 conn.rollback()
 
 
+def _run_md5_hash_migration() -> None:
+    """添加 md5_hash 列及索引"""
+    with sync_engine.connect() as conn:
+        r = conn.execute(
+            text(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'images' AND COLUMN_NAME = 'md5_hash'"
+            )
+        )
+        if r.fetchone() is None:
+            conn.execute(text("ALTER TABLE images ADD COLUMN md5_hash VARCHAR(32) DEFAULT NULL"))
+            conn.execute(text("CREATE INDEX idx_images_md5_hash ON images(md5_hash)"))
+            conn.commit()
+
+
 def init_db() -> None:
     """创建数据库表（仅支持全新部署）"""
     if not _MYSQL_HOST:
@@ -181,6 +200,7 @@ def init_db() -> None:
     _run_natural_sort_index_migration()
     _run_performance_indexes_migration()
     _run_fulltext_migration()
+    _run_md5_hash_migration()
 
 
 async def get_async_session():
