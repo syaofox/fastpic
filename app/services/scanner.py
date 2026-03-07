@@ -331,6 +331,16 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
                 raw_results = await asyncio.gather(*tasks)
             return [r for r in raw_results if r is not None]
 
+        async def _process_batch_safe(
+            paths: list[Path],
+        ) -> list[tuple[str, str, float, int, int, int]]:
+            """包装 _process_batch，捕获异常避免中断整体流程"""
+            try:
+                return await _process_batch(paths)
+            except Exception as e:
+                logger.warning(f"批次处理失败，继续下一批: {e}")
+                return []
+
         damaged_tag = await ensure_tag_exists(session, DAMAGED_TAG_NAME)
 
         _EXISTS_CHECK_BATCH = 500  # 批量检查是否已存在，减少 DB 往返
@@ -356,7 +366,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
             while len(pending) >= _PROCESS_BATCH_SIZE:
                 batch_to_process = pending[:_PROCESS_BATCH_SIZE]
                 pending = pending[_PROCESS_BATCH_SIZE:]
-                results = await _process_batch(batch_to_process)
+                results = await _process_batch_safe(batch_to_process)
                 results = _dedupe_image_results(results)
                 for data in results:
                     (
@@ -407,7 +417,7 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
 
         # 处理剩余 pending
         if pending:
-            results = await _process_batch(pending)
+            results = await _process_batch_safe(pending)
             results = _dedupe_image_results(results)
             for data in results:
                 (

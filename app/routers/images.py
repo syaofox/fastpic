@@ -9,6 +9,19 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+
+class UploadError(Exception):
+    pass
+
+
+class FileSizeExceededError(UploadError):
+    pass
+
+
+class DuplicateFileError(UploadError):
+    pass
+
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
@@ -341,8 +354,14 @@ async def upload_images(request: Request):
         content_hash: str,
         dest: Path,
         is_video: bool,
+        on_duplicate: str,
     ) -> tuple[bool, bool, str | None]:
         """处理单个文件：写入、缩略图、入库。返回 (uploaded, skipped, error_msg)"""
+        if len(content) > MAX_UPLOAD_FILE_SIZE:
+            raise FileSizeExceededError(
+                f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024 * 1024)}MB)"
+            )
+
         rel_path = str(dest.relative_to(PHOTOS_DIR)).replace("\\", "/")
         async with sem:
             try:
@@ -420,9 +439,6 @@ async def upload_images(request: Request):
         is_video = ext in VIDEO_EXTENSIONS
         try:
             content = await f.read(MAX_UPLOAD_FILE_SIZE + 1)
-            if len(content) > MAX_UPLOAD_FILE_SIZE:
-                errors.append(f"{display_name}: 单文件超过大小限制 ({MAX_UPLOAD_FILE_SIZE // (1024 * 1024)}MB)")
-                continue
             if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
                 errors.append(f"{display_name}: 本次上传总大小将超限")
                 continue
@@ -454,14 +470,18 @@ async def upload_images(request: Request):
                     pass
                 else:
                     dest = unique_path(dest_parent, base_name, suffix_style="underscore")
-        tasks.append((i, f, display_name, sanitized, content, content_hash, dest, is_video))
+        tasks.append((i, f, display_name, sanitized, content, content_hash, dest, is_video, on_duplicate))
 
     results = await asyncio.gather(
-        *[_process_one(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7]) for t in tasks],
+        *[_process_one(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]) for t in tasks],
         return_exceptions=True,
     )
     for r in results:
-        if isinstance(r, Exception):
+        if isinstance(r, FileSizeExceededError):
+            errors.append(f"文件大小超限: {str(r)}")
+        elif isinstance(r, DuplicateFileError):
+            skipped += 1
+        elif isinstance(r, Exception):
             errors.append(str(r))
         elif isinstance(r, tuple):
             u, s, err = r
