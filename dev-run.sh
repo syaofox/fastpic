@@ -59,7 +59,7 @@ show_help() {
 
 stop_services() {
     echo -e "${YELLOW}[1/2]${NC} Stopping FastPic..."
-    pkill -f 'uvicorn main:app' 2>/dev/null || true
+    pkill -f 'uvicorn app.main:app' 2>/dev/null || true
     fuser -k 8000/tcp 2>/dev/null || true
     echo -e "${GREEN}FastPic stopped${NC}"
     
@@ -83,7 +83,7 @@ watch_css() {
 check_status() {
     local running=false
     
-    if pgrep -f 'uvicorn main:app' >/dev/null 2>&1; then
+    if pgrep -f 'uvicorn app.main:app' >/dev/null 2>&1; then
         echo -e "${GREEN}FastPic: running${NC}"
         running=true
     else
@@ -106,7 +106,7 @@ check_status() {
 start_services() {
     # Stop existing FastPic process
     echo -e "${YELLOW}[1/5]${NC} Stopping existing FastPic..."
-    pkill -f 'uvicorn main:app' 2>/dev/null || true
+    pkill -f 'uvicorn app.main:app' 2>/dev/null || true
     # Also kill any process using port 8000
     fuser -k 8000/tcp 2>/dev/null || true
     sleep 1
@@ -152,12 +152,12 @@ start_services() {
 
     if [[ "$DAEMON" == "yes" ]]; then
         # Daemon mode: use --reload for development
-        nohup uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload > /tmp/fastpic.log 2>&1 &
-        echo -e "${GREEN}FastPic started in background (PID: $(pgrep -f 'uvicorn main:app'))${NC}"
+        nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > /tmp/fastpic.log 2>&1 &
+        echo -e "${GREEN}FastPic started in background (PID: $(pgrep -f 'uvicorn app.main:app'))${NC}"
         echo "Logs: tail -f /tmp/fastpic.log"
     else
         # Foreground mode: no --reload to avoid watchfiles permission issues
-        uv run uvicorn main:app --host 0.0.0.0 --port 8000
+        uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
     fi
 }
 
