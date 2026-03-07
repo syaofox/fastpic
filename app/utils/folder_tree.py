@@ -218,7 +218,7 @@ async def get_root_subfolders_from_counts(
     return result
 
 
-_FOLDER_TREE_CACHE_TTL = 60.0
+_FOLDER_TREE_CACHE_TTL = 300.0
 _folder_tree_cache: dict | None = None
 _folder_tree_cache_lock = asyncio.Lock()
 

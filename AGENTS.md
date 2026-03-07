@@ -42,10 +42,14 @@ npm install
 ./dev-run.sh status         # 查看状态
 
 # 方式2：手动启动
-# 1. 启动 MariaDB
+# 1. 启动 MariaDB（必须用 up -d，不能用 restart）
 docker compose -f docker-compose.dev.yml up -d
 
-# 2. 设置环境变量并运行
+# 2. 确认端口已映射
+docker compose -f docker-compose.dev.yml ps
+# 应显示: 0.0.0.0:3306->3306/tcp
+
+# 3. 设置环境变量并运行
 export MYSQL_HOST=127.0.0.1
 uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -69,8 +73,12 @@ docker compose down
 ### 运行测试
 
 ```bash
-# 需先启动 MariaDB
+# 需先启动 MariaDB（必须用 up -d，确保端口正确映射）
 docker compose -f docker-compose.dev.yml up -d
+
+# 确认端口已映射
+docker compose -f docker-compose.dev.yml ps
+# 应显示: 0.0.0.0:3306->3306/tcp
 
 # 运行所有测试
 uv run pytest

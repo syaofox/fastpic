@@ -13,6 +13,7 @@ from app.schemas import (
     MergeTagRequest,
     RenameTagRequest,
 )
+from app.utils.cache_utils import invalidate_hot_tags_cache
 from app.utils.path_utils import LIKE_ESCAPE, escape_like
 
 router = APIRouter(prefix="/api", tags=["tags"])
@@ -70,6 +71,7 @@ async def rename_tag(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=400, detail="新名称已存在（并发冲突）")
+    invalidate_hot_tags_cache()
     return {"renamed": True}
 
 
@@ -89,6 +91,7 @@ async def delete_tag(
     await session.execute(delete(ImageTag).where(ImageTag.tag_id == tag.id))
     await session.delete(tag)
     await session.commit()
+    invalidate_hot_tags_cache()
     return {"deleted": True}
 
 
@@ -115,9 +118,7 @@ async def merge_tag(
     target_tag = target_result.scalar_one_or_none()
     if not target_tag:
         raise HTTPException(status_code=404, detail="目标标签不存在")
-    img_result = await session.execute(
-        select(ImageTag.image_id).where(ImageTag.tag_id == source_tag.id)
-    )
+    img_result = await session.execute(select(ImageTag.image_id).where(ImageTag.tag_id == source_tag.id))
     image_ids = [r[0] for r in img_result.fetchall()]
     if image_ids:
         existing_result = await session.execute(
@@ -127,11 +128,7 @@ async def merge_tag(
             )
         )
         existing_ids = {r[0] for r in existing_result.fetchall()}
-        to_add = [
-            ImageTag(image_id=i, tag_id=target_tag.id)
-            for i in image_ids
-            if i not in existing_ids
-        ]
+        to_add = [ImageTag(image_id=i, tag_id=target_tag.id) for i in image_ids if i not in existing_ids]
         if to_add:
             session.add_all(to_add)
         await session.execute(delete(ImageTag).where(ImageTag.tag_id == source_tag.id))
@@ -142,6 +139,7 @@ async def merge_tag(
         await session.rollback()
         # 竞态：ImageTag 已存在，忽略
         pass
+    invalidate_hot_tags_cache()
     return {"merged": True, "images_updated": len(image_ids)}
 
 
@@ -163,6 +161,7 @@ async def batch_delete_tags(
             await session.delete(tag)
             deleted += 1
     await session.commit()
+    invalidate_hot_tags_cache()
     return {"deleted": deleted}
 
 
@@ -214,9 +213,7 @@ async def add_image_tags(
                 if not tag:
                     continue
         existing = await session.execute(
-            select(ImageTag).where(
-                ImageTag.image_id == image_id, ImageTag.tag_id == tag.id
-            )
+            select(ImageTag).where(ImageTag.image_id == image_id, ImageTag.tag_id == tag.id)
         )
         if existing.scalar_one_or_none() is None:
             session.add(ImageTag(image_id=image_id, tag_id=tag.id))
