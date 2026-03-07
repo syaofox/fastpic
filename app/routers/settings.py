@@ -78,7 +78,7 @@ async def task_events(request: Request):
                 break
 
             try:
-                data = await asyncio.wait_for(queue.get(), timeout=25)
+                await asyncio.wait_for(queue.get(), timeout=25)
 
                 status = task_state.get_status()
                 if status:

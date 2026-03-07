@@ -9,19 +9,6 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-
-class UploadError(Exception):
-    pass
-
-
-class FileSizeExceededError(UploadError):
-    pass
-
-
-class DuplicateFileError(UploadError):
-    pass
-
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
@@ -58,6 +45,19 @@ from app.utils.path_utils import (
     resolve_and_validate_relative_path,
 )
 from app.utils.unique_path import unique_path
+
+
+class UploadError(Exception):
+    pass
+
+
+class FileSizeExceededError(UploadError):
+    pass
+
+
+class DuplicateFileError(UploadError):
+    pass
+
 
 router = APIRouter(prefix="/api", tags=["images"])
 
