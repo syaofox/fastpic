@@ -19,6 +19,7 @@ from app.app_common import templates
 from app.config import (
     APP_VERSION,
     CACHE_DIR,
+    FOLDER_IMAGES_MAX,
     PER_PAGE,
     PHOTOS_DIR,
     SKIP_FULL_SCAN_ON_STARTUP,
@@ -513,9 +514,6 @@ async def gallery(
     )
 
 
-_FOLDER_IMAGES_MAX = 5000  # 大图模式最大返回数量，防止 DoS
-
-
 @app.get("/api/folder-images")
 async def api_folder_images(
     path: str = "",
@@ -538,7 +536,7 @@ async def api_folder_images(
     sort_col = get_sort_column(sort_by)
     sort_order = "asc" if sort_order == "asc" else "desc"
     order_clause = sort_col.asc() if sort_order == "asc" else sort_col.desc()
-    stmt = select(Image.id, Image.relative_path, Image.media_type).order_by(order_clause).limit(_FOLDER_IMAGES_MAX + 1)
+    stmt = select(Image.id, Image.relative_path, Image.media_type).order_by(order_clause).limit(FOLDER_IMAGES_MAX + 1)
     parsed = parse_filter_params(
         filter_filename,
         filter_size_min,
@@ -550,9 +548,9 @@ async def api_folder_images(
     stmt, _, _ = apply_image_filters(stmt, path, search, mode, parsed)
     result = await session.execute(stmt)
     rows = result.fetchall()
-    truncated = len(rows) > _FOLDER_IMAGES_MAX
+    truncated = len(rows) > FOLDER_IMAGES_MAX
     if truncated:
-        rows = rows[:_FOLDER_IMAGES_MAX]
+        rows = rows[:FOLDER_IMAGES_MAX]
     return {
         "urls": ["/photos/" + "/".join(quote(p, safe="") for p in (r.relative_path or "").split("/")) for r in rows],
         "ids": [r.id for r in rows],

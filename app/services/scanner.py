@@ -10,6 +10,7 @@ from PIL import ImageFile
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlmodel import select
 
+from app.config import CLEANUP_BATCH_SIZE
 from app.models import Image, async_session_factory
 from app.services import task_state
 from app.services.scan_state import begin_scan, end_scan
@@ -624,7 +625,7 @@ async def run_db_only_validation(photos_dir: Path, cache_dir: Path) -> dict:
         last_id = 0
         total_checked = 0
         while True:
-            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(_CLEANUP_BATCH_SIZE)
+            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(CLEANUP_BATCH_SIZE)
             result = await session.execute(stmt)
             batch = list(result.scalars().all())
             if not batch:
@@ -748,9 +749,6 @@ def _regenerate_one(args: tuple[Path, Path, bool]) -> bool:
     return _generate_thumbnail(photo_path, cache_path)
 
 
-_CLEANUP_BATCH_SIZE = 5000  # 分批处理，避免百万级全表加载 OOM
-
-
 async def cleanup_database(photos_dir: Path, cache_dir: Path, existing_rel_paths: set[str] | None = None) -> dict:
     """
     数据库清理同步，处理三种不一致：
@@ -780,7 +778,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path, existing_rel_paths
         last_id = 0
         total_checked = 0
         while True:
-            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(_CLEANUP_BATCH_SIZE)
+            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(CLEANUP_BATCH_SIZE)
             result = await session.execute(stmt)
             batch = list(result.scalars().all())
             if not batch:
@@ -852,7 +850,7 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path, existing_rel_paths
         last_id = 0
         loop = asyncio.get_running_loop()
         while True:
-            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(_CLEANUP_BATCH_SIZE)
+            stmt = select(Image).where(Image.id > last_id).order_by(Image.id).limit(CLEANUP_BATCH_SIZE)
             result = await session.execute(stmt)
             batch = list(result.scalars().all())
             if not batch:

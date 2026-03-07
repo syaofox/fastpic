@@ -11,6 +11,18 @@ CACHE_DIR = ROOT / "cache"
 STATIC_DIR = ROOT / "app" / "static"
 PER_PAGE = 24
 
+# 图片浏览配置
+FOLDER_IMAGES_MAX = 5000  # 大图模式最大返回数量，防止 DoS
+DEFAULT_PER_PAGE = 24
+DEFAULT_COLS = 4
+
+# 上传并发配置
+UPLOAD_PARALLEL = 4
+
+# 扫描批处理配置
+SCAN_PROCESS_BATCH_SIZE = 16
+CLEANUP_BATCH_SIZE = 5000  # 分批处理，避免百万级全表加载 OOM
+
 # 数据库批量操作
 IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批，避免 max_allowed_packet
 FOLDER_OP_BATCH_SIZE = 1000  # 按路径前缀分批加载

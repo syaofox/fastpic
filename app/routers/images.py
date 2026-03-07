@@ -34,6 +34,7 @@ from app.config import (
     MAX_UPLOAD_FILE_SIZE,
     MAX_UPLOAD_TOTAL_SIZE,
     PHOTOS_DIR,
+    UPLOAD_PARALLEL,
 )
 from app.models import (
     Image,
@@ -338,12 +339,11 @@ async def upload_images(request: Request):
     else:
         existing_hashes = await asyncio.to_thread(_compute_existing_hashes, target_dir, media_extensions)
 
-    _UPLOAD_PARALLEL = 4
     uploaded = 0
     skipped = 0
     errors: list[str] = []
     total_uploaded_bytes = 0
-    sem = asyncio.Semaphore(_UPLOAD_PARALLEL)
+    sem = asyncio.Semaphore(UPLOAD_PARALLEL)
 
     async def _process_one(
         i: int,
