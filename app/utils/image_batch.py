@@ -19,13 +19,7 @@ async def iter_images_by_path_prefix(
     pf = path_filter_for_prefix(Image.relative_path, prefix)
     last_id = 0
     while True:
-        stmt = (
-            select(Image)
-            .where(pf)
-            .where(Image.id > last_id)
-            .order_by(Image.id)
-            .limit(batch_size)
-        )
+        stmt = select(Image).where(pf).where(Image.id > last_id).order_by(Image.id).limit(batch_size)
         result = await session.execute(stmt)
         images = list(result.scalars().all())
         if not images:
@@ -39,11 +33,11 @@ async def collect_image_items_by_prefix(
     prefix: str,
     src: str,
     batch_size: int = 1000,
-) -> list[tuple[int, str, str]]:
-    """按路径前缀收集 (id, relative_path, src) 列表，供 merge_folders 使用"""
-    items: list[tuple[int, str, str]] = []
+) -> list[tuple[int, str, str, str | None]]:
+    """按路径前缀收集 (id, relative_path, src, md5_hash) 列表，供 merge_folders 使用"""
+    items: list[tuple[int, str, str, str | None]] = []
     async for batch in iter_images_by_path_prefix(session, prefix, batch_size):
         for img in batch:
             if img.id:
-                items.append((img.id, img.relative_path, src))
+                items.append((img.id, img.relative_path, src, img.md5_hash))
     return items

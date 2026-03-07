@@ -550,13 +550,15 @@ async def merge_folders(
             source_path, target_path = path_b, path_a
 
         preferred = "a" if count_a >= count_b else "b"
-        by_hash: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+        by_hash: dict[str, list[tuple[int, str, str, str | None]]] = defaultdict(list)
         for item in items_a + items_b:
-            img_id, rel_path, src = item
+            img_id, rel_path, src, md5_hash = item
             full = photos_dir / rel_path
             if not full.is_file() or full.suffix.lower() not in media_extensions:
                 continue
-            h = await asyncio.to_thread(compute_file_md5, photos_dir, rel_path)
+            h = md5_hash
+            if h is None:
+                h = await asyncio.to_thread(compute_file_md5, photos_dir, rel_path)
             if h is None:
                 continue
             by_hash[h].append(item)
