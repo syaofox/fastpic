@@ -16,6 +16,7 @@ from app.services.scan_state import begin_scan, end_scan
 from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
 from app.utils.path_count_cache import cleanup_expired_path_count_cache
+from app.utils.path_utils import relative_path
 from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
 logger = logging.getLogger(__name__)
@@ -26,12 +27,6 @@ THUMBNAIL_WIDTH = 300
 # 多进程缩略图：并行度与批大小
 _MAX_WORKERS = min(32, (os.cpu_count() or 4) + 4)
 _PROCESS_BATCH_SIZE = min(16, _MAX_WORKERS * 2)
-
-
-def _relative_path(photos_dir: Path, full_path: Path) -> str:
-    """计算相对路径，统一使用 / 分隔"""
-    rel = full_path.relative_to(photos_dir)
-    return str(rel).replace("\\", "/")
 
 
 def _load_image_maybe_truncated(full_path: Path) -> tuple[PILImage.Image, bool]:
@@ -231,10 +226,10 @@ def _collect_media_and_existing(
             ext = p.suffix.lower()
             if ext in IMAGE_EXTENSIONS:
                 images.append(p)
-                existing_rel_paths.add(_relative_path(photos_dir, p))
+                existing_rel_paths.add(relative_path(photos_dir, p))
             elif ext in VIDEO_EXTENSIONS:
                 videos.append(p)
-                existing_rel_paths.add(_relative_path(photos_dir, p))
+                existing_rel_paths.add(relative_path(photos_dir, p))
     return images, videos, existing_rel_paths
 
 
@@ -244,35 +239,22 @@ def _process_single_image_sync(
     """同步处理单张图片：读取尺寸、生成缩略图，返回
     (filename, rel_path, modified_at, file_size, width, height, is_corrupted)，失败返回 None"""
     try:
-        rel_path = _relative_path(photos_dir, full_path)
-        modified_at = os.path.getmtime(full_path)
-        file_size = os.path.getsize(full_path)
-        img, is_corrupted = _load_image_maybe_truncated(full_path)
-        try:
-            width, height = img.size
-            if img.width > THUMBNAIL_WIDTH:
-                ratio = THUMBNAIL_WIDTH / img.width
-                new_size = (THUMBNAIL_WIDTH, int(img.height * ratio))
-                thumb = img.resize(new_size, PILImage.Resampling.LANCZOS)
-            else:
-                thumb = img.copy()
-            if thumb.mode in ("RGBA", "P"):
-                thumb = thumb.convert("RGB")
-            cache_name = cache_filename(rel_path)
-            cache_path = cache_dir / cache_name
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            thumb.save(cache_path, "WEBP", quality=85)
-            return (
-                full_path.name,
-                rel_path,
-                modified_at,
-                file_size,
-                width,
-                height,
-                is_corrupted,
-            )
-        finally:
-            img.close()
+        rel_path = relative_path(photos_dir, full_path)
+        cache_name = cache_filename(rel_path)
+        cache_path = cache_dir / cache_name
+        data = get_media_metadata_and_thumbnail(full_path, cache_path, is_video=False)
+        if data is None:
+            return None
+        width, height, modified_at, file_size, is_corrupted = data
+        return (
+            full_path.name,
+            rel_path,
+            modified_at,
+            file_size,
+            width,
+            height,
+            is_corrupted,
+        )
     except Exception as e:
         print(f"[scan] 处理失败 {full_path}: {e}", flush=True)
         return None
@@ -283,7 +265,7 @@ def _process_single_video_sync(
 ) -> tuple[str, str, float, int, int, int] | None:
     """同步处理单个视频：获取尺寸、生成缩略图，返回入库所需数据，失败返回 None"""
     try:
-        rel_path = _relative_path(photos_dir, full_path)
+        rel_path = relative_path(photos_dir, full_path)
         modified_at = os.path.getmtime(full_path)
         file_size = os.path.getsize(full_path)
         width, height = _get_video_dimensions(full_path)
@@ -358,14 +340,14 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
             i += _EXISTS_CHECK_BATCH
             if not check_batch:
                 continue
-            rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
+            rel_paths = [relative_path(photos_dir, p) for p in check_batch]
             with session.no_autoflush:
                 result = await session.execute(select(Image.relative_path).where(Image.relative_path.in_(rel_paths)))
                 existing_rows = result.fetchall()
             # MySQL 默认 collation 大小写不敏感，需用小写比较
             existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
-                rel_path = _relative_path(photos_dir, full_path)
+                rel_path = relative_path(photos_dir, full_path)
                 if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)
@@ -529,14 +511,14 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
             vi += _EXISTS_CHECK_BATCH
             if not check_batch:
                 continue
-            rel_paths = [_relative_path(photos_dir, p) for p in check_batch]
+            rel_paths = [relative_path(photos_dir, p) for p in check_batch]
             with session.no_autoflush:
                 result = await session.execute(select(Image.relative_path).where(Image.relative_path.in_(rel_paths)))
                 existing_rows = result.fetchall()
             # MySQL 默认 collation 大小写不敏感，需用小写比较
             existing_lower = {r[0].lower() for r in existing_rows}
             for full_path in check_batch:
-                rel_path = _relative_path(photos_dir, full_path)
+                rel_path = relative_path(photos_dir, full_path)
                 if rel_path.lower() in existing_lower or rel_path.lower() in seen_in_run:
                     continue
                 pending.append(full_path)

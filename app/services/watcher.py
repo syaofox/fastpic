@@ -27,11 +27,11 @@ from app.services.scan_state import begin_scan, end_scan, is_scanning
 from app.services.scanner import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
-    _relative_path,
     get_media_metadata_and_thumbnail,
 )
 from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
+from app.utils.path_utils import relative_path
 from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
     if not full_path.exists() or not full_path.is_file():
         return
 
-    rel_path = _relative_path(photos_dir, full_path)
+    rel_path = relative_path(photos_dir, full_path)
 
     async with async_session_factory() as session:
         result = await session.execute(select(Image).where(Image.relative_path == rel_path))
@@ -135,7 +135,7 @@ async def _process_created(photos_dir: Path, cache_dir: Path, full_path: Path):
 
 async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
     """处理删除图片：移除数据库记录 + 缓存"""
-    rel_path = _relative_path(photos_dir, full_path)
+    rel_path = relative_path(photos_dir, full_path)
 
     async with async_session_factory() as session:
         result = await session.execute(select(Image).where(Image.relative_path == rel_path))
@@ -156,8 +156,8 @@ async def _process_deleted(photos_dir: Path, cache_dir: Path, full_path: Path):
 
 async def _process_moved(photos_dir: Path, cache_dir: Path, src_path: Path, dst_path: Path):
     """处理移动/重命名：更新数据库记录路径 + 缓存"""
-    src_rel = _relative_path(photos_dir, src_path)
-    dst_rel = _relative_path(photos_dir, dst_path)
+    src_rel = relative_path(photos_dir, src_path)
+    dst_rel = relative_path(photos_dir, dst_path)
 
     async with async_session_factory() as session:
         result = await session.execute(select(Image).where(Image.relative_path == src_rel))

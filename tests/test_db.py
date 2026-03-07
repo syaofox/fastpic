@@ -1,7 +1,8 @@
 """数据库相关测试。需先启动 docker compose -f docker-compose.dev.yml up -d"""
+
 import pytest
 
-from models import Image, sync_engine
+from app.models import Image, sync_engine
 from sqlalchemy import text
 
 

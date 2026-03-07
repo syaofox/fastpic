@@ -1,4 +1,5 @@
 """路径工具：SQL LIKE 转义、路径校验、路径过滤条件"""
+
 from pathlib import Path
 
 # MariaDB 不支持 ESCAPE '\\' 会报语法错误，使用 !
@@ -25,9 +26,7 @@ def normalize_path(path: str | None, allow_empty: bool = True) -> str | None:
     return p
 
 
-def resolve_and_validate_relative_path(
-    relative_path: str, photos_dir: Path
-) -> Path | None:
+def resolve_and_validate_relative_path(relative_path: str, photos_dir: Path) -> Path | None:
     """校验 relative_path 在 photos_dir 下，返回绝对路径或 None"""
     rel = (relative_path or "").strip().strip("/")
     if not rel or ".." in rel or rel.startswith("/"):
@@ -44,7 +43,7 @@ def invalid_filename(name: str) -> bool:
     """检查文件名是否包含非法字符（供 rename/create 等复用）"""
     if not name or ".." in name:
         return True
-    for c in "/\\:*?\"<>|":
+    for c in '/\\:*?"<>|':
         if c in name:
             return True
     return False
@@ -59,8 +58,11 @@ def path_filter_for_prefix(relative_path_column, prefix: str, include_children: 
     """
     escaped = escape_like(prefix)
     if include_children:
-        return (
-            relative_path_column.like(f"{escaped}/%", escape=LIKE_ESCAPE)
-            | (relative_path_column == prefix)
-        )
+        return relative_path_column.like(f"{escaped}/%", escape=LIKE_ESCAPE) | (relative_path_column == prefix)
     return relative_path_column == prefix
+
+
+def relative_path(photos_dir: Path, full_path: Path) -> str:
+    """计算相对路径，统一使用 / 分隔"""
+    rel = full_path.relative_to(photos_dir)
+    return str(rel).replace("\\", "/")
