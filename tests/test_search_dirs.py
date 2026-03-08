@@ -51,13 +51,8 @@ class TestSearchDirsEndpoint:
         from app.main import app
         from app.models import get_async_session
 
-        mock_scalars = MagicMock()
-        mock_scalars.fetchall.return_value = [
-            ("2024/01", 10),
-            ("2024/02", 5),
-        ]
         mock_result = MagicMock()
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.fetchall.return_value = []
 
         mock_async_session = AsyncMock()
         mock_async_session.execute.return_value = mock_result
@@ -75,7 +70,7 @@ class TestSearchDirsEndpoint:
             call_args = mock_async_session.execute.call_args
             sql_query = str(call_args[0][0])
             assert "LIKE" in sql_query
-            assert "like_filter" in sql_query
+            assert ":like_filter" in sql_query
         finally:
             app.dependency_overrides.clear()
 
@@ -87,10 +82,8 @@ class TestSearchDirsEndpoint:
         from app.main import app
         from app.models import get_async_session
 
-        mock_scalars = MagicMock()
-        mock_scalars.fetchall.return_value = []
         mock_result = MagicMock()
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.fetchall.return_value = []
 
         mock_async_session = AsyncMock()
         mock_async_session.execute.return_value = mock_result
@@ -119,10 +112,8 @@ class TestSearchDirsEndpoint:
         from app.main import app
         from app.models import get_async_session
 
-        mock_scalars = MagicMock()
-        mock_scalars.fetchall.return_value = []
         mock_result = MagicMock()
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.fetchall.return_value = []
 
         mock_async_session = AsyncMock()
         mock_async_session.execute.return_value = mock_result

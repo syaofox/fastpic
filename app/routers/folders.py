@@ -7,6 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import delete, select
@@ -35,7 +36,6 @@ from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.services.scheduler import scheduler
 from app.utils.folder_tree import (
-    get_folder_counts_for_search,
     get_subfolders,
     invalidate_folder_tree_cache,
 )
@@ -817,10 +817,31 @@ async def search_dirs(
     escaped = escape_like(q)
     like_filter = f"%{escaped}%"
 
-    full_dir_counts = await get_folder_counts_for_search(session, like_filter=like_filter)
+    sql = text("""
+        SELECT prefix, COUNT(*) AS cnt FROM (
+            SELECT SUBSTRING_INDEX(relative_path, '/', 1) AS prefix
+            FROM images WHERE relative_path LIKE :like_filter AND relative_path LIKE '%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 2) AS prefix
+            FROM images WHERE relative_path LIKE :like_filter AND relative_path LIKE '%/%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 3) AS prefix
+            FROM images WHERE relative_path LIKE :like_filter AND relative_path LIKE '%/%/%/%'
+            UNION ALL
+            SELECT SUBSTRING_INDEX(relative_path, '/', 4) AS prefix
+            FROM images WHERE relative_path LIKE :like_filter AND relative_path LIKE '%/%/%/%/%'
+        ) t
+        WHERE prefix IS NOT NULL AND prefix != ''
+        GROUP BY prefix
+        LIMIT :limit_val
+    """)
+    result = await session.execute(sql, {"like_filter": like_filter, "limit_val": limit * 5})
+    rows = result.fetchall()
 
     matched = []
-    for dir_path, count in sorted(full_dir_counts.items()):
+    for row in rows:
+        dir_path = row[0]
+        count = row[1]
         if search_match(q, dir_path):
             matched.append({"path": dir_path, "image_count": count})
             if len(matched) >= limit:
