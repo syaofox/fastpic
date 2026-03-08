@@ -124,7 +124,7 @@ def apply_image_filters(
         if path:
             escaped = escape_like(path)
             stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
-        else:
+        elif not parsed["filter_tag"]:
             stmt = stmt.where(Image.id == 0)
 
     return stmt, pf, has_filters
