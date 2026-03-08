@@ -1098,7 +1098,7 @@ function setAsFolderThumbnail() {
         body: JSON.stringify({ relative_path: relPath })
     }).then(function(r) {
         if (r.ok) {
-            if (typeof showToast === 'function') showToast('已设为文件夹缩略图');
+            if (typeof showToast === 'function') showToast('已设为文件夹缩略图', 'success');
             if (typeof refreshGalleryFromModal === 'function') refreshGalleryFromModal();
         } else {
             return r.json().then(function(d) {
@@ -2662,9 +2662,19 @@ document.addEventListener('keydown', function(e) {
                     var summary = data.uploaded + ' 个成功';
                     if (data.skipped > 0) summary += '，' + data.skipped + ' 个跳过（重复）';
                     progressCount.textContent = summary;
+                    
+                    var toastMsg = '';
+                    var toastType = 'success';
                     if (data.errors && data.errors.length > 0) {
                         errorEl.textContent = '部分失败: ' + data.errors.join('; ');
                         errorEl.classList.remove('hidden');
+                        toastMsg = '上传完成：' + data.uploaded + ' 成功，' + data.skipped + ' 跳过，' + data.errors.length + ' 失败';
+                        toastType = 'warning';
+                    } else {
+                        toastMsg = '上传完成：' + data.uploaded + ' 个文件';
+                    }
+                    if (typeof showToast === 'function') {
+                        showToast(toastMsg, toastType);
                     }
                     var delay = (data.errors && data.errors.length > 0) ? 2500 : 500;
                     setTimeout(function() {
@@ -2680,6 +2690,9 @@ document.addEventListener('keydown', function(e) {
                     errorEl.textContent = errMsg;
                     errorEl.classList.remove('hidden');
                     confirmBtn.disabled = false;
+                    if (typeof showToast === 'function') {
+                        showToast('上传失败：' + errMsg, 'error');
+                    }
                 }
             });
 
@@ -2690,6 +2703,9 @@ document.addEventListener('keydown', function(e) {
                 errorEl.textContent = '网络错误';
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
+                if (typeof showToast === 'function') {
+                    showToast('上传失败：网络错误', 'error');
+                }
             });
 
             xhr.addEventListener('timeout', function() {
@@ -2699,6 +2715,9 @@ document.addEventListener('keydown', function(e) {
                 errorEl.textContent = '服务器处理时间过长，请尝试减少文件数量或分批上传';
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;
+                if (typeof showToast === 'function') {
+                    showToast('上传超时，请减少文件数量或分批上传', 'error');
+                }
             });
 
             xhr.send(formData);
@@ -3087,6 +3106,7 @@ document.addEventListener('keydown', function(e) {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+            if (typeof showToast === 'function') showToast('下载开始', 'success');
         }).catch(function(err) {
             if (typeof showToast === 'function') showToast(err.message || '下载失败', 'error');
         }).finally(function() {
@@ -3165,7 +3185,13 @@ document.addEventListener('keydown', function(e) {
         }
 
         Promise.all(promises).then(function(results) {
-            // 退出选择模式
+            var totalDeleted = 0;
+            results.forEach(function(data) {
+                totalDeleted += (data.deleted || 0);
+            });
+            if (totalDeleted > 0 && typeof showToast === 'function') {
+                showToast('已删除 ' + totalDeleted + ' 项', 'success');
+            }
             exitSelectMode();
             refreshGallery();
         }).catch(function(err) {
@@ -3369,7 +3395,9 @@ document.addEventListener('keydown', function(e) {
                         if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
                     }
                     if (allErrors.length > 0) {
-                        if (typeof showToast === 'function') showToast('已移动 ' + totalMoved + ' 项，失败 ' + allErrors.length + ' 项：' + allErrors.join('；'), 'error');
+                        if (typeof showToast === 'function') showToast('已移动 ' + totalMoved + ' 项，失败 ' + allErrors.length + ' 项：' + allErrors.join('；'), 'warning');
+                    } else {
+                        if (typeof showToast === 'function') showToast('已移动 ' + totalMoved + ' 项', 'success');
                     }
                     if (!fromModal) {
                         refreshGallery();

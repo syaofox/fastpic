@@ -1616,6 +1616,13 @@ function restoreTaskState() {
     fetch('/api/task-status', { method: 'GET' })
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            var taskLabelMap = {
+                'scan': '扫描',
+                'cleanup': '清理',
+                'full-sync': '重建索引',
+                'scan-duplicates': '查重',
+                'merge-folders': '合并文件夹'
+            };
             if (data.is_running) {
                 currentTaskType = data.task_type;
                 disableTaskButton(data.task_type);
@@ -1633,6 +1640,12 @@ function restoreTaskState() {
                 }
                 connectTaskEvents();
             } else if (data.finished_at) {
+                var taskLabel = taskLabelMap[data.task_type] || '任务';
+                if (data.result && !data.result.error) {
+                    showToast('上次' + taskLabel + '已完成', 'success');
+                } else if (data.result && data.result.error) {
+                    showToast('上次' + taskLabel + '失败：' + data.result.error, 'error');
+                }
                 onTaskComplete(data.task_type, data.result || data.error);
             }
         });
@@ -1640,6 +1653,13 @@ function restoreTaskState() {
 
 function onTaskComplete(taskType, result) {
     showGlobalProgress(false);
+    var taskLabelMap = {
+        'scan': '扫描',
+        'cleanup': '清理',
+        'full-sync': '重建索引',
+        'scan-duplicates': '查重',
+        'merge-folders': '合并文件夹'
+    };
     if (!taskType) {
         var taskLabels = {
             'scan': { btn: 'scan-btn', status: 'scan-status' },
@@ -1658,6 +1678,31 @@ function onTaskComplete(taskType, result) {
         }
     }
     if (!taskType) return;
+    
+    var isSuccess = result && !result.error;
+    var taskLabel = taskLabelMap[taskType] || '任务';
+    
+    if (isSuccess) {
+        var countInfo = '';
+        if (taskType === 'scan' && result.scanned !== undefined) {
+            countInfo = result.scanned > 0 ? '，新增 ' + result.scanned + ' 个媒体' : '，无新增';
+        } else if (taskType === 'cleanup') {
+            var total = (result.stale_removed || 0) + (result.orphan_cache_removed || 0) + (result.cache_regenerated || 0);
+            countInfo = total > 0 ? '，处理 ' + total + ' 项' : '，数据已一致';
+        } else if (taskType === 'full-sync') {
+            var scanned = (result.images_added || 0) + (result.videos_added || 0);
+            countInfo = scanned > 0 ? '，新增 ' + scanned + ' 个媒体' : '';
+        } else if (taskType === 'scan-duplicates' && result.groups) {
+            var totalDup = result.groups.reduce(function(sum, g) { return sum + g.items.length; }, 0);
+            countInfo = result.groups.length > 0 ? '，发现 ' + result.groups.length + ' 组重复' : '，未发现重复';
+        } else if (taskType === 'merge-folders' && result.ok) {
+            countInfo = '，移动 ' + (result.moved || 0) + ' 个文件';
+        }
+        showToast(taskLabel + '完成' + countInfo, 'success');
+    } else if (result && result.error) {
+        showToast(taskLabel + '失败：' + result.error, 'error');
+    }
+    
     var handlers = {
         'scan': function(res) {
             var btn = document.getElementById('scan-btn');
