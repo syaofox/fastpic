@@ -27,6 +27,19 @@ CLEANUP_BATCH_SIZE = 5000  # 分批处理，避免百万级全表加载 OOM
 IN_CLAUSE_BATCH_SIZE = 1000  # IN 子句分批，避免 max_allowed_packet
 FOLDER_OP_BATCH_SIZE = 1000  # 按路径前缀分批加载
 SCAN_DUPLICATES_BATCH_SIZE = 5000
+BATCH_COMMIT_SIZE = 50  # 批量提交数量，防止连接池耗尽
+
+
+def _get_db_pool_config() -> tuple[int, int, int]:
+    """获取数据库连接池配置，返回 (pool_size, max_overflow, concurrent_limit)"""
+    pool_size = int(os.environ.get("DB_POOL_SIZE", "20"))
+    max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "40"))
+    total = pool_size + max_overflow
+    concurrent_limit = int(total * 0.7)  # 最多使用 70%
+    return pool_size, max_overflow, concurrent_limit
+
+
+DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_CONCURRENT_LIMIT = _get_db_pool_config()
 
 
 def _parse_size(value: str | None, default_bytes: int) -> int:

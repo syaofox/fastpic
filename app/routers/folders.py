@@ -11,7 +11,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import delete, select
 
-from app.config import CACHE_DIR, FOLDER_OP_BATCH_SIZE, IN_CLAUSE_BATCH_SIZE, PHOTOS_DIR
+from app.config import (
+    BATCH_COMMIT_SIZE,
+    CACHE_DIR,
+    FOLDER_OP_BATCH_SIZE,
+    IN_CLAUSE_BATCH_SIZE,
+    PHOTOS_DIR,
+)
 from app.models import FolderThumbnail, Image, ImageTag, get_async_session
 from app.schemas import (
     AddFolderThumbnailRequest,
@@ -27,6 +33,7 @@ from app.schemas import (
 )
 from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.services.scheduler import scheduler
 from app.utils.folder_tree import (
     get_folder_counts_for_search,
     get_subfolders,
@@ -351,6 +358,13 @@ async def batch_rename(
     image_count = 0
     errors: list[str] = []
 
+    async def _flush_and_commit():
+        try:
+            await session.commit()
+        except Exception as e:
+            await session.rollback()
+            errors.append(f"提交失败: {e}")
+
     # 先处理文件夹重命名
     for item in body.folder_renames or []:
         folder_path = normalize_path(item.path, allow_empty=False)
@@ -398,65 +412,83 @@ async def batch_rename(
                         img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
                     )
                     session.add(img)
+                await _flush_and_commit()
             invalidate_folder_tree_cache(new_prefix)
             folder_count += 1
             print(f"[api] 批量重命名文件夹: {folder_path} → {new_prefix}", flush=True)
         except Exception as e:
             errors.append(f"{folder_path}: 更新数据库失败 {e}")
 
-    # 再处理图片重命名
+    # 再处理图片重命名：批量查询 + 定期提交 + 并发控制
     media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
-    for item in body.image_renames or []:
-        result = await session.execute(select(Image).where(Image.id == item.id))
-        img = result.scalar_one_or_none()
-        if not img:
-            errors.append(f"id={item.id}: 图片不存在")
-            continue
-        new_filename = (item.new_filename or "").strip()
-        if not new_filename:
-            errors.append(f"{img.filename}: 新文件名不能为空")
-            continue
-        if invalid_filename(new_filename):
-            errors.append(f"{img.filename}: 文件名包含非法字符")
-            continue
-        if Path(new_filename).suffix.lower() not in media_extensions:
-            errors.append(f"{img.filename}: 不支持的格式")
-            continue
+    image_renames = body.image_renames or []
+    if image_renames:
+        id_list = [item.id for item in image_renames]
+        result = await session.execute(select(Image).where(Image.id.in_(id_list)))
+        image_map = {img.id: img for img in result.scalars().all()}
+        pending_commits = 0
 
-        src_path = PHOTOS_DIR / img.relative_path
-        if not src_path.exists() or not src_path.is_file():
-            errors.append(f"{img.filename}: 文件不存在")
-            continue
+        async def _process_item(item):
+            img = image_map.get(item.id)
+            if not img:
+                return ("error", f"id={item.id}: 图片不存在")
+            new_filename = (item.new_filename or "").strip()
+            if not new_filename:
+                return ("error", f"{img.filename}: 新文件名不能为空")
+            if invalid_filename(new_filename):
+                return ("error", f"{img.filename}: 文件名包含非法字符")
+            if Path(new_filename).suffix.lower() not in media_extensions:
+                return ("error", f"{img.filename}: 不支持的格式")
 
-        parent_dir = src_path.parent
-        dest_path = parent_dir / new_filename
-        if dest_path.exists() and dest_path.resolve() != src_path.resolve():
-            dest_path = unique_path(parent_dir, new_filename, suffix_style="underscore")
-            new_filename = dest_path.name
+            src_path = PHOTOS_DIR / img.relative_path
+            if not src_path.exists() or not src_path.is_file():
+                return ("error", f"{img.filename}: 文件不存在")
 
-        new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
-        if new_rel == img.relative_path:
-            image_count += 1
-            continue
+            parent_dir = src_path.parent
+            dest_path = parent_dir / new_filename
+            if dest_path.exists() and dest_path.resolve() != src_path.resolve():
+                dest_path = unique_path(parent_dir, new_filename, suffix_style="underscore")
+                new_filename = dest_path.name
 
-        try:
-            await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
-        except OSError as e:
-            errors.append(f"{img.filename}: {e}")
-            continue
+            new_rel = str(dest_path.relative_to(PHOTOS_DIR)).replace("\\", "/")
+            if new_rel == img.relative_path:
+                return ("skip", None)
 
-        await update_image_path_and_regenerate_thumbnail(
-            img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+            try:
+                await asyncio.to_thread(shutil.move, str(src_path), str(dest_path))
+            except OSError as e:
+                return ("error", f"{img.filename}: {e}")
+
+            await update_image_path_and_regenerate_thumbnail(
+                img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+            )
+            session.add(img)
+            print(f"[api] 批量重命名图片: {img.relative_path} → {new_rel}", flush=True)
+            return ("ok", img)
+
+        tasks = [_process_item(item) for item in image_renames]
+        results = await asyncio.gather(
+            *[
+                scheduler.submit(task, priority=0, task_name=f"rename_{item.id}")
+                for item, task in zip(image_renames, tasks)
+            ],
+            return_exceptions=True,
         )
-        session.add(img)
-        image_count += 1
-        print(f"[api] 批量重命名图片: {img.relative_path} → {new_rel}", flush=True)
 
-    try:
-        await session.commit()
-    except Exception as e:
-        await session.rollback()
-        errors.append(f"提交失败: {e}")
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                errors.append(f"id={image_renames[i].id}: {result}")
+            elif result[0] == "error":
+                errors.append(result[1])
+            elif result[0] == "ok":
+                image_count += 1
+                pending_commits += 1
+                if pending_commits >= BATCH_COMMIT_SIZE:
+                    await _flush_and_commit()
+                    pending_commits = 0
+
+        if pending_commits > 0:
+            await _flush_and_commit()
 
     return {
         "ok": len(errors) == 0,

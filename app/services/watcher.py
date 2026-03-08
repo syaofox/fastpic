@@ -17,9 +17,7 @@ from queue import Empty, Queue
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
-from watchdog.events import (
-    FileSystemEventHandler,
-)
+from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from app.models import Image, async_session_factory, natural_sort_key
@@ -29,6 +27,7 @@ from app.services.scanner import (
     VIDEO_EXTENSIONS,
     get_media_metadata_and_thumbnail,
 )
+from app.services.scheduler import scheduler
 from app.utils.hash_utils import compute_file_md5_by_path
 from app.utils.image_records import create_image_record
 from app.utils.images import cache_filename
@@ -279,14 +278,14 @@ async def _drain_queue(queue: Queue, photos_dir: Path, cache_dir: Path):
         elif event_type == "moved":
             moved_events.append((Path(src), Path(dst)))
 
-    # 并行处理所有事件
+    # 并行处理所有事件（使用调度器统一管理并发）
     tasks = []
     for src in created_events:
-        tasks.append(_process_created(photos_dir, cache_dir, src))
+        tasks.append(scheduler.submit(_process_created(photos_dir, cache_dir, src), priority=0, task_name="created"))
     for src in deleted_events:
-        tasks.append(_process_deleted(photos_dir, cache_dir, src))
+        tasks.append(scheduler.submit(_process_deleted(photos_dir, cache_dir, src), priority=0, task_name="deleted"))
     for src, dst in moved_events:
-        tasks.append(_process_moved(photos_dir, cache_dir, src, dst))
+        tasks.append(scheduler.submit(_process_moved(photos_dir, cache_dir, src, dst), priority=0, task_name="moved"))
 
     processed = 0
     begin_scan()
