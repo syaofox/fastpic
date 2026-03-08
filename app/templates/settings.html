@@ -1604,7 +1604,7 @@ function onTaskComplete(taskType, result) {
                     status.className = 'text-sm text-amber-600';
                     containerEl.classList.remove('hidden');
                     document.getElementById('dup-result-summary').textContent = '共 ' + dupGroupsCache.length + ' 组重复，勾选要删除的项';
-                    renderDuplicateGroups();
+                    renderDuplicateGroups(dupGroupsCache);
                 }
             } else if (res && res.error) {
                 status.textContent = '扫描失败: ' + res.error;
