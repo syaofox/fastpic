@@ -64,27 +64,49 @@ class TestBatchRenameEndpoint:
                                     with patch("app.routers.folders.asyncio") as mock_asyncio:
                                         mock_asyncio.to_thread = AsyncMock()
 
-                                        with patch(
-                                            "app.routers.folders.update_image_path_and_regenerate_thumbnail",
-                                            new_callable=AsyncMock,
-                                        ):
-                                            mock_unique.side_effect = lambda *args, **kwargs: MagicMock(
-                                                name="unique_path"
-                                            )
+                                        async def mock_gather(*args, return_exceptions=False):
+                                            results = []
+                                            for coro in args:
+                                                try:
+                                                    result = await coro
+                                                    results.append(result)
+                                                except Exception as e:
+                                                    if return_exceptions:
+                                                        results.append(e)
+                                                    else:
+                                                        raise
+                                            return results
 
-                                            mock_result = MagicMock()
-                                            mock_result.scalars.return_value.all.return_value = mock_images
-                                            mock_session.execute.return_value = mock_result
+                                        mock_asyncio.gather = mock_gather
 
-                                            rename_items = [
-                                                ImageRenameItem(id=i + 1, new_filename=f"renamed{i + 1}.jpg")
-                                                for i in range(120)
-                                            ]
-                                            body = BatchRenameRequest(image_renames=rename_items)
+                                        with patch("app.routers.folders.scheduler") as mock_scheduler:
 
-                                            await batch_rename(body, mock_session)
+                                            async def mock_submit(coro, **kwargs):
+                                                return await coro
 
-                                            assert commit_count >= 2
+                                            mock_scheduler.submit = mock_submit
+
+                                            with patch(
+                                                "app.routers.folders.update_image_path_and_regenerate_thumbnail",
+                                                new_callable=AsyncMock,
+                                            ):
+                                                mock_unique.side_effect = lambda *args, **kwargs: MagicMock(
+                                                    name="unique_path"
+                                                )
+
+                                                mock_result = MagicMock()
+                                                mock_result.scalars.return_value.all.return_value = mock_images
+                                                mock_session.execute.return_value = mock_result
+
+                                                rename_items = [
+                                                    ImageRenameItem(id=i + 1, new_filename=f"renamed{i + 1}.jpg")
+                                                    for i in range(120)
+                                                ]
+                                                body = BatchRenameRequest(image_renames=rename_items)
+
+                                                await batch_rename(body, mock_session)
+
+                                                assert commit_count >= 2
 
     @pytest.mark.asyncio
     async def test_batch_rename_queries_all_images_at_once(self):
@@ -110,24 +132,46 @@ class TestBatchRenameEndpoint:
                                     with patch("app.routers.folders.asyncio") as mock_asyncio:
                                         mock_asyncio.to_thread = AsyncMock()
 
-                                        with patch(
-                                            "app.routers.folders.update_image_path_and_regenerate_thumbnail",
-                                            new_callable=AsyncMock,
-                                        ):
-                                            mock_unique.side_effect = lambda *args, **kwargs: MagicMock(
-                                                name="unique_path"
-                                            )
+                                        async def mock_gather(*args, return_exceptions=False):
+                                            results = []
+                                            for coro in args:
+                                                try:
+                                                    result = await coro
+                                                    results.append(result)
+                                                except Exception as e:
+                                                    if return_exceptions:
+                                                        results.append(e)
+                                                    else:
+                                                        raise
+                                            return results
 
-                                            mock_result = MagicMock()
-                                            mock_result.scalars.return_value.all.return_value = [mock_img]
-                                            mock_session.execute.return_value = mock_result
+                                        mock_asyncio.gather = mock_gather
 
-                                            rename_items = [ImageRenameItem(id=1, new_filename="renamed.jpg")]
-                                            body = BatchRenameRequest(image_renames=rename_items)
+                                        with patch("app.routers.folders.scheduler") as mock_scheduler:
 
-                                            await batch_rename(body, mock_session)
+                                            async def mock_submit(coro, **kwargs):
+                                                return await coro
 
-                                            assert mock_session.execute.call_count >= 1
+                                            mock_scheduler.submit = mock_submit
+
+                                            with patch(
+                                                "app.routers.folders.update_image_path_and_regenerate_thumbnail",
+                                                new_callable=AsyncMock,
+                                            ):
+                                                mock_unique.side_effect = lambda *args, **kwargs: MagicMock(
+                                                    name="unique_path"
+                                                )
+
+                                                mock_result = MagicMock()
+                                                mock_result.scalars.return_value.all.return_value = [mock_img]
+                                                mock_session.execute.return_value = mock_result
+
+                                                rename_items = [ImageRenameItem(id=1, new_filename="renamed.jpg")]
+                                                body = BatchRenameRequest(image_renames=rename_items)
+
+                                                await batch_rename(body, mock_session)
+
+                                                assert mock_session.execute.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_folder_rename_processes_correctly(self):
