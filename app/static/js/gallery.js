@@ -3596,7 +3596,6 @@ document.addEventListener('keydown', function(e) {
 (function() {
     var searchInput = document.getElementById('dir-search-input');
     var dropdown = document.getElementById('dir-search-dropdown');
-    var timer = null;
 
     function doSearch(query) {
         if (!query.trim()) {
@@ -3649,10 +3648,9 @@ document.addEventListener('keydown', function(e) {
     }
 
     if (searchInput) {
+        var debouncedSearch = debounce(doSearch, 250);
         searchInput.addEventListener('input', function() {
-            clearTimeout(timer);
-            var val = this.value;
-            timer = setTimeout(function() { doSearch(val); }, 250);
+            debouncedSearch(this.value);
         });
 
         searchInput.addEventListener('keydown', function(e) {

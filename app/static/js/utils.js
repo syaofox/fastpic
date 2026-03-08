@@ -2,6 +2,21 @@
  * FastPic 前端工具函数
  */
 
+/** 防抖函数 */
+function debounce(func, wait) {
+    var timeout;
+    return function executedFunction() {
+        var context = this;
+        var args = arguments;
+        var later = function() {
+            timeout = null;
+            func.apply(context, args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 /** 转义 HTML 文本内容，防止 XSS */
 function escapeHtml(s) {
     if (s == null) return '';
