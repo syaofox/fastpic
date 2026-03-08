@@ -274,14 +274,14 @@ class TestApplyImageFiltersSubstringIndex:
     """apply_image_filters 函数中 SUBSTRING_INDEX 优化测试"""
 
     def test_folder_mode_uses_substring_index(self):
-        """测试 folder 模式 path 为空时使用 SUBSTRING_INDEX"""
+        """测试 folder 模式 path 为空时不返回任何图片"""
         from sqlmodel import select
 
         stmt = select(Image)
         parsed = parse_filter_params()
         result_stmt, pf, has_filters = apply_image_filters(stmt, "", "", "folder", parsed)
         sql_str = str(result_stmt).lower()
-        assert "substring_index" in sql_str
+        assert "id = " in sql_str and ":id_" in sql_str
 
     def test_list_mode_uses_substring_index(self):
         """测试 list 模式 path 为空时使用 SUBSTRING_INDEX"""
@@ -302,3 +302,23 @@ class TestApplyImageFiltersSubstringIndex:
         result_stmt, pf, has_filters = apply_image_filters(stmt, "2024", "", "folder", parsed)
         sql_str = str(result_stmt)
         assert "LIKE" in sql_str
+
+    def test_folder_mode_root_with_search_returns_empty(self):
+        """测试 folder 模式根目录有搜索词时仍不返回图片（优先显示文件夹）"""
+        from sqlmodel import select
+
+        stmt = select(Image)
+        parsed = parse_filter_params()
+        result_stmt, pf, has_filters = apply_image_filters(stmt, "", "test", "folder", parsed)
+        sql_str = str(result_stmt).lower()
+        assert "id = " in sql_str and ":id_" in sql_str
+
+    def test_folder_mode_subfolder_returns_direct_images(self):
+        """测试 folder 模式子目录返回该目录的直接照片（不含子目录）"""
+        from sqlmodel import select
+
+        stmt = select(Image)
+        parsed = parse_filter_params()
+        result_stmt, pf, has_filters = apply_image_filters(stmt, "2024/01", "", "folder", parsed)
+        sql_str = str(result_stmt).lower()
+        assert "like" in sql_str
