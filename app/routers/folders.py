@@ -107,7 +107,7 @@ async def move_images(
             await session.rollback()
             errors.append("路径冲突（可能与已有文件重复），请重试")
         if moved > 0:
-            invalidate_folder_tree_cache()
+            invalidate_folder_tree_cache(target_path)
         task_state.end_task({"moved": moved})
         return {"moved": moved, "errors": errors}
     except Exception as e:
@@ -241,7 +241,7 @@ async def rename_folder(
                 return {"ok": False, "error": "路径冲突，请重试"}
             await asyncio.sleep(0)
 
-        invalidate_folder_tree_cache()
+        invalidate_folder_tree_cache(new_prefix)
         print(f"[api] 重命名文件夹: {folder_path} → {new_prefix}", flush=True)
         return {"ok": True, "path": new_prefix}
     except Exception as e:
@@ -398,7 +398,7 @@ async def batch_rename(
                         img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
                     )
                     session.add(img)
-            invalidate_folder_tree_cache()
+            invalidate_folder_tree_cache(new_prefix)
             folder_count += 1
             print(f"[api] 批量重命名文件夹: {folder_path} → {new_prefix}", flush=True)
         except Exception as e:
@@ -496,7 +496,7 @@ async def delete_folders(
                 total_folders += 1
         await session.commit()
         if total_folders > 0:
-            invalidate_folder_tree_cache()
+            invalidate_folder_tree_cache(body.paths[0] if len(body.paths) == 1 else None)
         task_state.end_task({"deleted_images": total_images, "deleted_folders": total_folders})
         return {"deleted_images": total_images, "deleted_folders": total_folders}
     except Exception as e:
@@ -633,7 +633,7 @@ async def merge_folders(
                         pass
         try:
             await session.commit()
-            invalidate_folder_tree_cache()
+            invalidate_folder_tree_cache(target_prefix)
             print(
                 f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
                 flush=True,
@@ -675,7 +675,7 @@ async def create_folder(body: CreateFolderRequest):
         return {"error": "文件夹已存在", "ok": False}
     folder_path.mkdir(parents=True, exist_ok=True)
     rel = f"{parent}/{name}" if parent else name
-    invalidate_folder_tree_cache()
+    invalidate_folder_tree_cache(rel)
     print(f"[api] 创建文件夹: {rel}", flush=True)
     return {"ok": True, "path": rel}
 

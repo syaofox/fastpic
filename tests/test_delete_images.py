@@ -113,3 +113,4 @@ class TestDeleteImagesEndpoint:
                                 await delete_images(body, mock_session)
 
                                 mock_invalidate.assert_called_once()
+                                mock_invalidate.assert_called_with("")

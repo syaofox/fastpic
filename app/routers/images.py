@@ -208,7 +208,17 @@ async def delete_images(
         await session.commit()
 
         if len(all_images) > 0:
-            invalidate_folder_tree_cache()
+            parent_paths = set()
+            for img in all_images:
+                parent = str(Path(img.relative_path).parent)
+                if parent != ".":
+                    parent_paths.add(parent)
+            if len(parent_paths) == 1:
+                invalidate_folder_tree_cache(next(iter(parent_paths)))
+            elif len(parent_paths) > 1:
+                invalidate_folder_tree_cache()
+            else:
+                invalidate_folder_tree_cache("")
         task_state.end_task({"deleted": len(all_images)})
         return {"deleted": len(all_images)}
     except Exception as e:
@@ -544,7 +554,7 @@ async def upload_images(request: Request):
             elif err:
                 errors.append(err)
     if uploaded > 0:
-        invalidate_folder_tree_cache()
+        invalidate_folder_tree_cache(target_path)
     print(
         f"[upload] 完成: {uploaded} 成功, {skipped} 跳过, {len(errors)} 失败",
         flush=True,

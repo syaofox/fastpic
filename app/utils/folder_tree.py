@@ -229,15 +229,23 @@ _subfolder_cache: dict[str, dict] = {}
 _subfolder_cache_lock = asyncio.Lock()
 
 
-def invalidate_folder_tree_cache() -> None:
-    """创建/删除文件夹后调用，使缓存失效"""
+def invalidate_folder_tree_cache(affected_path: str | None = None) -> None:
+    """affected_path 为受影响的路径，仅清除相关缓存"""
     global _folder_tree_cache, _subfolder_cache
-    _folder_tree_cache = None
-    _subfolder_cache = {}
+
+    if affected_path is None:
+        _folder_tree_cache = None
+        _subfolder_cache = {}
+    else:
+        _folder_tree_cache = None
+        to_remove = [k for k in _subfolder_cache if k.startswith(affected_path)]
+        for k in to_remove:
+            del _subfolder_cache[k]
+
     try:
         from app.utils.path_count_cache import invalidate_path_count_cache
 
-        invalidate_path_count_cache()
+        invalidate_path_count_cache(affected_path)
     except ImportError:
         pass
 

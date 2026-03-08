@@ -1,7 +1,5 @@
 """_get_existing_hashes_from_db 函数测试。"""
 
-import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

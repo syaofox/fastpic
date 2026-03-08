@@ -1,7 +1,8 @@
 """collect_image_items_by_prefix 函数测试。"""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestCollectImageItemsByPrefix:

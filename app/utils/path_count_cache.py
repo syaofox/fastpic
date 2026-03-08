@@ -50,10 +50,7 @@ def _get_path_count_from_db_sync(path: str, mode: str) -> int | None:
     path_key = path or ""
     with sync_engine.connect() as conn:
         r = conn.execute(
-            text(
-                "SELECT total, updated_at FROM path_count_cache "
-                "WHERE path = :p AND mode = :m"
-            ),
+            text("SELECT total, updated_at FROM path_count_cache WHERE path = :p AND mode = :m"),
             {"p": path_key, "m": mode},
         )
         row = r.fetchone()
@@ -103,8 +100,20 @@ def cleanup_expired_path_count_cache() -> int:
         return r.rowcount
 
 
-def invalidate_path_count_cache() -> None:
-    """清空 path count 持久化缓存（文件夹操作后调用）"""
-    with sync_engine.connect() as conn:
-        conn.execute(text("DELETE FROM path_count_cache"))
-        conn.commit()
+def invalidate_path_count_cache(affected_path: str | None = None) -> None:
+    """清空 path count 缓存（文件夹操作后调用）"""
+    if affected_path is None:
+        with sync_engine.connect() as conn:
+            conn.execute(text("DELETE FROM path_count_cache"))
+            conn.commit()
+    else:
+        with sync_engine.connect() as conn:
+            conn.execute(
+                text("DELETE FROM path_count_cache WHERE path LIKE :p"),
+                {"p": f"{affected_path}%"},
+            )
+            conn.commit()
+
+    to_remove = [k for k in _count_cache if k[0].startswith(affected_path or "")]
+    for k in to_remove:
+        del _count_cache[k]
