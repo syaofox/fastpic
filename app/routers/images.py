@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -316,17 +317,19 @@ async def get_image_info(
     """获取单张图片的详细信息"""
     from datetime import datetime
 
-    result = await session.execute(select(Image).where(Image.id == image_id))
-    img = result.scalar_one_or_none()
-    if not img:
-        raise HTTPException(status_code=404, detail="媒体文件不存在或已被删除")
-    tag_result = await session.execute(
-        select(Tag.name)
-        .join(ImageTag, ImageTag.tag_id == Tag.id)
-        .where(ImageTag.image_id == image_id)
-        .order_by(Tag.name)
+    stmt = (
+        select(Image, func.group_concat(Tag.name).label("tags"))
+        .outerjoin(ImageTag, ImageTag.image_id == Image.id)
+        .outerjoin(Tag, Tag.id == ImageTag.tag_id)
+        .where(Image.id == image_id)
+        .group_by(Image.id)
     )
-    tags = [r[0] for r in tag_result.fetchall()]
+    result = await session.execute(stmt)
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="媒体文件不存在或已被删除")
+    img = row[0]
+    tags = sorted((row[1] or "").split(",")) if row[1] else []
     full_path = str((PHOTOS_DIR / img.relative_path).resolve())
     modified_dt = datetime.fromtimestamp(img.modified_at)
     modified_str = modified_dt.strftime("%Y-%m-%d %H:%M:%S")
