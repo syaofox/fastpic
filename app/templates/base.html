@@ -232,12 +232,164 @@
     </div>
     <!-- 页面内提示（替代 alert） -->
     <div id="toast-container" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
+    
+    <!-- 全局进度指示器 -->
+    <div id="progress-indicator" class="fixed top-0 left-0 right-0 z-[130] hidden transform transition-transform duration-300 -translate-y-full">
+        <div class="bg-slate-800 text-white px-4 py-3 shadow-lg">
+            <div class="max-w-4xl mx-auto flex items-center gap-3">
+                <svg id="progress-icon" class="w-5 h-5 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between mb-1">
+                        <span id="progress-title" class="text-sm font-medium truncate">正在处理...</span>
+                        <span id="progress-percent" class="text-sm font-medium ml-2">0%</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-slate-600 rounded-full overflow-hidden">
+                        <div id="progress-bar" class="h-full bg-blue-500 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div id="progress-message" class="text-xs text-slate-400 mt-1 truncate"></div>
+                </div>
+                <button id="progress-close" class="p-1 hover:bg-slate-700 rounded transition-colors" title="关闭">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
     function showToast(message, type, duration) {
         type = type || 'info';
         duration = duration || 4000;
         var container = document.getElementById('toast-container');
-        if (!container) return;
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 pointer-events-none';
+            container.setAttribute('aria-live', 'polite');
+            document.body.appendChild(container);
+        }
+        
+        var iconSvg = '';
+        var baseClasses = 'px-4 py-3 rounded-lg shadow-lg text-sm font-medium max-w-md flex items-center gap-2.5 ';
+        var typeClasses = '';
+        
+        switch (type) {
+            case 'success':
+                typeClasses = 'bg-green-100 text-green-800 border border-green-200';
+                iconSvg = '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+                break;
+            case 'error':
+                typeClasses = 'bg-red-100 text-red-800 border border-red-200';
+                iconSvg = '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+                break;
+            case 'warning':
+                typeClasses = 'bg-amber-100 text-amber-800 border border-amber-200';
+                iconSvg = '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+                break;
+            default: // info
+                typeClasses = 'bg-slate-800 text-white';
+                iconSvg = '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+        }
+        
+        var el = document.createElement('div');
+        el.className = baseClasses + typeClasses;
+        el.innerHTML = iconSvg + '<span>' + message + '</span>';
+        
+        if (duration > 0) {
+            setTimeout(function() {
+                el.style.opacity = '0';
+                el.style.transition = 'opacity 0.2s';
+                setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 200);
+            }, duration);
+        }
+        
+        container.appendChild(el);
+    }
+    </script>
+    <script>
+    (function() {
+    var _progressIndicator = null;
+    var _progressTitle = null;
+    var _progressPercent = null;
+    var _progressBar = null;
+    var _progressMessage = null;
+    var _progressClose = null;
+    var _currentTaskId = null;
+    var _progressExpandTimeout = null;
+
+    function _initProgressIndicator() {
+        if (_progressIndicator) return;
+        _progressIndicator = document.getElementById('progress-indicator');
+        _progressTitle = document.getElementById('progress-title');
+        _progressPercent = document.getElementById('progress-percent');
+        _progressBar = document.getElementById('progress-bar');
+        _progressMessage = document.getElementById('progress-message');
+        _progressClose = document.getElementById('progress-close');
+        
+        if (_progressClose) {
+            _progressClose.onclick = hideProgressIndicator;
+        }
+    }
+
+    function showProgressIndicator(taskId, title, progress, message) {
+        _initProgressIndicator();
+        if (!_progressIndicator) return;
+        
+        _currentTaskId = taskId;
+        _progressTitle.textContent = title || '正在处理...';
+        _progressPercent.textContent = (progress || 0) + '%';
+        _progressBar.style.width = (progress || 0) + '%';
+        _progressMessage.textContent = message || '';
+        
+        _progressIndicator.classList.remove('hidden');
+        requestAnimationFrame(function() {
+            _progressIndicator.classList.remove('-translate-y-full');
+        });
+        
+        if (_progressExpandTimeout) clearTimeout(_progressExpandTimeout);
+    }
+
+    function updateProgressIndicator(progress, message) {
+        _initProgressIndicator();
+        if (!_progressIndicator || _progressIndicator.classList.contains('hidden')) return;
+        
+        _progressPercent.textContent = Math.round(progress) + '%';
+        _progressBar.style.width = progress + '%';
+        if (message !== undefined) {
+            _progressMessage.textContent = message;
+        }
+    }
+
+    function hideProgressIndicator() {
+        _initProgressIndicator();
+        if (!_progressIndicator) return;
+        
+        _progressIndicator.classList.add('-translate-y-full');
+        _currentTaskId = null;
+        
+        if (_progressExpandTimeout) clearTimeout(_progressExpandTimeout);
+        _progressExpandTimeout = setTimeout(function() {
+            if (_progressIndicator && _progressIndicator.classList.contains('-translate-y-full')) {
+                _progressIndicator.classList.add('hidden');
+            }
+        }, 300);
+    }
+
+    function showToast(message, type, duration) {
+        type = type || 'info';
+        duration = duration || 4000;
+        var container = document.getElementById('toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 pointer-events-none';
+            container.setAttribute('aria-live', 'polite');
+            document.body.appendChild(container);
+        }
         
         var iconSvg = '';
         var baseClasses = 'px-4 py-3 rounded-lg shadow-lg text-sm font-medium max-w-md flex items-center gap-2.5 ';
@@ -307,6 +459,120 @@
         var overlay = document.getElementById('global-confirm-overlay');
         if (overlay) overlay.classList.add('hidden');
     }
+
+    var _evtSource = null;
+    var _currentTaskType = null;
+
+    function connectTaskEvents() {
+        if (_evtSource) {
+            _evtSource.close();
+        }
+        
+        // 检查是否已登录（通过检查侧边栏是否存在）
+        if (!document.getElementById('sidebar')) {
+            return;
+        }
+        
+        _evtSource = new EventSource('/api/task-events');
+        
+        _evtSource.onmessage = function(e) {
+            var data = {};
+            try {
+                data = JSON.parse(e.data) || {};
+            } catch(err) {
+                return;
+            }
+            
+            if (!data.task_type && !data.title) return;
+            
+            _currentTaskType = data.task_type;
+            
+            if (data.is_running) {
+                var title = data.title || _getTaskTitle(data.task_type);
+                var message = data.message || '';
+                var progress = data.progress_percent || 0;
+                
+                showProgressIndicator(data.task_type, title, progress, message);
+            } else if (data.finished_at) {
+                hideProgressIndicator();
+                
+                var resultType = data.error ? 'error' : 'success';
+                var resultMessage = '';
+                
+                if (data.error) {
+                    resultMessage = data.error;
+                } else if (data.result) {
+                    resultMessage = _formatResultMessage(data.task_type, data.result);
+                } else if (data.current_operation) {
+                    resultMessage = data.current_operation;
+                } else {
+                    resultMessage = _getTaskCompleteMessage(data.task_type);
+                }
+                
+                var duration = data.error ? 6000 : 4000;
+                showToast(resultMessage, resultType, duration);
+            }
+        };
+        
+        _evtSource.onerror = function(err) {
+            console.log('SSE connection error, will retry...');
+        };
+    }
+
+    function _getTaskTitle(taskType) {
+        var titles = {
+            'scan': '正在扫描媒体文件',
+            'cleanup': '正在清理数据库',
+            'full-sync': '正在完整同步',
+            'scan-duplicates': '正在扫描重复文件',
+            'upload': '正在上传文件',
+            'delete': '正在删除文件'
+        };
+        return titles[taskType] || '正在处理...';
+    }
+
+    function _getTaskCompleteMessage(taskType) {
+        var messages = {
+            'scan': '扫描完成',
+            'cleanup': '清理完成',
+            'full-sync': '同步完成',
+            'scan-duplicates': '重复文件扫描完成',
+            'upload': '上传完成',
+            'delete': '删除完成'
+        };
+        return messages[taskType] || '操作完成';
+    }
+
+    function _formatResultMessage(taskType, result) {
+        if (!result) return '';
+        
+        if (taskType === 'scan' || taskType === 'full-sync') {
+            var count = result.added || result.scanned || 0;
+            return count + ' 个文件已处理';
+        }
+        if (taskType === 'cleanup') {
+            var removed = result.removed || 0;
+            return '已清理 ' + removed + ' 个记录';
+        }
+        if (taskType === 'upload') {
+            var uploaded = result.uploaded || 0;
+            var skipped = result.skipped || 0;
+            var errors = result.errors ? result.errors.length : 0;
+            if (errors > 0) {
+                return uploaded + ' 个上传成功，' + skipped + ' 个跳过，' + errors + ' 个失败';
+            }
+            return uploaded + ' 个文件上传成功';
+        }
+        if (taskType === 'delete') {
+            var deleted = result.deleted || 0;
+            return deleted + ' 个文件已删除';
+        }
+        
+        return JSON.stringify(result);
+    }
+
+    connectTaskEvents();
+    })();
     </script>
     <script>
     (function() {
