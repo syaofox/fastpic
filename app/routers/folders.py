@@ -563,7 +563,7 @@ async def merge_folders(
             if h is None:
                 continue
             by_hash[h].append(item)
-        to_keep: dict[str, tuple[int, str, str]] = {}
+        to_keep: dict[str, tuple[int, str, str, str | None]] = {}
         to_delete: set[int] = set()
         for h, items in by_hash.items():
             from_preferred = [x for x in items if x[2] == preferred]
@@ -585,7 +585,7 @@ async def merge_folders(
         target_hashes = {h for h, k in to_keep.items() if _belongs_to(k[1], target_prefix)}
         to_move: list[tuple[int, str]] = []
         for h, items in by_hash.items():
-            for img_id, rel_path, src in items:
+            for img_id, rel_path, src, _ in items:
                 if img_id in to_delete or src != source_letter:
                     continue
                 if h not in target_hashes:
