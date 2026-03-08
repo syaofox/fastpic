@@ -284,14 +284,14 @@ class TestApplyImageFiltersSubstringIndex:
         assert "id = " in sql_str and ":id_" in sql_str
 
     def test_list_mode_uses_substring_index(self):
-        """测试 list 模式 path 为空时使用 SUBSTRING_INDEX"""
+        """测试 list 模式 path 为空时不返回任何图片"""
         from sqlmodel import select
 
         stmt = select(Image)
         parsed = parse_filter_params()
         result_stmt, pf, has_filters = apply_image_filters(stmt, "", "", "list", parsed)
         sql_str = str(result_stmt).lower()
-        assert "substring_index" in sql_str
+        assert "id = " in sql_str and ":id_" in sql_str
 
     def test_folder_mode_with_path_uses_like(self):
         """测试 folder 模式有 path 时仍使用 LIKE（可利用索引）"""
