@@ -606,4 +606,8 @@ app.mount(
     ),
     name="cache",
 )
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount(
+    "/static",
+    CachedStaticFiles(directory=str(STATIC_DIR), cache_control="public, max-age=31536000, immutable"),
+    name="static",
+)
