@@ -1,4 +1,5 @@
 """API 请求/响应 Pydantic 模型"""
+
 from pydantic import BaseModel, Field
 
 # IN 子句分批上限，避免百万级 id 导致 max_allowed_packet 或查询退化
@@ -37,6 +38,7 @@ class MergeFoldersRequest(BaseModel):
     folder_a: str
     folder_b: str
     target: str = "auto"  # "folder_a" | "folder_b" | "auto"
+    duplicate_mode: str = "rename"  # "skip" | "rename" | "overwrite"
 
 
 class DownloadZipRequest(BaseModel):

@@ -105,18 +105,22 @@ check_status() {
 
 start_services() {
     # Stop existing FastPic process
-    echo -e "${YELLOW}[1/5]${NC} Stopping existing FastPic..."
+    echo -e "${YELLOW}[1/6]${NC} Stopping existing FastPic..."
     pkill -f 'uvicorn app.main:app' 2>/dev/null || true
     # Also kill any process using port 8000
     fuser -k 8000/tcp 2>/dev/null || true
     sleep 1
 
+    # Build CSS
+    echo -e "${YELLOW}[2/6]${NC} Building CSS..."
+    npm run build:css
+
     # Stop existing containers
-    echo -e "${YELLOW}[2/5]${NC} Stopping existing containers..."
+    echo -e "${YELLOW}[3/6]${NC} Stopping existing containers..."
     docker compose -f docker-compose.dev.yml down 2>/dev/null || true
 
     # Start MariaDB
-    echo -e "${YELLOW}[3/5]${NC} Starting MariaDB..."
+    echo -e "${YELLOW}[4/6]${NC} Starting MariaDB..."
     docker compose -f docker-compose.dev.yml up -d
 
     # Fix permissions for data-dev directory (owned by docker after startup)
@@ -125,7 +129,7 @@ start_services() {
     fi
 
     # Wait for MariaDB to be ready
-    echo -e "${YELLOW}[4/5]${NC} Waiting for MariaDB to be ready..."
+    echo -e "${YELLOW}[5/6]${NC} Waiting for MariaDB to be ready..."
     MAX_RETRIES=30
     RETRY_COUNT=0
     while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
@@ -148,7 +152,7 @@ start_services() {
     # Force polling to avoid inotify permission issues with docker data dirs
     export WATCHFILES_FORCE_POLLING=true
 
-    echo -e "${YELLOW}[5/5]${NC} Starting FastPic..."
+    echo -e "${YELLOW}[6/6]${NC} Starting FastPic..."
 
     if [[ "$DAEMON" == "yes" ]]; then
         # Daemon mode: use --reload for development
@@ -157,7 +161,7 @@ start_services() {
         echo "Logs: tail -f /tmp/fastpic.log"
     else
         # Foreground mode: no --reload to avoid watchfiles permission issues
-        uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+        uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 
     fi
 }
 

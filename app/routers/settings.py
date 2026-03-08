@@ -1,9 +1,9 @@
 """设置/维护 API"""
 
 import asyncio
-from collections import defaultdict
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -15,6 +15,7 @@ from app.schemas import ScanDuplicatesRequest
 from app.services import task_state
 from app.services.scan_state import begin_scan, end_scan
 from app.services.scanner import run_full_scan
+from app.services.task_queue import QueueTask, TaskQueue
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.hash_utils import compute_file_md5
 from app.utils.images import cache_filename
@@ -22,6 +23,8 @@ from app.utils.path_utils import normalize_path, path_filter_for_prefix
 from app.utils.stats import stats_folder_count_from_db
 
 router = APIRouter(tags=["settings"])
+
+task_queue = TaskQueue()
 
 
 def _estimate_thumb_bytes(width: int, height: int) -> int:
@@ -64,6 +67,13 @@ async def get_task_status():
     return {"task_type": None, "is_running": False}
 
 
+@router.post("/api/task-status/clear")
+async def clear_task_status():
+    """清除任务状态"""
+    task_state.clear()
+    return {"ok": True}
+
+
 @router.get("/api/task-events")
 async def task_events(request: Request):
     """Server-Sent Events 实时推送任务进度"""
@@ -72,9 +82,13 @@ async def task_events(request: Request):
     async def event_generator():
         queue = task_state.get_queue_for_sse()
         last_sent_status = None
+        disconnected = False
 
         while True:
             if await request.is_disconnected():
+                if not disconnected:
+                    disconnected = True
+                    yield "data: \n\n"
                 break
 
             try:
@@ -103,103 +117,144 @@ async def task_events(request: Request):
     )
 
 
-@router.post("/scan")
-async def trigger_scan():
-    """手动触发扫描。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""
-    if not task_state.start_task("scan"):
-        from fastapi import HTTPException
+@router.get("/api/queue-status")
+async def get_queue_status():
+    """获取队列状态"""
+    return task_queue.get_status()
 
-        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
+
+class CancelTaskRequest(BaseModel):
+    queue_id: str
+
+
+@router.post("/api/queue-cancel")
+async def cancel_queue_task(request: CancelTaskRequest):
+    """取消队列中的任务"""
+    success = task_queue.cancel_task(request.queue_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="任务不存在或已完成")
+    return {"success": True}
+
+
+async def _run_scan_task(task: QueueTask) -> dict:
+    """扫描任务处理器"""
     begin_scan()
     try:
         result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
         n_img = result.get("images_added", 0)
         n_vid = result.get("videos_added", 0)
-        task_state.end_task({"scanned": n_img + n_vid, "images": n_img, "videos": n_vid})
         return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
-    except Exception as e:
-        task_state.fail_task(str(e))
-        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
 
 
-@router.post("/api/cleanup")
-async def trigger_cleanup():
-    """手动触发数据库清理同步。复用 run_full_scan，一次 os.walk 完成 cleanup + scan。"""
-    if not task_state.start_task("cleanup"):
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
+async def _run_cleanup_task(task: QueueTask) -> dict:
+    """清理任务处理器"""
     begin_scan()
     try:
         result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
-        task_state.end_task(
-            {
-                "stale_removed": result.get("stale_removed", 0),
-                "orphan_cache_removed": result.get("orphan_cache_removed", 0),
-                "cache_regenerated": result.get("cache_regenerated", 0),
-            }
-        )
         return {
             "stale_removed": result.get("stale_removed", 0),
             "orphan_cache_removed": result.get("orphan_cache_removed", 0),
             "cache_regenerated": result.get("cache_regenerated", 0),
         }
-    except Exception as e:
-        task_state.fail_task(str(e))
-        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
+
+
+async def _run_full_sync_task(task: QueueTask) -> dict:
+    """完整同步任务处理器"""
+    begin_scan()
+    try:
+        return await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+    finally:
+        end_scan()
+        invalidate_folder_tree_cache()
+
+
+task_queue.register_handler("scan", _run_scan_task)
+task_queue.register_handler("cleanup", _run_cleanup_task)
+task_queue.register_handler("full-sync", _run_full_sync_task)
+
+
+@router.post("/scan")
+async def trigger_scan():
+    """手动触发扫描，任务进入队列后台执行"""
+    queue_id = await task_queue.add_task("scan", priority=10)
+    status = task_queue.get_status()
+    running = status.get("scan", {}).get("running")
+    pending = status.get("scan", {}).get("pending", [])
+    position = 0
+    for i, p in enumerate(pending):
+        if p.get("queue_id") == queue_id:
+            position = i
+            break
+    if running:
+        return {"queue_id": queue_id, "status": "running", "position": 0}
+    return {"queue_id": queue_id, "status": "queued", "position": position}
+
+
+@router.post("/api/cleanup")
+async def trigger_cleanup():
+    """手动触发数据库清理同步，任务进入队列后台执行"""
+    queue_id = await task_queue.add_task("cleanup", priority=10)
+    status = task_queue.get_status()
+    running = status.get("cleanup", {}).get("running")
+    pending = status.get("cleanup", {}).get("pending", [])
+    position = 0
+    for i, p in enumerate(pending):
+        if p.get("queue_id") == queue_id:
+            position = i
+            break
+    if running:
+        return {"queue_id": queue_id, "status": "running", "position": 0}
+    return {"queue_id": queue_id, "status": "queued", "position": position}
 
 
 @router.post("/api/full-sync")
 async def trigger_full_sync():
-    """完整同步：一次 os.walk 完成 cleanup + scan，供「完整重建」等场景使用。"""
-    if not task_state.start_task("full-sync"):
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
-    begin_scan()
-    try:
-        result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
-        task_state.end_task(result)
-        return result
-    except Exception as e:
-        task_state.fail_task(str(e))
-        raise
-    finally:
-        end_scan()
-        invalidate_folder_tree_cache()
+    """完整同步：任务进入队列后台执行"""
+    queue_id = await task_queue.add_task("full-sync", priority=10)
+    status = task_queue.get_status()
+    running = status.get("full-sync", {}).get("running")
+    pending = status.get("full-sync", {}).get("pending", [])
+    position = 0
+    for i, p in enumerate(pending):
+        if p.get("queue_id") == queue_id:
+            position = i
+            break
+    if running:
+        return {"queue_id": queue_id, "status": "running", "position": 0}
+    return {"queue_id": queue_id, "status": "queued", "position": position}
 
 
-@router.post("/api/scan-duplicates")
-async def scan_duplicates(
-    body: ScanDuplicatesRequest | None = None,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """扫描重复文件（分批加载，支持百万级；仅对同 size 候选组计算 MD5）"""
-    if not task_state.start_task("scan-duplicates"):
-        from fastapi import HTTPException
+async def _run_scan_duplicates_task(task: QueueTask) -> dict:
+    """扫描重复文件任务处理器"""
+    from collections import defaultdict
 
-        raise HTTPException(status_code=409, detail="有任务正在进行中，请等待完成后再提交新任务")
-    try:
-        folder_path = normalize_path((body.folder_path if body else None) or "", allow_empty=True)
-        base_stmt = select(
-            Image.id,
-            Image.relative_path,
-            Image.filename,
-            Image.file_size,
-            Image.modified_at,
-            Image.md5_hash,
-        )
-        if folder_path:
-            pf = path_filter_for_prefix(Image.relative_path, folder_path)
-            base_stmt = base_stmt.where(pf)
-        photos_dir = PHOTOS_DIR.resolve()
-        by_size: dict[int, list[dict]] = defaultdict(list)
+    from app.models import Image, async_session_factory
+
+    body = task.params or {}
+    folder_path = normalize_path(body.get("folder_path", ""), allow_empty=True)
+
+    base_stmt = select(
+        Image.id,
+        Image.relative_path,
+        Image.filename,
+        Image.file_size,
+        Image.modified_at,
+        Image.md5_hash,
+    )
+    if folder_path:
+        pf = path_filter_for_prefix(Image.relative_path, folder_path)
+        base_stmt = base_stmt.where(pf)
+
+    photos_dir = PHOTOS_DIR.resolve()
+    by_size: dict[int, list[dict]] = defaultdict(list)
+
+    async with async_session_factory() as session:
         last_id = 0
         while True:
             stmt = base_stmt.where(Image.id > last_id).order_by(Image.id).limit(SCAN_DUPLICATES_BATCH_SIZE)
@@ -222,34 +277,55 @@ async def scan_duplicates(
                     }
                 )
             await asyncio.sleep(0)
-        candidate_groups = [g for g in by_size.values() if len(g) > 1]
-        if not candidate_groups:
-            task_state.end_task({"groups": []})
-            return {"groups": []}
-        by_hash: dict[str, list[dict]] = defaultdict(list)
-        for group in candidate_groups:
-            for item in group:
-                h = item.get("md5_hash")
-                if h is None:
-                    h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
-                if h is None:
-                    continue
-                by_hash[h].append(item)
-        groups = []
-        for content_hash, items in by_hash.items():
-            if len(items) > 1:
-                groups.append(
-                    {
-                        "content_hash": content_hash,
-                        "file_size": items[0]["file_size"],
-                        "items": items,
-                    }
-                )
-        task_state.end_task({"groups": groups})
-        return {"groups": groups}
-    except Exception as e:
-        task_state.fail_task(str(e))
-        raise
+
+    candidate_groups = [g for g in by_size.values() if len(g) > 1]
+    if not candidate_groups:
+        return {"groups": []}
+
+    by_hash: dict[str, list[dict]] = defaultdict(list)
+    for group in candidate_groups:
+        for item in group:
+            h = item.get("md5_hash")
+            if h is None:
+                h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
+            if h is None:
+                continue
+            by_hash[h].append(item)
+
+    groups = []
+    for content_hash, items in by_hash.items():
+        if len(items) > 1:
+            groups.append(
+                {
+                    "content_hash": content_hash,
+                    "file_size": items[0]["file_size"],
+                    "items": items,
+                }
+            )
+    return {"groups": groups}
+
+
+task_queue.register_handler("scan-duplicates", _run_scan_duplicates_task)
+
+
+@router.post("/api/scan-duplicates")
+async def scan_duplicates(
+    body: ScanDuplicatesRequest | None = None,
+):
+    """扫描重复文件，任务进入队列后台执行"""
+    params = {"folder_path": body.folder_path} if body and body.folder_path else {}
+    queue_id = await task_queue.add_task("scan-duplicates", params, priority=10)
+    status = task_queue.get_status()
+    running = status.get("scan-duplicates", {}).get("running")
+    pending = status.get("scan-duplicates", {}).get("pending", [])
+    position = 0
+    for i, p in enumerate(pending):
+        if p.get("queue_id") == queue_id:
+            position = i
+            break
+    if running:
+        return {"queue_id": queue_id, "status": "running", "position": 0}
+    return {"queue_id": queue_id, "status": "queued", "position": position}
 
 
 def _stats_cache_realtime_sync() -> tuple[int, int]:

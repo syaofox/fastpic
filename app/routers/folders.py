@@ -35,6 +35,7 @@ from app.schemas import (
 from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.services.scheduler import scheduler
+from app.services.task_queue import QueueTask, TaskQueue
 from app.utils.folder_tree import (
     get_subfolders,
     invalidate_folder_tree_cache,
@@ -536,44 +537,48 @@ async def delete_folders(
         raise
 
 
-@router.post("/merge-folders")
-async def merge_folders(
-    body: MergeFoldersRequest,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """合并两个文件夹：通过 MD5 去重"""
-    if not task_state.start_task("merge-folders"):
-        return {"ok": False, "error": "有任务正在进行中，请等待完成后再提交新任务", "busy": True}
-    try:
-        folder_a = normalize_path(body.folder_a, allow_empty=False)
-        folder_b = normalize_path(body.folder_b, allow_empty=False)
-        if folder_a is None or folder_b is None:
-            task_state.end_task({"ok": False, "error": "路径不合法"})
-            return {"ok": False, "error": "路径不合法"}
-        if folder_a == folder_b:
-            task_state.end_task({"ok": False, "error": "不能选择相同的文件夹"})
-            return {"ok": False, "error": "不能选择相同的文件夹"}
-        if folder_a.startswith(folder_b + "/") or folder_b.startswith(folder_a + "/"):
-            task_state.end_task({"ok": False, "error": "不能合并互为父子关系的文件夹"})
-            return {"ok": False, "error": "不能合并互为父子关系的文件夹"}
-        path_a = PHOTOS_DIR / folder_a
-        path_b = PHOTOS_DIR / folder_b
-        if not path_a.exists() or not path_a.is_dir():
-            task_state.end_task({"ok": False, "error": f"文件夹不存在: {folder_a}"})
-            return {"ok": False, "error": f"文件夹不存在: {folder_a}"}
-        if not path_b.exists() or not path_b.is_dir():
-            task_state.end_task({"ok": False, "error": f"文件夹不存在: {folder_b}"})
-            return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
-        photos_dir = PHOTOS_DIR.resolve()
-        media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+task_queue = TaskQueue()
 
-        def _belongs_to(rel: str, prefix: str) -> bool:
-            return rel == prefix or rel.startswith(prefix + "/")
 
+async def _run_merge_folders_task(task: QueueTask) -> dict:
+    """合并文件夹任务处理器"""
+    from sqlalchemy import delete, select
+
+    from app.models import Image, ImageTag, async_session_factory
+
+    body = task.params or {}
+    folder_a = normalize_path(body.get("folder_a", ""), allow_empty=False)
+    folder_b = normalize_path(body.get("folder_b", ""), allow_empty=False)
+    target = body.get("target", "auto")
+    duplicate_mode = body.get("duplicate_mode", "rename")
+
+    if folder_a is None or folder_b is None:
+        return {"ok": False, "error": "路径不合法"}
+    if folder_a == folder_b:
+        return {"ok": False, "error": "不能选择相同的文件夹"}
+    if folder_a.startswith(folder_b + "/") or folder_b.startswith(folder_a + "/"):
+        return {"ok": False, "error": "不能合并互为父子关系的文件夹"}
+
+    path_a = PHOTOS_DIR / folder_a
+    path_b = PHOTOS_DIR / folder_b
+    if not path_a.exists() or not path_a.is_dir():
+        return {"ok": False, "error": f"文件夹不存在: {folder_a}"}
+    if not path_b.exists() or not path_b.is_dir():
+        return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
+
+    photos_dir = PHOTOS_DIR.resolve()
+    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+
+    def _belongs_to(rel: str, prefix: str) -> bool:
+        return rel == prefix or rel.startswith(prefix + "/")
+
+    async with async_session_factory() as session:
         items_a = await collect_image_items_by_prefix(session, folder_a, "a", FOLDER_OP_BATCH_SIZE)
         items_b = await collect_image_items_by_prefix(session, folder_b, "b", FOLDER_OP_BATCH_SIZE)
         count_a, count_b = len(items_a), len(items_b)
-        if body.target == "folder_b" or (body.target == "auto" and count_b > count_a):
+        print(f"[debug] folder_a={folder_a} items_a={count_a}, folder_b={folder_b} items_b={count_b}", flush=True)
+
+        if target == "folder_b" or (target == "auto" and count_b > count_a):
             target_prefix, source_prefix = folder_b, folder_a
             source_letter = "a"
             source_path, target_path = path_a, path_b
@@ -583,26 +588,23 @@ async def merge_folders(
             source_path, target_path = path_b, path_a
 
         preferred = "a" if count_a >= count_b else "b"
-        by_hash: dict[str, list[tuple[int, str, str, str | None]]] = defaultdict(list)
+        by_name: dict[str, list[tuple[int, str, str, str | None]]] = defaultdict(list)
         for item in items_a + items_b:
             img_id, rel_path, src, md5_hash = item
             full = photos_dir / rel_path
             if not full.is_file() or full.suffix.lower() not in media_extensions:
                 continue
-            h = md5_hash
-            if h is None:
-                h = await asyncio.to_thread(compute_file_md5, photos_dir, rel_path)
-            if h is None:
-                continue
-            by_hash[h].append(item)
+            filename = os.path.basename(rel_path)
+            by_name[filename].append(item)
+
         to_keep: dict[str, tuple[int, str, str, str | None]] = {}
         to_delete: set[int] = set()
-        for h, items in by_hash.items():
+        for filename, items in by_name.items():
             from_preferred = [x for x in items if x[2] == preferred]
             from_other = [x for x in items if x[2] != preferred]
             if from_preferred:
                 keeper = min(from_preferred, key=lambda x: x[1])
-                to_keep[h] = keeper
+                to_keep[filename] = keeper
                 for x in from_preferred:
                     if x[0] != keeper[0]:
                         to_delete.add(x[0])
@@ -610,30 +612,41 @@ async def merge_folders(
                     to_delete.add(x[0])
             else:
                 keeper = min(from_other, key=lambda x: x[1])
-                to_keep[h] = keeper
+                to_keep[filename] = keeper
                 for x in from_other:
                     if x[0] != keeper[0]:
                         to_delete.add(x[0])
-        target_hashes = {h for h, k in to_keep.items() if _belongs_to(k[1], target_prefix)}
-        to_move: list[tuple[int, str]] = []
-        for h, items in by_hash.items():
-            for img_id, rel_path, src, _ in items:
-                if img_id in to_delete or src != source_letter:
-                    continue
-                if h not in target_hashes:
-                    to_move.append((img_id, rel_path))
-                elif h in target_hashes:
-                    delete_image_files(rel_path, PHOTOS_DIR, CACHE_DIR)
-                    to_delete.add(img_id)
+
+        to_move: list[tuple[int, str, str]] = []
+        duplicate_hashes: set[str] = set()
+        for filename, items in by_name.items():
+            from_source = [x for x in items if x[2] == source_letter]
+            for img_id, rel_path, src, _ in from_source:
+                to_move.append((img_id, rel_path, filename))
+            if len(items) > 1:
+                duplicate_hashes.add(filename)
+        print(
+            f"[debug] target_prefix={target_prefix}, source_prefix={source_prefix}, source_letter={source_letter}",
+            flush=True,
+        )
+        print(
+            f"[debug] to_keep count={len(to_keep)}, to_delete count={len(to_delete)}, to_move count={len(to_move)}",
+            flush=True,
+        )
+
+        moved_ids = {item[0] for item in to_move}
         for img_id in to_delete:
+            if img_id in moved_ids:
+                continue
             result = await session.execute(select(Image).where(Image.id == img_id))
             img = result.scalar_one_or_none()
             if img:
                 delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
                 await session.execute(delete(ImageTag).where(ImageTag.image_id == img_id))
                 await session.delete(img)
+
         moved = 0
-        for img_id, rel_path in to_move:
+        for img_id, rel_path, h in to_move:
             result = await session.execute(select(Image).where(Image.id == img_id))
             img = result.scalar_one_or_none()
             if not img:
@@ -643,40 +656,47 @@ async def merge_folders(
             new_full = target_path / suffix if suffix else target_path
             new_full.parent.mkdir(parents=True, exist_ok=True)
             if new_full.exists():
-                new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
-                new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
+                if duplicate_mode == "skip":
+                    continue
+                elif duplicate_mode == "overwrite":
+                    delete_image_files(new_rel, PHOTOS_DIR, CACHE_DIR)
+                    result = await session.execute(select(Image).where(Image.relative_path == new_rel))
+                    existing_img = result.scalar_one_or_none()
+                    if existing_img:
+                        await session.execute(delete(ImageTag).where(ImageTag.image_id == existing_img.id))
+                        await session.delete(existing_img)
+                else:
+                    new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
+                    new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
             try:
                 await asyncio.to_thread(shutil.move, str(photos_dir / rel_path), str(new_full))
             except OSError as e:
                 await session.rollback()
-                task_state.fail_task(f"移动文件失败 {rel_path}: {e}")
                 return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
             await update_image_path_and_regenerate_thumbnail(
                 img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
             )
             session.add(img)
             moved += 1
+
         if source_path.exists():
             for root, dirs, files in os.walk(str(source_path), topdown=False):
-                if not dirs and not files:
+                for d in dirs:
                     try:
-                        os.rmdir(root)
+                        os.rmdir(os.path.join(root, d))
                     except OSError:
                         pass
+            if not os.listdir(str(source_path)):
+                try:
+                    os.rmdir(str(source_path))
+                except OSError:
+                    pass
         try:
             await session.commit()
             invalidate_folder_tree_cache(target_prefix)
             print(
                 f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
                 flush=True,
-            )
-            task_state.end_task(
-                {
-                    "ok": True,
-                    "moved": moved,
-                    "deleted": len(to_delete),
-                    "target": target_prefix,
-                }
             )
             return {
                 "ok": True,
@@ -686,11 +706,34 @@ async def merge_folders(
             }
         except IntegrityError:
             await session.rollback()
-            task_state.fail_task("路径冲突，请重试")
             return {"ok": False, "error": "路径冲突，请重试"}
-    except Exception as e:
-        task_state.fail_task(str(e))
-        raise
+
+
+task_queue.register_handler("merge-folders", _run_merge_folders_task)
+
+
+@router.post("/merge-folders")
+async def merge_folders(
+    body: MergeFoldersRequest,
+):
+    """合并两个文件夹，任务进入队列后台执行"""
+    params = {
+        "folder_a": body.folder_a,
+        "folder_b": body.folder_b,
+        "target": body.target,
+    }
+    queue_id = await task_queue.add_task("merge-folders", params, priority=10)
+    status = task_queue.get_status()
+    running = status.get("merge-folders", {}).get("running")
+    pending = status.get("merge-folders", {}).get("pending", [])
+    position = 0
+    for i, p in enumerate(pending):
+        if p.get("queue_id") == queue_id:
+            position = i
+            break
+    if running:
+        return {"queue_id": queue_id, "status": "running", "position": 0}
+    return {"queue_id": queue_id, "status": "queued", "position": position}
 
 
 @router.post("/create-folder")

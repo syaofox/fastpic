@@ -7,8 +7,11 @@ LIKE_ESCAPE = "!"
 
 
 def escape_like(value: str) -> str:
-    """转义 SQL LIKE 中的 % 和 _"""
-    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    """转义 SQL LIKE 中的特殊字符：% _ 以及 ! 本身"""
+    result = value
+    for ch in "!%_":
+        result = result.replace(ch, "!" + ch)
+    return result
 
 
 def normalize_path(path: str | None, allow_empty: bool = True) -> str | None:

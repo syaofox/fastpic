@@ -266,6 +266,23 @@
                                     </label>
                                 </div>
                             </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">重复文件名处理</label>
+                                <div class="flex flex-wrap gap-4">
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="merge-dup-mode" value="rename" checked class="rounded-full border-slate-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-slate-700">改名（添加序号）</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="merge-dup-mode" value="skip" class="rounded-full border-slate-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-slate-700">跳过</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="merge-dup-mode" value="overwrite" class="rounded-full border-slate-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-slate-700">覆盖</span>
+                                    </label>
+                                </div>
+                            </div>
                             <div class="flex items-center gap-3">
                                 <button type="button" id="merge-folders-btn" onclick="triggerMergeFolders()"
                                         class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
@@ -354,7 +371,7 @@
     </div>
 </div>
 
-<!-- 通用操作加载提示（耗时操作时显示，阻止离开页面） -->
+<!-- 通用操作加载提示（非阻塞，用户可关闭页面） -->
 <div id="operation-loading-overlay" class="hidden fixed inset-0 z-[110] flex items-center justify-center bg-black/40">
     <div class="bg-white rounded-xl shadow-xl px-8 py-6 flex flex-col items-center gap-4 min-w-[220px]">
         <svg class="w-10 h-10 animate-spin text-slate-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
@@ -364,6 +381,9 @@
         <p id="operation-loading-message" class="text-sm font-medium text-slate-700">请稍候...</p>
     </div>
 </div>
+
+<!-- 队列状态面板 -->
+<div id="queue-panel" class="hidden fixed bottom-4 right-4 z-50 w-72"></div>
 
 <!-- 自定义弹窗：统一风格 -->
 <div id="settings-modal-overlay" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/40" onclick="settingsModalCloseIfOverlay(event)">
@@ -481,11 +501,7 @@
 </div>
 
 <script>
-// 通用操作加载提示（与 gallery.js 保持一致）
-var _beforeUnloadHandler = function(e) {
-    e.preventDefault();
-    e.returnValue = '';
-};
+// 通用操作加载提示（非阻塞，用户可关闭页面）
 var OPERATION_STORAGE_KEY = 'fastpic_operation';
 
 window.showOperationLoading = function(message) {
@@ -494,7 +510,6 @@ window.showOperationLoading = function(message) {
     var msgEl = document.getElementById('operation-loading-message');
     if (msgEl) msgEl.textContent = msg;
     if (el) el.classList.remove('hidden');
-    window.addEventListener('beforeunload', _beforeUnloadHandler);
     try {
         localStorage.setItem(OPERATION_STORAGE_KEY, JSON.stringify({ type: msg, ts: Date.now() }));
     } catch (err) {}
@@ -502,11 +517,139 @@ window.showOperationLoading = function(message) {
 window.hideOperationLoading = function() {
     var el = document.getElementById('operation-loading-overlay');
     if (el) el.classList.add('hidden');
-    window.removeEventListener('beforeunload', _beforeUnloadHandler);
     try {
         localStorage.removeItem(OPERATION_STORAGE_KEY);
     } catch (err) {}
 };
+
+// 队列状态轮询
+var queuePollInterval = null;
+
+function startQueuePolling() {
+    if (queuePollInterval) return;
+    updateQueueStatus();
+    queuePollInterval = setInterval(updateQueueStatus, 3000);
+}
+
+function stopQueuePolling() {
+    if (queuePollInterval) {
+        clearInterval(queuePollInterval);
+        queuePollInterval = null;
+    }
+}
+
+function updateQueueStatus() {
+    fetch('/api/queue-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderQueuePanel(data);
+        })
+        .catch(function() {});
+    
+    fetch('/api/task-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.task_type && data.finished_at && (data.result || data.error)) {
+                if (window._lastProcessedFinishedAt === data.finished_at) return;
+                window._lastProcessedFinishedAt = data.finished_at;
+                var handlers = {
+                    'scan': onTaskComplete,
+                    'cleanup': onTaskComplete,
+                    'full-sync': onTaskComplete,
+                    'scan-duplicates': onTaskComplete,
+                    'merge-folders': onTaskComplete
+                };
+                var handler = handlers[data.task_type];
+                if (handler) {
+                    handler(data.task_type, data.result || { error: data.error });
+                }
+            }
+        })
+        .catch(function() {});
+}
+
+function renderQueuePanel(data) {
+    var panel = document.getElementById('queue-panel');
+    if (!panel) return;
+    
+    var hasRunning = false;
+    var html = '';
+    
+    for (var taskType in data) {
+        var taskData = data[taskType];
+        var running = taskData.running;
+        var pending = taskData.pending || [];
+        var pendingCount = taskData.pending_count || 0;
+        
+        if (running || pendingCount > 0) {
+            hasRunning = true;
+            var taskName = getTaskDisplayName(taskType);
+            
+            if (running) {
+                var progress = running.progress_percent || 0;
+                var operation = running.current_operation || '处理中...';
+                html += '<div class="bg-blue-50 rounded-lg p-3 mb-2">';
+                html += '<div class="flex justify-between items-center mb-1">';
+                html += '<span class="font-medium text-blue-800">' + taskName + ' (进行中)</span>';
+                html += '<button onclick="cancelQueueTask(\'' + running.queue_id + '\')" class="text-xs text-red-600 hover:text-red-800">取消</button>';
+                html += '</div>';
+                html += '<div class="w-full bg-blue-200 rounded-full h-2 mb-1">';
+                html += '<div class="bg-blue-500 h-2 rounded-full" style="width:' + progress + '%"></div>';
+                html += '</div>';
+                html += '<div class="text-xs text-blue-600">' + operation + '</div>';
+                html += '</div>';
+            }
+            
+            if (pendingCount > 0) {
+                html += '<div class="bg-slate-50 rounded-lg p-3 mb-2">';
+                html += '<div class="flex justify-between items-center">';
+                html += '<span class="font-medium text-slate-600">' + taskName + ' (等待中)</span>';
+                html += '<span class="text-xs text-slate-500">位置: ' + pendingCount + '</span>';
+                html += '</div>';
+                html += '</div>';
+            }
+        }
+    }
+    
+    if (hasRunning) {
+        panel.classList.remove('hidden');
+        panel.innerHTML = '<div class="font-semibold text-sm text-slate-700 mb-2">任务队列</div>' + html;
+    } else {
+        panel.classList.add('hidden');
+    }
+}
+
+function getTaskDisplayName(taskType) {
+    var names = {
+        'scan': '扫描',
+        'cleanup': '清理',
+        'full-sync': '完整同步',
+        'scan-duplicates': '查重',
+        'merge-folders': '合并文件夹',
+        'upload': '上传',
+        'delete': '删除',
+        'rename': '重命名'
+    };
+    return names[taskType] || taskType;
+}
+
+function cancelQueueTask(queueId) {
+    fetch('/api/queue-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue_id: queueId })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+        updateQueueStatus();
+    })
+    .catch(function() {});
+}
+
+// 页面加载时启动队列轮询
+document.addEventListener('DOMContentLoaded', function() {
+    startQueuePolling();
+});
 
 // 自定义弹窗（统一风格）
 function settingsModalCloseIfOverlay(e) {
@@ -770,43 +913,31 @@ function triggerScan() {
     var btn = document.getElementById('scan-btn');
     var status = document.getElementById('scan-status');
     btn.disabled = true;
-    btn.textContent = '扫描中...';
+    btn.textContent = '提交中...';
     status.textContent = '';
     status.className = 'text-sm text-slate-500';
-    if (window.showOperationLoading) window.showOperationLoading('正在扫描，请稍候...');
 
     fetch('/scan', { method: 'POST' })
-        .then(function(r) {
-            if (r.status === 409) {
-                btn.disabled = false;
-                btn.textContent = '开始扫描';
-                status.textContent = '有任务正在进行中，请等待完成后再提交';
-                status.className = 'text-sm text-amber-600';
-                if (window.hideOperationLoading) window.hideOperationLoading();
-                return Promise.reject('busy');
-            }
-            return r.json();
-        })
+        .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.disabled = false;
-            btn.textContent = '开始扫描';
-            var nImg = data.images || 0, nVid = data.videos || 0;
-            status.textContent = data.scanned > 0
-                ? '扫描完成，新增 ' + data.scanned + ' 个媒体文件（图片 ' + nImg + ' 张、视频 ' + nVid + ' 个）'
-                : '扫描完成，无新增';
-            status.className = 'text-sm text-green-600';
-            loadStats();
-            onTaskComplete('scan', data);
-            if (window.hideOperationLoading) window.hideOperationLoading();
+            if (data.status === 'running') {
+                btn.textContent = '扫描中...';
+                status.textContent = '扫描已开始';
+                status.className = 'text-sm text-blue-600';
+                if (window.showOperationLoading) window.showOperationLoading('正在扫描...');
+            } else {
+                btn.textContent = '排队中';
+                status.textContent = '任务已加入队列，等待位置: ' + data.position;
+                status.className = 'text-sm text-amber-600';
+            }
+            updateQueueStatus();
         })
         .catch(function(err) {
-            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '开始扫描';
-            status.textContent = '扫描失败: ' + err;
+            status.textContent = '提交失败: ' + err;
             status.className = 'text-sm text-red-500';
-            onTaskComplete('scan', { error: err });
-            if (window.hideOperationLoading) window.hideOperationLoading();
         });
 }
 
@@ -816,52 +947,32 @@ function triggerCleanup() {
     var status = document.getElementById('cleanup-status');
     var resultEl = document.getElementById('cleanup-result');
     btn.disabled = true;
-    btn.textContent = '清理中...';
+    btn.textContent = '提交中...';
     status.textContent = '';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
-    if (window.showOperationLoading) window.showOperationLoading('正在清理，请稍候...');
 
     fetch('/api/cleanup', { method: 'POST' })
-        .then(function(r) {
-            if (r.status === 409) {
-                btn.disabled = false;
-                btn.textContent = '开始清理';
-                status.textContent = '有任务正在进行中，请等待完成后再提交';
-                status.className = 'text-sm text-amber-600';
-                if (window.hideOperationLoading) window.hideOperationLoading();
-                return Promise.reject('busy');
-            }
-            return r.json();
-        })
+        .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.disabled = false;
-            btn.textContent = '开始清理';
-            var total = data.stale_removed + data.orphan_cache_removed + data.cache_regenerated;
-            if (total === 0) {
-                status.textContent = '清理完成，数据已一致，无需处理';
-                status.className = 'text-sm text-green-600';
+            if (data.status === 'running') {
+                btn.textContent = '清理中...';
+                status.textContent = '清理已开始';
+                status.className = 'text-sm text-blue-600';
+                if (window.showOperationLoading) window.showOperationLoading('正在清理...');
             } else {
-                status.textContent = '清理完成';
-                status.className = 'text-sm text-green-600';
-                resultEl.classList.remove('hidden');
-                resultEl.innerHTML =
-                    '<div>清除幽灵记录：<span class="font-medium text-slate-800">' + data.stale_removed + '</span> 条</div>' +
-                    '<div>清除孤儿缓存：<span class="font-medium text-slate-800">' + data.orphan_cache_removed + '</span> 个</div>' +
-                    '<div>重新生成缓存：<span class="font-medium text-slate-800">' + data.cache_regenerated + '</span> 个</div>';
+                btn.textContent = '排队中';
+                status.textContent = '任务已加入队列，等待位置: ' + data.position;
+                status.className = 'text-sm text-amber-600';
             }
-            loadStats();
-            onTaskComplete('cleanup', data);
-            if (window.hideOperationLoading) window.hideOperationLoading();
+            updateQueueStatus();
         })
         .catch(function(err) {
-            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '开始清理';
-            status.textContent = '清理失败: ' + err;
+            status.textContent = '提交失败: ' + err;
             status.className = 'text-sm text-red-500';
-            onTaskComplete('cleanup', { error: err });
-            if (window.hideOperationLoading) window.hideOperationLoading();
         });
 }
 
@@ -871,50 +982,32 @@ function triggerRebuild() {
     var status = document.getElementById('rebuild-status');
     var resultEl = document.getElementById('rebuild-result');
     btn.disabled = true;
-    btn.textContent = '重建中...';
-    status.textContent = '正在执行完整同步...';
+    btn.textContent = '提交中...';
+    status.textContent = '';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
-    if (window.showOperationLoading) window.showOperationLoading('正在重建，请稍候...');
 
     fetch('/api/full-sync', { method: 'POST' })
-        .then(function(r) {
-            if (r.status === 409) {
-                btn.disabled = false;
-                btn.textContent = '完整重建';
-                status.textContent = '有任务正在进行中，请等待完成后再提交';
-                status.className = 'text-sm text-amber-600';
-                if (window.hideOperationLoading) window.hideOperationLoading();
-                return Promise.reject('busy');
-            }
-            return r.json();
-        })
+        .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.disabled = false;
-            btn.textContent = '完整重建';
-            status.textContent = '重建完成';
-            status.className = 'text-sm text-green-600';
-            resultEl.classList.remove('hidden');
-            var scanned = (data.images_added || 0) + (data.videos_added || 0);
-            resultEl.innerHTML =
-                '<div class="font-medium text-slate-700 mb-1">清理结果：</div>' +
-                '<div class="ml-3">清除幽灵记录：' + (data.stale_removed || 0) + ' 条</div>' +
-                '<div class="ml-3">清除孤儿缓存：' + (data.orphan_cache_removed || 0) + ' 个</div>' +
-                '<div class="ml-3">重新生成缓存：' + (data.cache_regenerated || 0) + ' 个</div>' +
-                '<div class="font-medium text-slate-700 mt-2 mb-1">扫描结果：</div>' +
-                '<div class="ml-3">新增媒体：' + scanned + ' 个</div>';
-            loadStats();
-            onTaskComplete('full-sync', data);
-            if (window.hideOperationLoading) window.hideOperationLoading();
+            if (data.status === 'running') {
+                btn.textContent = '重建中...';
+                status.textContent = '重建已开始';
+                status.className = 'text-sm text-blue-600';
+                if (window.showOperationLoading) window.showOperationLoading('正在重建...');
+            } else {
+                btn.textContent = '排队中';
+                status.textContent = '任务已加入队列，等待位置: ' + data.position;
+                status.className = 'text-sm text-amber-600';
+            }
+            updateQueueStatus();
         })
         .catch(function(err) {
-            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '完整重建';
-            status.textContent = '重建失败: ' + err;
+            status.textContent = '提交失败: ' + err;
             status.className = 'text-sm text-red-500';
-            onTaskComplete('full-sync', { error: err });
-            if (window.hideOperationLoading) window.hideOperationLoading();
         });
 }
 
@@ -929,12 +1022,10 @@ function triggerScanDuplicates() {
     var folderInput = document.getElementById('dup-folder-input');
     var folderPath = folderInput ? (folderInput.value || '').trim() : '';
     btn.disabled = true;
-    btn.textContent = '扫描中...';
     status.textContent = '';
     status.className = 'text-sm text-slate-500';
     emptyEl.classList.add('hidden');
     containerEl.classList.add('hidden');
-    if (window.showOperationLoading) window.showOperationLoading('正在扫描重复文件，请稍候...');
 
     var body = folderPath ? { folder_path: folderPath } : {};
     fetch('/api/scan-duplicates', {
@@ -942,45 +1033,23 @@ function triggerScanDuplicates() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     })
-        .then(function(r) {
-            if (r.status === 409) {
-                btn.disabled = false;
-                btn.textContent = '开始扫描';
-                status.textContent = '有任务正在进行中，请等待完成后再提交';
-                status.className = 'text-sm text-amber-600';
-                if (window.hideOperationLoading) window.hideOperationLoading();
-                return Promise.reject('busy');
-            }
-            return r.json();
-        })
+        .then(function(r) { return r.json(); })
         .then(function(data) {
-            btn.disabled = false;
-            btn.textContent = '开始扫描';
-            dupGroupsCache = data.groups || [];
-            if (dupGroupsCache.length === 0) {
-                status.textContent = '扫描完成，未发现重复文件';
-                status.className = 'text-sm text-green-600';
-                emptyEl.classList.remove('hidden');
+            btn.textContent = '等待中...';
+            if (data.status === 'running') {
+                status.textContent = '扫描已开始';
+                status.className = 'text-sm text-blue-600';
             } else {
-                var totalDup = dupGroupsCache.reduce(function(sum, g) { return sum + g.items.length; }, 0);
-                status.textContent = '扫描完成，发现 ' + dupGroupsCache.length + ' 组重复，共 ' + totalDup + ' 个文件';
+                status.textContent = '任务已加入队列，等待位置: ' + data.position;
                 status.className = 'text-sm text-amber-600';
-                containerEl.classList.remove('hidden');
-                document.getElementById('dup-result-summary').textContent = '共 ' + dupGroupsCache.length + ' 组重复，勾选要删除的项';
-                renderDuplicateGroups(dupGroupsCache);
-                updateDupDeleteBtn();
             }
-            onTaskComplete('scan-duplicates', data);
-            if (window.hideOperationLoading) window.hideOperationLoading();
+            updateQueueStatus();
         })
         .catch(function(err) {
-            if (err === 'busy') return;
             btn.disabled = false;
             btn.textContent = '开始扫描';
-            status.textContent = '扫描失败: ' + err;
+            status.textContent = '提交失败: ' + err;
             status.className = 'text-sm text-red-500';
-            onTaskComplete('scan-duplicates', { error: err });
-            if (window.hideOperationLoading) window.hideOperationLoading();
         });
 }
 
@@ -1106,7 +1175,29 @@ function deleteSelectedDuplicates() {
             closeDupPreview();
             showSettingsAlert('已删除 ' + (data.deleted || 0) + ' 个文件');
             loadStats();
-            triggerScanDuplicates();
+            // 从缓存中移除已删除的项目
+            if (dupGroupsCache && ids.length > 0) {
+                var deletedSet = new Set(ids);
+                dupGroupsCache = dupGroupsCache.map(function(g) {
+                    return Object.assign({}, g, {
+                        items: g.items.filter(function(item) { return !deletedSet.has(item.id); })
+                    });
+                }).filter(function(g) { return g.items.length > 1; });
+                // 重新渲染
+                var containerEl = document.getElementById('dup-result-container');
+                var status = document.getElementById('dup-scan-status');
+                if (dupGroupsCache.length === 0) {
+                    containerEl.classList.add('hidden');
+                    document.getElementById('dup-result-empty').classList.remove('hidden');
+                    status.textContent = '扫描完成，已清除重复文件';
+                    status.className = 'text-sm text-green-600';
+                } else {
+                    var totalDup = dupGroupsCache.reduce(function(sum, g) { return sum + g.items.length; }, 0);
+                    status.textContent = '扫描完成，发现 ' + dupGroupsCache.length + ' 组重复，共 ' + totalDup + ' 个文件';
+                    document.getElementById('dup-result-summary').textContent = '共 ' + dupGroupsCache.length + ' 组重复，勾选要删除的项';
+                    renderDuplicateGroups(dupGroupsCache);
+                }
+            }
         }).catch(function(err) {
             showSettingsAlert('删除失败: ' + err.message);
         });
@@ -1454,6 +1545,8 @@ function triggerMergeFolders() {
     var folderB = (document.getElementById('merge-folder-b').value || '').trim();
     var targetRadios = document.querySelectorAll('input[name="merge-target"]:checked');
     var target = (targetRadios.length && targetRadios[0].value) || 'auto';
+    var dupModeRadios = document.querySelectorAll('input[name="merge-dup-mode"]:checked');
+    var duplicateMode = (dupModeRadios.length && dupModeRadios[0].value) || 'rename';
 
     if (!folderA || !folderB) {
         showSettingsAlert('请填写两个文件夹路径');
@@ -1468,52 +1561,35 @@ function triggerMergeFolders() {
     var status = document.getElementById('merge-status');
     var resultEl = document.getElementById('merge-result');
     btn.disabled = true;
-    status.textContent = '合并中...';
+    status.textContent = '';
     status.className = 'text-sm text-slate-500';
     resultEl.classList.add('hidden');
-    if (window.showOperationLoading) window.showOperationLoading('正在合并文件夹，请稍候...');
 
     fetch('/api/merge-folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder_a: folderA, folder_b: folderB, target: target })
+        body: JSON.stringify({ folder_a: folderA, folder_b: folderB, target: target, duplicate_mode: duplicateMode })
     })
-        .then(function(r) {
-            if (r.status === 409) {
-                btn.disabled = false;
-                status.textContent = '有任务正在进行中，请等待完成后再提交';
-                status.className = 'text-sm text-amber-600';
-                if (window.hideOperationLoading) window.hideOperationLoading();
-                return Promise.reject('busy');
-            }
-            return r.json();
-        })
+        .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.disabled = false;
-            if (data.busy) {
-                status.textContent = data.error || '有任务正在进行中，请等待完成后再提交';
-                status.className = 'text-sm text-amber-600';
-                if (window.hideOperationLoading) window.hideOperationLoading();
-                return;
-            }
-            if (data.ok) {
-                status.textContent = '合并完成';
-                status.className = 'text-sm text-green-600';
-                resultEl.classList.remove('hidden');
-                resultEl.innerHTML =
-                    '<div>移动文件：<span class="font-medium text-slate-800">' + (data.moved || 0) + '</span> 个</div>' +
-                    '<div>删除重复：<span class="font-medium text-slate-800">' + (data.deleted || 0) + '</span> 个</div>' +
-                    '<div>合并目标：<span class="font-medium text-slate-800">' + (data.target || '') + '</span></div>';
-                loadStats();
-                onTaskComplete('merge-folders', data);
-                if (window.hideOperationLoading) window.hideOperationLoading();
+            if (data.status === 'running') {
+                btn.textContent = '合并中...';
+                status.textContent = '合并已开始';
+                status.className = 'text-sm text-blue-600';
+                if (window.showOperationLoading) window.showOperationLoading('正在合并文件夹...');
             } else {
-                status.textContent = '合并失败';
-                status.className = 'text-sm text-red-500';
-                showSettingsAlert(data.error || '合并失败');
-                onTaskComplete('merge-folders', { error: data.error || '合并失败' });
-                if (window.hideOperationLoading) window.hideOperationLoading();
+                btn.textContent = '开始合并';
+                status.textContent = '任务已加入队列，等待位置: ' + data.position;
+                status.className = 'text-sm text-amber-600';
             }
+            updateQueueStatus();
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = '开始合并';
+            status.textContent = '提交失败: ' + err;
+            status.className = 'text-sm text-red-500';
         })
         .catch(function(err) {
             if (err === 'busy') return;
@@ -1575,9 +1651,8 @@ function onTaskComplete(taskType, result) {
         } else if (taskType === 'merge-folders' && result.ok) {
             countInfo = '，移动 ' + (result.moved || 0) + ' 个文件';
         }
-        if (typeof showToast === 'function') showToast(taskLabel + '完成' + countInfo, 'success');
     } else if (result && result.error) {
-        if (typeof showToast === 'function') showToast(taskLabel + '失败：' + result.error, 'error');
+        var errorMsg = result.error;
     }
     
     var handlers = {

@@ -19,7 +19,15 @@ def setup_auth_middleware(app):
         if not ACCESS_PASSWORD:
             return await call_next(request)
         path = request.url.path
-        if path in ("/login", "/favicon.ico", "/api/scan-status") or path.startswith("/static/"):
+        if path in (
+            "/login",
+            "/favicon.ico",
+            "/api/scan-status",
+            "/api/task-events",
+            "/api/task-status",
+            "/api/task-status/clear",
+            "/api/queue-status",
+        ) or path.startswith("/static/"):
             return await call_next(request)
         token = request.cookies.get("fp_session")
         if not token or not hmac.compare_digest(token, SESSION_TOKEN):

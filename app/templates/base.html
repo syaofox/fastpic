@@ -510,7 +510,9 @@
                 }
                 
                 var duration = data.error ? 6000 : 4000;
-                showToast(resultMessage, resultType, duration);
+                if (!document.getElementById('queue-panel')) {
+                    showToast(resultMessage, resultType, duration);
+                }
             }
         };
         
