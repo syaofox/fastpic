@@ -245,3 +245,60 @@ class TestApplyImageFiltersToCount:
         parsed = parse_filter_params(filter_size_min="1000", filter_size_max="1000000")
         result = apply_image_filters_to_count(count_stmt, "", "", "folder", parsed, None)
         assert result is not None
+
+    def test_count_uses_substring_index(self):
+        """测试 path 为空时使用 SUBSTRING_INDEX 而非前导通配符 LIKE"""
+        from sqlalchemy import func
+        from sqlmodel import select
+
+        count_stmt = select(func.count(1))
+        parsed = parse_filter_params()
+        result = apply_image_filters_to_count(count_stmt, "", "", "folder", parsed, None)
+        sql_str = str(result).lower()
+        assert "substring_index" in sql_str
+        assert "%/%" not in sql_str
+
+    def test_list_mode_uses_substring_index(self):
+        """测试 list 模式 path 为空时也使用 SUBSTRING_INDEX"""
+        from sqlalchemy import func
+        from sqlmodel import select
+
+        count_stmt = select(func.count(1))
+        parsed = parse_filter_params()
+        result = apply_image_filters_to_count(count_stmt, "", "", "list", parsed, None)
+        sql_str = str(result).lower()
+        assert "substring_index" in sql_str
+
+
+class TestApplyImageFiltersSubstringIndex:
+    """apply_image_filters 函数中 SUBSTRING_INDEX 优化测试"""
+
+    def test_folder_mode_uses_substring_index(self):
+        """测试 folder 模式 path 为空时使用 SUBSTRING_INDEX"""
+        from sqlmodel import select
+
+        stmt = select(Image)
+        parsed = parse_filter_params()
+        result_stmt, pf, has_filters = apply_image_filters(stmt, "", "", "folder", parsed)
+        sql_str = str(result_stmt).lower()
+        assert "substring_index" in sql_str
+
+    def test_list_mode_uses_substring_index(self):
+        """测试 list 模式 path 为空时使用 SUBSTRING_INDEX"""
+        from sqlmodel import select
+
+        stmt = select(Image)
+        parsed = parse_filter_params()
+        result_stmt, pf, has_filters = apply_image_filters(stmt, "", "", "list", parsed)
+        sql_str = str(result_stmt).lower()
+        assert "substring_index" in sql_str
+
+    def test_folder_mode_with_path_uses_like(self):
+        """测试 folder 模式有 path 时仍使用 LIKE（可利用索引）"""
+        from sqlmodel import select
+
+        stmt = select(Image)
+        parsed = parse_filter_params()
+        result_stmt, pf, has_filters = apply_image_filters(stmt, "2024", "", "folder", parsed)
+        sql_str = str(result_stmt)
+        assert "LIKE" in sql_str

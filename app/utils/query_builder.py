@@ -2,7 +2,7 @@
 
 from datetime import datetime as _dt
 
-from sqlalchemy import case, text
+from sqlalchemy import case, func, text
 
 from app.models import Image, ImageTag, Tag
 from app.utils.path_utils import LIKE_ESCAPE, escape_like, path_filter_for_prefix
@@ -14,9 +14,7 @@ def _fulltext_search_condition(search: str):
     q = (search or "").strip()
     if not q or len(q) < 3 or "%" in q or "_" in q:
         return None
-    return text(
-        "MATCH(images.filename) AGAINST(:ft_q IN NATURAL LANGUAGE MODE)"
-    ).bindparams(ft_q=q)
+    return text("MATCH(images.filename) AGAINST(:ft_q IN NATURAL LANGUAGE MODE)").bindparams(ft_q=q)
 
 
 IMAGE_SORT_COLUMNS = {
@@ -47,12 +45,8 @@ def parse_filter_params(
     filter_tag: str = "",
 ) -> dict:
     """解析过滤参数，返回用于 apply_image_filters 的字典"""
-    _size_min = (
-        int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
-    )
-    _size_max = (
-        int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
-    )
+    _size_min = int(filter_size_min) if filter_size_min and filter_size_min.isdigit() else None
+    _size_max = int(filter_size_max) if filter_size_max and filter_size_max.isdigit() else None
     _date_from_ts = None
     _date_to_ts = None
     if filter_date_from:
@@ -100,15 +94,11 @@ def apply_image_filters(
         if ft is not None:
             stmt = stmt.where(ft)
         else:
-            stmt = stmt.where(
-                Image.filename.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE)
-            )
+            stmt = stmt.where(Image.filename.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE))
 
     fn = parsed["filter_filename"]
     if fn:
-        stmt = stmt.where(
-            Image.filename.ilike(f"%{escape_like(fn)}%", escape=LIKE_ESCAPE)
-        )
+        stmt = stmt.where(Image.filename.ilike(f"%{escape_like(fn)}%", escape=LIKE_ESCAPE))
         has_filters = True
     if parsed["_size_min"] is not None:
         stmt = stmt.where(Image.file_size >= parsed["_size_min"])
@@ -133,18 +123,14 @@ def apply_image_filters(
     if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
-            stmt = stmt.where(
-                ~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE)
-            )
+            stmt = stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
         elif not parsed["filter_tag"]:
-            stmt = stmt.where(~Image.relative_path.like("%/%"))
+            stmt = stmt.where(func.substring_index(Image.relative_path, "/", 1) != "")
 
     return stmt, pf, has_filters
 
 
-def apply_image_filters_to_count(
-    count_stmt, path: str, search: str, mode: str, parsed: dict, pf
-):
+def apply_image_filters_to_count(count_stmt, path: str, search: str, mode: str, parsed: dict, pf):
     """对 count 语句应用与 apply_image_filters 相同的过滤条件"""
     if path and pf is not None:
         count_stmt = count_stmt.where(pf)
@@ -153,14 +139,10 @@ def apply_image_filters_to_count(
         if ft is not None:
             count_stmt = count_stmt.where(ft)
         else:
-            count_stmt = count_stmt.where(
-                Image.filename.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE)
-            )
+            count_stmt = count_stmt.where(Image.filename.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE))
     if parsed["filter_filename"]:
         count_stmt = count_stmt.where(
-            Image.filename.ilike(
-                f"%{escape_like(parsed['filter_filename'])}%", escape=LIKE_ESCAPE
-            )
+            Image.filename.ilike(f"%{escape_like(parsed['filter_filename'])}%", escape=LIKE_ESCAPE)
         )
     if parsed["_size_min"] is not None:
         count_stmt = count_stmt.where(Image.file_size >= parsed["_size_min"])
@@ -179,9 +161,7 @@ def apply_image_filters_to_count(
     if mode in ("folder", "list"):
         if path:
             escaped = escape_like(path)
-            count_stmt = count_stmt.where(
-                ~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE)
-            )
+            count_stmt = count_stmt.where(~Image.relative_path.like(f"{escaped}/%/%", escape=LIKE_ESCAPE))
         elif not parsed["filter_tag"]:
-            count_stmt = count_stmt.where(~Image.relative_path.like("%/%"))
+            count_stmt = count_stmt.where(func.substring_index(Image.relative_path, "/", 1) != "")
     return count_stmt
