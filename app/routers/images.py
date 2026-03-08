@@ -347,6 +347,7 @@ async def get_image_info(
 @router.post("/upload")
 async def upload_images(request: Request):
     """上传图片或视频到指定路径，支持子目录结构（拖拽/选择文件夹）"""
+    from app.services import task_state
     from app.services.scanner import get_media_metadata_and_thumbnail
     from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
@@ -383,6 +384,8 @@ async def upload_images(request: Request):
     print(f"[upload] 开始: {len(files)} 个文件 -> {target_path or '根目录'}", flush=True)
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    task_state.start_task("upload", total_items=len(files), title="正在上传文件")
 
     has_subpath = any("/" in (fp or "") or "\\" in (fp or "") for fp in file_paths)
     if has_subpath:
@@ -556,10 +559,21 @@ async def upload_images(request: Request):
                 skipped += 1
             elif err:
                 errors.append(err)
+
+    await task_state.async_update_progress(
+        current_operation=f"已完成 ({uploaded}/{len(tasks)})",
+        progress_percent=100,
+        processed_items=len(tasks),
+        total_items=len(tasks),
+    )
     if uploaded > 0:
         invalidate_folder_tree_cache(target_path)
+
+    result = {"uploaded": uploaded, "skipped": skipped, "errors": errors}
+    task_state.end_task(result)
+
     print(
         f"[upload] 完成: {uploaded} 成功, {skipped} 跳过, {len(errors)} 失败",
         flush=True,
     )
-    return {"uploaded": uploaded, "skipped": skipped, "errors": errors}
+    return result

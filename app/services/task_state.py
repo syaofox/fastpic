@@ -9,6 +9,7 @@
 import asyncio
 import json
 import threading
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,15 @@ from typing import Any
 
 STATE_FILE = Path("task_state.json")
 _lock = threading.Lock()
+
+TASK_TITLES = {
+    "scan": "正在扫描媒体文件",
+    "cleanup": "正在清理数据库",
+    "full-sync": "正在完整同步",
+    "scan-duplicates": "正在扫描重复文件",
+    "upload": "正在上传文件",
+    "delete": "正在删除文件",
+}
 
 _progress_callbacks: list[Callable[[dict], None]] = []
 _queue: asyncio.Queue | None = None
@@ -68,7 +78,9 @@ def get_queue_for_sse() -> asyncio.Queue:
 
 @dataclass
 class TaskState:
+    task_id: str | None = None
     task_type: str | None = None
+    title: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     result: dict[str, Any] | None = None
@@ -91,7 +103,9 @@ def _read_state() -> TaskState:
         with open(STATE_FILE, encoding="utf-8") as f:
             data = json.load(f)
             return TaskState(
+                task_id=data.get("task_id"),
                 task_type=data.get("task_type"),
+                title=data.get("title"),
                 started_at=data.get("started_at"),
                 finished_at=data.get("finished_at"),
                 result=data.get("result"),
@@ -108,7 +122,9 @@ def _read_state() -> TaskState:
 def _write_state(state: TaskState) -> None:
     _ensure_data_dir()
     data = {
+        "task_id": state.task_id,
         "task_type": state.task_type,
+        "title": state.title,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
         "result": state.result,
@@ -159,13 +175,18 @@ def is_busy() -> bool:
     return state.finished_at is None and state.task_type is not None
 
 
-def start_task(task_type: str, total_items: int = 0) -> bool:
+def start_task(task_type: str, total_items: int = 0, title: str | None = None) -> bool:
     """标记任务开始，返回是否成功启动（如果忙则返回 False）"""
     if is_busy():
         return False
 
+    if title is None:
+        title = TASK_TITLES.get(task_type, "正在处理...")
+
     state = TaskState(
+        task_id=str(uuid.uuid4()),
         task_type=task_type,
+        title=title,
         started_at=datetime.now().isoformat(),
         total_items=total_items,
     )
@@ -215,7 +236,9 @@ def end_task(result: dict[str, Any]) -> None:
     """标记任务成功结束"""
     current = _read_state()
     state = TaskState(
+        task_id=current.task_id,
         task_type=current.task_type,
+        title=current.title,
         started_at=current.started_at,
         finished_at=datetime.now().isoformat(),
         result=result,
@@ -229,7 +252,9 @@ def fail_task(error: str) -> None:
     """标记任务失败"""
     current = _read_state()
     state = TaskState(
+        task_id=current.task_id,
         task_type=current.task_type,
+        title=current.title,
         started_at=current.started_at,
         finished_at=datetime.now().isoformat(),
         error=error,
@@ -239,13 +264,15 @@ def fail_task(error: str) -> None:
 
 
 def get_status() -> dict[str, Any] | None:
-    """获取当前任务状态"""
+    """获取当前任务状态（标准化格式）"""
     state = _read_state()
     if state.task_type is None:
         return None
     is_running = state.finished_at is None
     result = {
+        "task_id": state.task_id,
         "task_type": state.task_type,
+        "title": state.title or TASK_TITLES.get(state.task_type, "正在处理..."),
         "started_at": state.started_at,
         "is_running": is_running,
     }
@@ -257,6 +284,12 @@ def get_status() -> dict[str, Any] | None:
         result["total_items"] = state.total_items
     if state.processed_items:
         result["processed_items"] = state.processed_items
+    if state.error:
+        result["error"] = state.error
+    if state.result:
+        result["result"] = state.result
+    if state.finished_at:
+        result["finished_at"] = state.finished_at
     return result
 
 
