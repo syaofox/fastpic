@@ -54,6 +54,7 @@ uv run ruff format .         # 格式化
 ```
 
 - 行长度: 120 | 规则: E, W, F, I, UP | 测试目录已排除
+- 测试时只检查 py 文件: `uv run ruff check . --select E,W,F,I,UP --exclude tests/`
 
 ## 代码风格
 
