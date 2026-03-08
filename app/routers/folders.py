@@ -707,7 +707,7 @@ async def create_folder(body: CreateFolderRequest):
         return {"error": "文件夹已存在", "ok": False}
     folder_path.mkdir(parents=True, exist_ok=True)
     rel = f"{parent}/{name}" if parent else name
-    invalidate_folder_tree_cache(rel)
+    invalidate_folder_tree_cache(parent)
     print(f"[api] 创建文件夹: {rel}", flush=True)
     return {"ok": True, "path": rel}
 

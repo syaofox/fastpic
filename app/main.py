@@ -39,8 +39,6 @@ from app.services.scanner import run_db_only_validation, run_full_scan
 from app.services.watcher import start_watcher
 from app.utils.folder_tree import (
     get_folder_tree_cached,
-    get_root_folder_counts_only,
-    get_root_subfolders_from_counts,
     get_subfolders,
 )
 from app.utils.path_count_cache import (
@@ -197,12 +195,8 @@ async def api_gallery_subfolders(
         filter_tag,
     )
     _, pf, has_filters = apply_image_filters(select(Image), path, "", mode, parsed)
-    if path == "":
-        folder_counts = await get_root_folder_counts_only(session)
-        subfolders = await get_root_subfolders_from_counts(folder_counts, session)
-    else:
-        async with async_session_factory() as s:
-            subfolders = await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
+    async with async_session_factory() as s:
+        subfolders = await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
     return templates.TemplateResponse(
         request,
         "partials/gallery_subfolders.html",
@@ -270,9 +264,6 @@ async def api_gallery_data(
         if not need_subfolders:
             return []
         _, pf_inner, _ = apply_image_filters(select(Image), path, "", mode, parsed)
-        if path == "":
-            folder_counts = await get_root_folder_counts_only(session)
-            return await get_root_subfolders_from_counts(folder_counts, session)
         async with async_session_factory() as s:
             return await get_subfolders(s, PHOTOS_DIR, path, pf_inner, sort_by, sort_order)
 
@@ -435,9 +426,6 @@ async def gallery(
     async def _run_subfolders():
         if not need_subfolders:
             return []
-        if path == "":
-            folder_counts = await get_root_folder_counts_only(session)
-            return await get_root_subfolders_from_counts(folder_counts, session)
         async with async_session_factory() as s:
             return await get_subfolders(s, PHOTOS_DIR, path, pf, sort_by, sort_order)
 
