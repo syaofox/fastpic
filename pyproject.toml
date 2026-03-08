@@ -37,3 +37,18 @@ exclude = ["tests/"]
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP"]
 ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+# 核心配置：确保 LSP 能找到你的虚拟环境
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+
+# 严格度设置：可以从 "standard" 开始，觉得太烦再调低
+typeCheckingMode = "basic" 
+reportMissingImports = true
+reportMissingTypeStubs = false # 很多库没写 type stubs，关闭此项减少干扰
