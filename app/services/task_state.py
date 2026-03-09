@@ -3,7 +3,7 @@
 防止页面刷新后 UI 状态丢失导致重复提交。
 
 支持任务队列，一次只能执行一个费时操作。
-支持 SSE 实时推送进度。
+通过 WebSocket 实时推送进度。
 """
 
 import asyncio
@@ -78,13 +78,17 @@ async def emit_progress(**kwargs) -> None:
             pass
     await q.put(data)
 
+    try:
+        from app.services.message_broadcaster import broadcaster
 
-def get_queue_for_sse() -> asyncio.Queue:
-    """获取 SSE 队列"""
-    q = _get_queue()
-    if q is None:
-        raise RuntimeError("Queue not initialized, call this in an async context")
-    return q
+        task_type = kwargs.get("task_type", "")
+        processed = kwargs.get("processed_items", 0)
+        total = kwargs.get("total_items", 0)
+        operation = kwargs.get("current_operation", "")
+        if task_type:
+            await broadcaster.broadcast_task_progress(task_type, processed, total, operation)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -189,7 +193,7 @@ async def async_update_progress(
     processed_items: int | None = None,
     total_items: int | None = None,
 ) -> None:
-    """异步更新任务进度（同步文件 + SSE 推送）"""
+    """异步更新任务进度（同步状态 + WebSocket 推送）"""
     update_progress(current_operation, progress_percent, processed_items, total_items)
     await emit_progress(
         current_operation=current_operation,

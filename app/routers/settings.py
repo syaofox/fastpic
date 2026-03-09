@@ -74,59 +74,6 @@ async def clear_task_status():
     return {"ok": True}
 
 
-@router.get("/api/task-events")
-async def task_events(request: Request):
-    """Server-Sent Events 实时推送任务进度"""
-    from fastapi.responses import StreamingResponse
-
-    async def event_generator():
-        queue = None
-        try:
-            queue = task_state.get_queue_for_sse()
-            last_sent_status = None
-
-            while True:
-                if await request.is_disconnected():
-                    break
-
-                try:
-                    await asyncio.wait_for(queue.get(), timeout=25)
-                except TimeoutError:
-                    yield "data: \n\n"
-                    continue
-                except Exception:
-                    break
-
-                try:
-                    status = task_state.get_status()
-                    if status:
-                        last_sent_status = status
-                        yield f"data: {status}\n\n"
-                    elif last_sent_status and last_sent_status.get("finished_at"):
-                        yield f"data: {last_sent_status}\n\n"
-                        last_sent_status = None
-                except Exception:
-                    break
-        except Exception:
-            pass
-        finally:
-            if queue is not None:
-                try:
-                    yield "data: \n\n"
-                except Exception:
-                    pass
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 @router.get("/api/queue-status")
 async def get_queue_status():
     """获取队列状态"""

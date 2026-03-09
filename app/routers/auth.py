@@ -14,10 +14,10 @@ EXCLUDED_PATHS = {
     "/login",
     "/favicon.ico",
     "/api/scan-status",
-    "/api/task-events",
     "/api/task-status",
     "/api/task-status/clear",
     "/api/queue-status",
+    "/ws",
 }
 
 

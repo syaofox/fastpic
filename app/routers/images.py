@@ -32,7 +32,7 @@ from app.models import (
     get_async_session,
     natural_sort_key,
 )
-from app.schemas import DeleteImagesRequest, DownloadZipRequest
+from app.schemas import ApiResponse, DeleteImagesRequest, DownloadZipRequest
 from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.utils.folder_tree import invalidate_folder_tree_cache
@@ -175,10 +175,10 @@ async def delete_images(
 ):
     """删除指定 ID 的图片（数据库记录 + 原图 + 缓存），分批处理支持大批量"""
     if not task_state.start_task("delete-images"):
-        return {"deleted": 0, "error": "有任务正在进行中，请等待完成后再操作"}
+        return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
     try:
         if not body.ids:
-            return {"deleted": 0}
+            return ApiResponse.success({"deleted": 0})
 
         all_images = []
         for i in range(0, len(body.ids), IN_CLAUSE_BATCH_SIZE):
@@ -221,10 +221,10 @@ async def delete_images(
             else:
                 invalidate_folder_tree_cache("")
         task_state.end_task({"deleted": len(all_images)})
-        return {"deleted": len(all_images)}
+        return ApiResponse.success({"deleted": len(all_images)}, f"已删除 {len(all_images)} 项")
     except Exception as e:
         task_state.fail_task(str(e))
-        raise
+        return ApiResponse.error(str(e))
 
 
 @router.get("/download/image")

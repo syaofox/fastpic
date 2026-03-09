@@ -1031,11 +1031,7 @@ function deleteCurrentImage() {
         var btn = document.getElementById('modal-delete-btn');
         if (btn) btn.disabled = true;
 
-        fetch('/api/delete-images', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ids: [imageId]})
-        }).then(function(r) { return r.json(); }).then(function(data) {
+        window.operationService.deleteImages([imageId]).then(function(data) {
             // 从列表中移除当前项
             modalImages.splice(modalIndex, 1);
             modalImageIds.splice(modalIndex, 1);
@@ -1060,7 +1056,6 @@ function deleteCurrentImage() {
             if (btn) btn.disabled = false;
         }).catch(function(err) {
             console.error('删除失败:', err);
-            if (typeof showToast === 'function') showToast('删除失败', 'error');
             if (btn) btn.disabled = false;
         });
     }, null, { variant: 'danger' });
@@ -3162,47 +3157,11 @@ document.addEventListener('keydown', function(e) {
             fabDelBtn.innerHTML = '<span>删除中...</span>';
         }
 
-        var promises = [];
-
-        if (imageIds.length > 0) {
-            promises.push(
-                fetch('/api/delete-images', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ids: imageIds})
-                }).then(function(r) { return r.json(); })
-            );
-        }
-
-        if (folderPaths.length > 0) {
-            promises.push(
-                fetch('/api/delete-folders', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({paths: folderPaths})
-                }).then(function(r) { return r.json(); })
-            );
-        }
-
-        Promise.all(promises).then(function(results) {
-            var totalDeleted = 0;
-            results.forEach(function(data) {
-                totalDeleted += (data.deleted || 0);
-            });
-            if (totalDeleted > 0 && typeof showToast === 'function') {
-                showToast('已删除 ' + totalDeleted + ' 项', 'success');
-            }
+        window.operationService.batchDelete(imageIds, folderPaths).then(function(result) {
             exitSelectMode();
             refreshGallery();
         }).catch(function(err) {
             console.error('删除失败:', err);
-            if (typeof showToast === 'function') showToast('删除失败，请查看控制台日志', 'error');
-            if (delBtn) delBtn.disabled = false;
-            if (fabDelBtn) {
-                fabDelBtn.disabled = false;
-                fabDelBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>\n            删除';
-            }
-            updateDeleteButton();
         }).finally(function() {
             if (window.hideOperationLoading) window.hideOperationLoading();
             if (delBtn) delBtn.disabled = false;
@@ -3358,22 +3317,10 @@ document.addEventListener('keydown', function(e) {
             var currentPath = browser.getPath();
             var promises = [];
             if (imgIds.length > 0) {
-                promises.push(
-                    fetch('/api/move-images', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ids: imgIds, target_path: currentPath})
-                    }).then(function(r) { return r.json(); })
-                );
+                promises.push(window.operationService.moveImages(imgIds, currentPath));
             }
             if (folderPaths.length > 0) {
-                promises.push(
-                    fetch('/api/move-folders', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({paths: folderPaths, target_path: currentPath})
-                    }).then(function(r) { return r.json(); })
-                );
+                promises.push(window.operationService.moveFolders(folderPaths, currentPath));
             }
 
             Promise.all(promises).then(function(results) {
@@ -3394,11 +3341,6 @@ document.addEventListener('keydown', function(e) {
                         updateDeleteButton();
                         if (_selectedImages.size === 0 && _selectedFolders.size === 0) { exitSelectMode(); }
                     }
-                    if (allErrors.length > 0) {
-                        if (typeof showToast === 'function') showToast('已移动 ' + totalMoved + ' 项，失败 ' + allErrors.length + ' 项：' + allErrors.join('；'), 'warning');
-                    } else {
-                        if (typeof showToast === 'function') showToast('已移动 ' + totalMoved + ' 项', 'success');
-                    }
                     if (!fromModal) {
                         refreshGallery();
                     }
@@ -3415,7 +3357,6 @@ document.addEventListener('keydown', function(e) {
                 }
             }).catch(function(err) {
                 console.error('移动失败:', err);
-                if (typeof showToast === 'function') showToast('移动失败', 'error');
                 errorEl.textContent = '请求失败: ' + err;
                 errorEl.classList.remove('hidden');
                 confirmBtn.disabled = false;

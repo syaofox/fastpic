@@ -33,7 +33,7 @@ from app.models import (
     get_async_session,
     init_db,
 )
-from app.routers import auth, folders, images, settings, tags
+from app.routers import auth, folders, images, settings, tags, websocket
 from app.services.scan_state import begin_scan, end_scan
 from app.services.scanner import run_db_only_validation, run_full_scan
 from app.services.watcher import start_watcher
@@ -107,6 +107,7 @@ app.include_router(tags.router)
 app.include_router(images.router)
 app.include_router(folders.router)
 app.include_router(settings.router)
+app.include_router(websocket.router)
 
 
 @app.get("/favicon.ico")

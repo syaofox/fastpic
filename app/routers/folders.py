@@ -21,6 +21,7 @@ from app.config import (
 from app.models import FolderThumbnail, Image, ImageTag, get_async_session
 from app.schemas import (
     AddFolderThumbnailRequest,
+    ApiResponse,
     BatchRenameInfoRequest,
     BatchRenameRequest,
     CreateFolderRequest,
@@ -63,13 +64,13 @@ async def move_images(
 ):
     """将指定图片移动到目标文件夹"""
     if not task_state.start_task("move-images"):
-        return {"moved": 0, "errors": ["有任务正在进行中，请等待完成后再操作"]}
+        return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
     try:
         if not body.ids:
-            return {"moved": 0, "errors": []}
+            return ApiResponse.success({"moved": 0, "errors": []})
         target_path = normalize_path(body.target_path, allow_empty=True)
         if target_path is None:
-            return {"moved": 0, "errors": ["目标路径不合法"]}
+            return ApiResponse.error("目标路径不合法")
         target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
         images: list[Image] = []
@@ -114,10 +115,12 @@ async def move_images(
         if moved > 0:
             invalidate_folder_tree_cache(target_path)
         task_state.end_task({"moved": moved})
-        return {"moved": moved, "errors": errors}
+        if errors:
+            return ApiResponse.partial(f"已移动 {moved} 项", {"moved": moved, "errors": errors}, errors=errors)
+        return ApiResponse.success({"moved": moved}, f"已移动 {moved} 项")
     except Exception as e:
         task_state.fail_task(str(e))
-        raise
+        return ApiResponse.error(str(e))
 
 
 @router.post("/move-folders")
@@ -127,13 +130,13 @@ async def move_folders(
 ):
     """将指定文件夹（含子文件夹和图片）移动到目标父目录"""
     if not task_state.start_task("move-folders"):
-        return {"moved": 0, "errors": ["有任务正在进行中，请等待完成后再操作"]}
+        return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
     try:
         if not body.paths:
-            return {"moved": 0, "errors": []}
+            return ApiResponse.success({"moved": 0, "errors": []})
         target_path = normalize_path(body.target_path, allow_empty=True)
         if target_path is None:
-            return {"moved": 0, "errors": ["目标路径不合法"]}
+            return ApiResponse.error("目标路径不合法")
         target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
         moved = 0
@@ -187,10 +190,12 @@ async def move_folders(
             if not any("路径冲突" in e for e in errors):
                 errors.append("路径冲突，请重试")
         task_state.end_task({"moved": moved})
-        return {"moved": moved, "errors": errors}
+        if errors:
+            return ApiResponse.partial(f"已移动 {moved} 个文件夹", {"moved": moved, "errors": errors}, errors=errors)
+        return ApiResponse.success({"moved": moved}, f"已移动 {moved} 个文件夹")
     except Exception as e:
         task_state.fail_task(str(e))
-        raise
+        return ApiResponse.error(str(e))
 
 
 @router.post("/rename-folder")
@@ -503,10 +508,10 @@ async def delete_folders(
 ):
     """删除指定文件夹路径下所有图片（数据库 + 文件系统），并删除文件夹目录"""
     if not task_state.start_task("delete-folders"):
-        return {"deleted_images": 0, "deleted_folders": 0, "error": "有任务正在进行中，请等待完成后再操作"}
+        return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
     try:
         if not body.paths:
-            return {"deleted_images": 0, "deleted_folders": 0}
+            return ApiResponse.success({"deleted_images": 0, "deleted_folders": 0})
         total_images = 0
         total_folders = 0
         for folder_path in body.paths:
@@ -528,10 +533,13 @@ async def delete_folders(
         if total_folders > 0:
             invalidate_folder_tree_cache(body.paths[0] if len(body.paths) == 1 else None)
         task_state.end_task({"deleted_images": total_images, "deleted_folders": total_folders})
-        return {"deleted_images": total_images, "deleted_folders": total_folders}
+        return ApiResponse.success(
+            {"deleted_images": total_images, "deleted_folders": total_folders},
+            f"已删除 {total_folders} 个文件夹和 {total_images} 个文件",
+        )
     except Exception as e:
         task_state.fail_task(str(e))
-        raise
+        return ApiResponse.error(str(e))
 
 
 task_queue = TaskQueue()
