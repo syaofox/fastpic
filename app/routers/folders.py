@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import delete, select
+from sqlmodel import select
 
 from app.config import (
     BATCH_COMMIT_SIZE,
@@ -40,7 +40,6 @@ from app.utils.folder_tree import (
     get_subfolders,
     invalidate_folder_tree_cache,
 )
-from app.utils.hash_utils import compute_file_md5
 from app.utils.image_batch import (
     collect_image_items_by_prefix,
     iter_images_by_path_prefix,
@@ -541,16 +540,15 @@ task_queue = TaskQueue()
 
 
 async def _run_merge_folders_task(task: QueueTask) -> dict:
-    """合并文件夹任务处理器"""
+    """合并文件夹任务处理器（修正版）"""
     from sqlalchemy import delete, select
-
-    from app.models import Image, ImageTag, async_session_factory
+    from app.models import Image, async_session_factory
 
     body = task.params or {}
     folder_a = normalize_path(body.get("folder_a", ""), allow_empty=False)
     folder_b = normalize_path(body.get("folder_b", ""), allow_empty=False)
     target = body.get("target", "auto")
-    duplicate_mode = body.get("duplicate_mode", "rename")
+    duplicate_mode = body.get("duplicate_mode", "rename")  # skip / overwrite / rename
 
     if folder_a is None or folder_b is None:
         return {"ok": False, "error": "路径不合法"}
@@ -569,15 +567,28 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
     photos_dir = PHOTOS_DIR.resolve()
     media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
-    def _belongs_to(rel: str, prefix: str) -> bool:
-        return rel == prefix or rel.startswith(prefix + "/")
-
+    # 收集两个文件夹内的所有图片（仅需 id 和 relative_path）
     async with async_session_factory() as session:
-        items_a = await collect_image_items_by_prefix(session, folder_a, "a", FOLDER_OP_BATCH_SIZE)
-        items_b = await collect_image_items_by_prefix(session, folder_b, "b", FOLDER_OP_BATCH_SIZE)
-        count_a, count_b = len(items_a), len(items_b)
-        print(f"[debug] folder_a={folder_a} items_a={count_a}, folder_b={folder_b} items_b={count_b}", flush=True)
+        # 辅助函数：获取某个前缀下的所有图片 (id, relative_path, source_letter)
+        async def collect_items(prefix: str, letter: str):
+            items = []
+            stmt = select(Image.id, Image.relative_path).where(
+                Image.relative_path.startswith(prefix + "/") if prefix else Image.relative_path != ""
+            )
+            if prefix:
+                stmt = stmt.where((Image.relative_path == prefix) | (Image.relative_path.startswith(prefix + "/")))
+            result = await session.execute(stmt)
+            for row in result:
+                img_id, rel_path = row
+                items.append((img_id, rel_path, letter))
+            return items
 
+        items_a = await collect_items(folder_a, "a")
+        items_b = await collect_items(folder_b, "b")
+        all_items = items_a + items_b
+        count_a, count_b = len(items_a), len(items_b)
+
+        # 确定目标文件夹（保留图片较多的作为目标，或用户指定）
         if target == "folder_b" or (target == "auto" and count_b > count_a):
             target_prefix, source_prefix = folder_b, folder_a
             source_letter = "a"
@@ -587,126 +598,178 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
             source_letter = "b"
             source_path, target_path = path_b, path_a
 
-        preferred = "a" if count_a >= count_b else "b"
-        by_name: dict[str, list[tuple[int, str, str, str | None]]] = defaultdict(list)
-        for item in items_a + items_b:
-            img_id, rel_path, src, md5_hash = item
-            full = photos_dir / rel_path
-            if not full.is_file() or full.suffix.lower() not in media_extensions:
-                continue
-            filename = os.path.basename(rel_path)
-            by_name[filename].append(item)
-
-        to_keep: dict[str, tuple[int, str, str, str | None]] = {}
-        to_delete: set[int] = set()
-        for filename, items in by_name.items():
-            from_preferred = [x for x in items if x[2] == preferred]
-            from_other = [x for x in items if x[2] != preferred]
-            if from_preferred:
-                keeper = min(from_preferred, key=lambda x: x[1])
-                to_keep[filename] = keeper
-                for x in from_preferred:
-                    if x[0] != keeper[0]:
-                        to_delete.add(x[0])
-                for x in from_other:
-                    to_delete.add(x[0])
+        # 构建目标路径到图片项的映射（目标路径 = target_prefix + 相对后缀）
+        target_map = {}  # 目标路径 -> (img_id, source_letter)
+        conflict_map = {}  # 目标路径 -> 冲突的图片项列表
+        for img_id, rel_path, src in all_items:
+            # 计算该文件在目标文件夹中的预期路径
+            if rel_path.startswith(source_prefix + "/"):
+                suffix = rel_path[len(source_prefix) + 1 :]  # 去掉源前缀和斜杠
+                target_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
+            elif rel_path == source_prefix:
+                target_rel = target_prefix
+            elif rel_path.startswith(target_prefix + "/") or rel_path == target_prefix:
+                # 来自目标文件夹本身，无需移动，但需要记录目标路径以供冲突检测
+                target_rel = rel_path
+                src = "target"  # 标记为已经存在目标中的文件
             else:
-                keeper = min(from_other, key=lambda x: x[1])
-                to_keep[filename] = keeper
-                for x in from_other:
-                    if x[0] != keeper[0]:
-                        to_delete.add(x[0])
+                continue  # 不应该发生
 
-        to_move: list[tuple[int, str, str]] = []
-        duplicate_hashes: set[str] = set()
-        for filename, items in by_name.items():
-            from_source = [x for x in items if x[2] == source_letter]
-            for img_id, rel_path, src, _ in from_source:
-                to_move.append((img_id, rel_path, filename))
-            if len(items) > 1:
-                duplicate_hashes.add(filename)
-        print(
-            f"[debug] target_prefix={target_prefix}, source_prefix={source_prefix}, source_letter={source_letter}",
-            flush=True,
-        )
-        print(
-            f"[debug] to_keep count={len(to_keep)}, to_delete count={len(to_delete)}, to_move count={len(to_move)}",
-            flush=True,
-        )
+            # 检查是否已存在相同目标路径
+            if target_rel in target_map:
+                # 发现冲突，记录到冲突列表
+                if target_rel not in conflict_map:
+                    conflict_map[target_rel] = [target_map[target_rel]]
+                conflict_map[target_rel].append((img_id, rel_path, src))
+                # 同时从 target_map 中移除（因为我们稍后将统一处理冲突）
+                del target_map[target_rel]
+            elif target_rel in conflict_map:
+                # 已经是冲突路径，直接追加
+                conflict_map[target_rel].append((img_id, rel_path, src))
+            else:
+                target_map[target_rel] = (img_id, rel_path, src)
 
-        moved_ids = {item[0] for item in to_move}
-        for img_id in to_delete:
-            if img_id in moved_ids:
-                continue
-            result = await session.execute(select(Image).where(Image.id == img_id))
-            img = result.scalar_one_or_none()
-            if img:
-                delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
-                await session.execute(delete(ImageTag).where(ImageTag.image_id == img_id))
-                await session.delete(img)
+        # 处理冲突：根据 duplicate_mode 决定每个冲突路径保留哪个文件
+        to_move = []  # 需要移动的图片 (img_id, source_rel, target_rel)
+        to_delete = []  # 需要删除的图片 (img_id)
+        skipped_ids = set()  # 跳过移动的图片ID（用于 skip 模式）
 
+        for target_rel, items in conflict_map.items():
+            # 分离来源：来自源文件夹的（source_letter）和来自目标文件夹的（"target"）
+            from_source = [it for it in items if it[2] == source_letter]
+            from_target = [it for it in items if it[2] == "target"]
+            # 来自源文件夹的冲突项
+            for img_id, rel_path, src in from_source:
+                if duplicate_mode == "skip":
+                    # skip：不移动也不删除，保留在原处
+                    skipped_ids.add(img_id)
+                elif duplicate_mode == "overwrite":
+                    # overwrite：用源文件覆盖目标文件
+                    # 首先删除目标文件（如果存在）
+                    for t_id, t_rel, t_src in from_target:
+                        # 删除目标文件（文件系统 + 数据库）
+                        delete_image_files(t_rel, PHOTOS_DIR, CACHE_DIR)
+                        # 删除数据库记录
+                        result = await session.execute(select(Image).where(Image.id == t_id))
+                        img = result.scalar_one_or_none()
+                        if img:
+                            await session.execute(delete(ImageTag).where(ImageTag.image_id == t_id))
+                            await session.delete(img)
+                            to_delete.append(t_id)
+                    # 将源文件加入移动列表
+                    to_move.append((img_id, rel_path, target_rel))
+                else:  # rename
+                    # rename：为目标文件生成新文件名，保留原目标文件
+                    # 目标路径已存在，需要生成不冲突的新路径
+                    new_target_rel = target_rel  # 先尝试原目标路径
+                    parent = Path(new_target_rel).parent
+                    name = Path(new_target_rel).name
+                    # 使用 unique_path 生成新文件名，但需要基于目标目录和文件名
+                    # 注意：unique_path 期望一个完整的目标文件路径，我们构造临时路径
+                    temp_path = target_path / name  # 假设新文件在目标文件夹根？实际上要考虑子目录
+                    # 但 target_rel 可能包含子目录，需要准确定位
+                    full_target = photos_dir / target_rel
+                    new_full = unique_path(full_target.parent, full_target.name, suffix_style="paren")
+                    new_target_rel = str(new_full.relative_to(photos_dir)).replace("\\", "/")
+                    # 将源文件加入移动列表，使用新路径
+                    to_move.append((img_id, rel_path, new_target_rel))
+            # 来自目标文件夹的冲突项，如果没有被覆盖，则保留原样
+            for img_id, rel_path, src in from_target:
+                if duplicate_mode == "overwrite":
+                    # 已经在上面被删除，无需额外操作
+                    pass
+                else:
+                    # skip 或 rename 时，目标文件保留，无需移动或删除
+                    pass
+
+        # 处理无冲突的文件（target_map 中的项）
+        for target_rel, (img_id, rel_path, src) in target_map.items():
+            if src == source_letter:
+                # 来自源文件夹，需要移动
+                to_move.append((img_id, rel_path, target_rel))
+            # 来自目标文件夹的文件，无需处理
+
+        # 执行移动
         moved = 0
-        for img_id, rel_path, h in to_move:
+        for img_id, source_rel, target_rel in to_move:
+            if img_id in skipped_ids:
+                continue
+            # 查询图片对象
             result = await session.execute(select(Image).where(Image.id == img_id))
             img = result.scalar_one_or_none()
             if not img:
                 continue
-            suffix = rel_path[len(source_prefix) :].lstrip("/")
-            new_rel = f"{target_prefix}/{suffix}" if suffix else target_prefix
-            new_full = target_path / suffix if suffix else target_path
-            new_full.parent.mkdir(parents=True, exist_ok=True)
-            if new_full.exists():
+
+            source_full = photos_dir / source_rel
+            target_full = photos_dir / target_rel
+            target_full.parent.mkdir(parents=True, exist_ok=True)
+
+            # 检查目标是否存在（可能在 rename 时已确保不存在，但仍需防御）
+            if target_full.exists():
+                # 理论上在冲突处理中已解决，但以防万一
                 if duplicate_mode == "skip":
                     continue
                 elif duplicate_mode == "overwrite":
-                    delete_image_files(new_rel, PHOTOS_DIR, CACHE_DIR)
-                    result = await session.execute(select(Image).where(Image.relative_path == new_rel))
+                    # 删除目标文件（记录也要删除）
+                    delete_image_files(target_rel, PHOTOS_DIR, CACHE_DIR)
+                    result = await session.execute(select(Image).where(Image.relative_path == target_rel))
                     existing_img = result.scalar_one_or_none()
                     if existing_img:
                         await session.execute(delete(ImageTag).where(ImageTag.image_id == existing_img.id))
                         await session.delete(existing_img)
-                else:
-                    new_full = unique_path(new_full.parent, new_full.name, suffix_style="paren")
-                    new_rel = str(new_full.relative_to(PHOTOS_DIR)).replace("\\", "/")
+                else:  # rename
+                    # 重新生成唯一路径
+                    target_full = unique_path(target_full.parent, target_full.name, suffix_style="paren")
+                    target_rel = str(target_full.relative_to(photos_dir)).replace("\\", "/")
+
+            # 移动文件
             try:
-                await asyncio.to_thread(shutil.move, str(photos_dir / rel_path), str(new_full))
+                await asyncio.to_thread(shutil.move, str(source_full), str(target_full))
             except OSError as e:
                 await session.rollback()
-                return {"ok": False, "error": f"移动文件失败 {rel_path}: {e}"}
+                return {"ok": False, "error": f"移动文件失败 {source_rel}: {e}"}
+
+            # 更新数据库记录
             await update_image_path_and_regenerate_thumbnail(
-                img, new_rel, new_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+                img, target_rel, target_full, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
             )
             session.add(img)
             moved += 1
 
+            # 定期提交（可选）
+            if moved % BATCH_COMMIT_SIZE == 0:
+                await session.commit()
+
+        # 删除所有标记为删除的图片（目前只有 overwrite 模式下删除目标文件，已直接在冲突处理中删除）
+        # 但 to_delete 列表未使用，因为我们直接在冲突处理中删除了目标文件记录。
+        # 若需要额外删除，可在此处处理 to_delete（当前为空）
+
+        # 删除空源文件夹
         if source_path.exists():
+            # 递归删除空目录
             for root, dirs, files in os.walk(str(source_path), topdown=False):
                 for d in dirs:
                     try:
                         os.rmdir(os.path.join(root, d))
                     except OSError:
                         pass
-            if not os.listdir(str(source_path)):
-                try:
-                    os.rmdir(str(source_path))
-                except OSError:
-                    pass
-        try:
-            await session.commit()
-            invalidate_folder_tree_cache(target_prefix)
-            print(
-                f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
-                flush=True,
-            )
-            return {
-                "ok": True,
-                "moved": moved,
-                "deleted": len(to_delete),
-                "target": target_prefix,
-            }
-        except IntegrityError:
-            await session.rollback()
-            return {"ok": False, "error": "路径冲突，请重试"}
+            try:
+                os.rmdir(str(source_path))
+            except OSError:
+                pass  # 非空则保留
+
+        await session.commit()
+        invalidate_folder_tree_cache(target_prefix)
+        print(
+            f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
+            flush=True,
+        )
+        return {
+            "ok": True,
+            "moved": moved,
+            "deleted": len(to_delete),
+            "target": target_prefix,
+        }
 
 
 task_queue.register_handler("merge-folders", _run_merge_folders_task)
@@ -721,6 +784,7 @@ async def merge_folders(
         "folder_a": body.folder_a,
         "folder_b": body.folder_b,
         "target": body.target,
+        "duplicate_mode": body.duplicate_mode,
     }
     queue_id = await task_queue.add_task("merge-folders", params, priority=10)
     status = task_queue.get_status()

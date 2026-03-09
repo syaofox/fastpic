@@ -1,11 +1,14 @@
 {
-  "task_id": "d76e463a-3abc-44af-9fad-0e9c099ec3f8",
-  "task_type": "delete-images",
+  "task_id": "3efe0e3f-6af5-4f4f-9e9f-9fb64bddf831",
+  "task_type": "merge-folders",
   "title": "正在处理...",
-  "started_at": "2026-03-09T10:57:13.403808",
-  "finished_at": "2026-03-09T10:57:13.605330",
+  "started_at": "2026-03-09T11:39:00.214316",
+  "finished_at": "2026-03-09T11:39:00.328164",
   "result": {
-    "deleted": 351
+    "ok": true,
+    "moved": 8,
+    "deleted": 0,
+    "target": "test_merge/1"
   },
   "error": null,
   "current_operation": "已完成",
