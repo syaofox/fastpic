@@ -5,7 +5,11 @@ class ToastContainer {
     }
     
     init() {
-        if (document.getElementById('toast-container')) return;
+        const existing = document.getElementById('toast-container');
+        if (existing) {
+            this.container = existing;
+            return;
+        }
         this.container = document.createElement('div');
         this.container.id = 'toast-container';
         this.container.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 pointer-events-none';
