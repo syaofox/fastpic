@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('htmx:afterSwap', (event) => {
     if (event.detail.target.id === 'gallery-container' || 
         event.detail.target.id === 'main-content') {
-        if (!wsService.ws || wsService.ws.readyState !== WebSocket.OPEN) {
+        if (!wsService.ws || (wsService.ws.readyState !== WebSocket.OPEN && wsService.ws.readyState !== WebSocket.CONNECTING)) {
             wsService.connect();
         }
     }

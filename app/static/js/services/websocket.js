@@ -8,9 +8,15 @@ class WebSocketService {
         this.maxReconnectAttempts = 10;
         this.reconnectAttempts = 0;
         this.shouldReconnect = true;
+        this.connecting = false;
     }
     
     connect() {
+        if (this.connecting || (this.ws && this.ws.readyState !== WebSocket.CLOSED)) {
+            return;
+        }
+        this.connecting = true;
+        
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         
@@ -19,6 +25,7 @@ class WebSocketService {
         this.ws.onopen = () => {
             console.log('WebSocket connected');
             this.reconnectAttempts = 0;
+            this.connecting = false;
         };
         
         this.ws.onmessage = (event) => {
@@ -32,6 +39,7 @@ class WebSocketService {
         
         this.ws.onclose = () => {
             console.log('WebSocket disconnected');
+            this.connecting = false;
             if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.reconnectAttempts++;
                 setTimeout(() => this.connect(), this.reconnectInterval);
@@ -40,6 +48,7 @@ class WebSocketService {
         
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
+            this.connecting = false;
         };
     }
     
