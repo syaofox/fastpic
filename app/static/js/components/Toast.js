@@ -18,6 +18,11 @@ class ToastContainer {
     }
     
     show(message, type = 'info', duration = 4000) {
+        if (!this.container) {
+            this.init();
+        }
+        if (!this.container) return;
+
         const config = {
             success: { classes: 'bg-green-100 text-green-800 border border-green-200', icon: '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>' },
             error: { classes: 'bg-red-100 text-red-800 border border-red-200', icon: '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' },
