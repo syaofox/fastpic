@@ -29,6 +29,7 @@ from app.schemas import (
     MergeFoldersRequest,
     MoveFoldersRequest,
     MoveImagesRequest,
+    RegenerateCoverRequest,
     RenameFolderRequest,
     RenameImageRequest,
 )
@@ -912,6 +913,55 @@ async def remove_folder_thumbnail(
     await session.delete(ft)
     await session.commit()
     return {"ok": True}
+
+
+@router.post("/regenerate-covers")
+async def regenerate_covers(
+    body: RegenerateCoverRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """重建指定文件夹的封面：删除旧封面，从文件夹中选取最新的图片作为新封面"""
+    from sqlalchemy import delete
+
+    if not body.paths:
+        return ApiResponse.success({"updated": 0}, "无文件夹需要处理")
+
+    updated_count = 0
+    errors = []
+
+    for folder_path in body.paths:
+        folder_path = normalize_path(folder_path, allow_empty=False)
+        if folder_path is None:
+            errors.append("路径不合法")
+            continue
+
+        folder_fs_path = PHOTOS_DIR / folder_path
+        if not folder_fs_path.exists() or not folder_fs_path.is_dir():
+            errors.append(f"文件夹不存在: {folder_path}")
+            continue
+
+        await session.execute(delete(FolderThumbnail).where(FolderThumbnail.folder_path == folder_path))
+
+        result = await session.execute(
+            select(Image.relative_path)
+            .where(
+                Image.relative_path.startswith(folder_path + "/"),
+                Image.media_type == "image",
+            )
+            .order_by(Image.modified_at.desc())
+            .limit(4)
+        )
+        cover_images = list(result.scalars().all())
+
+        for i, rel_path in enumerate(cover_images):
+            session.add(FolderThumbnail(folder_path=folder_path, image_relative_path=rel_path, display_order=i))
+
+        await session.commit()
+        updated_count += 1
+
+    if errors:
+        return ApiResponse.partial("已处理 " + str(updated_count) + " 个文件夹", {"updated": updated_count}, errors)
+    return ApiResponse.success({"updated": updated_count}, "已重建 " + str(updated_count) + " 个文件夹封面")
 
 
 @router.get("/subfolders")

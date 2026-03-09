@@ -2898,6 +2898,7 @@ document.addEventListener('keydown', function(e) {
         var downloadBtn = document.getElementById('download-selected-btn');
         var fabMoveBtn = document.getElementById('select-mode-fab-move');
         var fabRenameBtn = document.getElementById('select-mode-fab-rename');
+        var fabRegenCoverBtn = document.getElementById('select-mode-fab-regen-cover');
         var countText = document.getElementById('delete-count-text');
         var fab = document.getElementById('select-mode-fab');
         var fabCount = document.getElementById('select-mode-fab-count');
@@ -2912,6 +2913,10 @@ document.addEventListener('keydown', function(e) {
                 var showRename = (folderCount === 1 && imgCount === 0) || (imgCount === 1 && folderCount === 0) || (folderCount > 1 && imgCount === 0) || (imgCount > 1 && folderCount === 0);
                 showRename ? fabRenameBtn.classList.remove('hidden') : fabRenameBtn.classList.add('hidden');
             }
+            if (fabRegenCoverBtn) {
+                var showRegenCover = folderCount > 0 && imgCount === 0;
+                showRegenCover ? fabRegenCoverBtn.classList.remove('hidden') : fabRegenCoverBtn.classList.add('hidden');
+            }
             if (fab) fab.classList.remove('hidden');
             if (fabCount) fabCount.textContent = '已选 ' + total + ' 项';
             if (scrollEl) scrollEl.classList.add('pb-24');
@@ -2921,6 +2926,7 @@ document.addEventListener('keydown', function(e) {
             if (moveBtn) moveBtn.classList.add('hidden');
             if (fabMoveBtn) fabMoveBtn.classList.add('hidden');
             if (fabRenameBtn) fabRenameBtn.classList.add('hidden');
+            if (fabRegenCoverBtn) fabRegenCoverBtn.classList.add('hidden');
             if (fab) fab.classList.add('hidden');
             if (scrollEl) scrollEl.classList.remove('pb-24');
         }
@@ -3039,6 +3045,27 @@ document.addEventListener('keydown', function(e) {
         // 显示自定义确认对话框
         showDeleteConfirmDialog(msg, function() {
             executeDelete(Array.from(_selectedImages), Array.from(_selectedFolders));
+        });
+    };
+
+    window.regenerateSelectedCovers = function() {
+        var folderCount = _selectedFolders.size;
+        if (folderCount === 0) return;
+
+        var msg = '确定要重建选中文件夹的封面吗？\n\n';
+        msg += '• ' + folderCount + ' 个文件夹\n';
+        msg += '\n这将删除旧封面并使用最新的图片作为新封面。';
+
+        showDeleteConfirmDialog(msg, function() {
+            var folderPaths = Array.from(_selectedFolders);
+            window.showOperationLoading('正在重建封面...');
+            window.operationService.regenerateCovers(folderPaths).then(function(data) {
+                window.hideOperationLoading();
+                exitSelectMode();
+                window.location.reload();
+            }).catch(function(err) {
+                window.hideOperationLoading();
+            });
         });
     };
 

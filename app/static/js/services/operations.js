@@ -93,6 +93,10 @@ class OperationService {
         return this.execute('merge-folder', () => api.operations.mergeFolder(sourcePath, targetPath));
     }
     
+    regenerateCovers(paths) {
+        return this.execute('regenerate-covers', () => api.operations.regenerateCovers(paths));
+    }
+    
     async batchDelete(imageIds, folderPaths) {
         const promises = [];
         if (imageIds?.length) promises.push(this.deleteImages(imageIds));

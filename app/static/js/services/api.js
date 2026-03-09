@@ -60,6 +60,7 @@ export const api = {
         renameImage: (imageId, newName) => api.put(`/api/rename-image`, { id: imageId, new_filename: newName }),
         batchRename: (items) => api.post('/api/batch-rename', { items }),
         mergeFolder: (sourcePath, targetPath) => api.post('/api/merge-folders', { folder_a: sourcePath, folder_b: targetPath }),
+        regenerateCovers: (paths) => api.post('/api/regenerate-covers', { paths }),
     },
     
     tasks: {

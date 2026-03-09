@@ -68,6 +68,10 @@ class DeleteFoldersRequest(BaseModel):
     paths: list[str]
 
 
+class RegenerateCoverRequest(BaseModel):
+    paths: list[str]
+
+
 class MergeFoldersRequest(BaseModel):
     folder_a: str
     folder_b: str
