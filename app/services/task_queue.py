@@ -248,6 +248,12 @@ class TaskQueue:
         self._tasks = {k: v for k, v in self._tasks.items() if v}
         self._running = {}
 
+    @classmethod
+    def reset_instance(cls) -> None:
+        """重置单例（仅用于测试）"""
+        cls._instance = None
+        cls._initialized = False
+
 
 async def get_task_queue() -> TaskQueue:
     """获取任务队列实例"""
