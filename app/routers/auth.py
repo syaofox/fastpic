@@ -10,6 +10,16 @@ from app.config import ACCESS_PASSWORD, SESSION_TOKEN
 
 router = APIRouter(tags=["auth"])
 
+EXCLUDED_PATHS = {
+    "/login",
+    "/favicon.ico",
+    "/api/scan-status",
+    "/api/task-events",
+    "/api/task-status",
+    "/api/task-status/clear",
+    "/api/queue-status",
+}
+
 
 def setup_auth_middleware(app):
     """注册认证中间件到 app"""
@@ -18,20 +28,52 @@ def setup_auth_middleware(app):
     async def auth_middleware(request: Request, call_next):
         if not ACCESS_PASSWORD:
             return await call_next(request)
+
         path = request.url.path
-        if path in (
-            "/login",
-            "/favicon.ico",
-            "/api/scan-status",
-            "/api/task-events",
-            "/api/task-status",
-            "/api/task-status/clear",
-            "/api/queue-status",
-        ) or path.startswith("/static/"):
+        if path in EXCLUDED_PATHS or path.startswith("/static/"):
             return await call_next(request)
+
         token = request.cookies.get("fp_session")
         if not token or not hmac.compare_digest(token, SESSION_TOKEN):
             return RedirectResponse(url="/login", status_code=302)
+
+        try:
+            return await call_next(request)
+        except RuntimeError as e:
+            if str(e) == "No response returned.":
+                return
+            raise
+
+
+def setup_error_suppressor_middleware(app):
+    """抑制 BaseHTTPMiddleware 的 No response returned 错误"""
+
+    @app.middleware("http")
+    async def suppress_error_middleware(request: Request, call_next):
+        try:
+            response = await call_next(request)
+            return response
+        except RuntimeError as e:
+            if str(e) == "No response returned.":
+                from fastapi.responses import Response
+
+                return Response(status_code=204)
+            raise
+        except TypeError as e:
+            if "NoneType" in str(e) and "not callable" in str(e):
+                from fastapi.responses import Response
+
+                return Response(status_code=204)
+            raise
+
+        path = request.url.path
+        if path in EXCLUDED_PATHS or path.startswith("/static/"):
+            return await call_next(request)
+
+        token = request.cookies.get("fp_session")
+        if not token or not hmac.compare_digest(token, SESSION_TOKEN):
+            return RedirectResponse(url="/login", status_code=302)
+
         return await call_next(request)
 
 

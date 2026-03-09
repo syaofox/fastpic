@@ -82,24 +82,18 @@ class TaskQueue:
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
     ) -> None:
         """注册任务处理器"""
-
-        def wrapper():
-            return self._run_worker(task_type, handler)
-
         self._task_handlers[task_type] = handler
         self._semaphores[task_type] = asyncio.Semaphore(max_concurrent)
-        self._ensure_worker(task_type)
 
     def _ensure_worker(self, task_type: str) -> None:
-        """确保 Worker 正在运行"""
+        """确保 Worker 正在运行（延迟启动，仅在有事件循环时）"""
         if task_type not in self._workers or self._workers[task_type].done():
             handler = self._task_handlers.get(task_type)
             if handler:
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    return
                 self._workers[task_type] = loop.create_task(self._run_worker(task_type, handler))
 
     async def _run_worker(

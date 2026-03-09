@@ -99,6 +99,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)
+auth.setup_error_suppressor_middleware(app)
 auth.setup_auth_middleware(app)
 
 app.include_router(auth.router)

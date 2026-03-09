@@ -28,7 +28,19 @@ _queue: asyncio.Queue | None = None
 _lock = threading.Lock()
 
 
-def _get_queue() -> asyncio.Queue:
+def _get_queue() -> asyncio.Queue | None:
+    global _queue
+    if _queue is None:
+        try:
+            asyncio.get_running_loop()
+            _queue = asyncio.Queue()
+        except RuntimeError:
+            pass
+    return _queue
+
+
+async def _get_queue_async() -> asyncio.Queue:
+    """异步获取或创建队列"""
     global _queue
     if _queue is None:
         _queue = asyncio.Queue()
@@ -58,7 +70,7 @@ async def emit_progress(**kwargs) -> None:
                 callback(data)
         except Exception:
             pass
-    q = _get_queue()
+    q = await _get_queue_async()
     if not q.empty():
         try:
             q.get_nowait()
@@ -69,7 +81,10 @@ async def emit_progress(**kwargs) -> None:
 
 def get_queue_for_sse() -> asyncio.Queue:
     """获取 SSE 队列"""
-    return _get_queue()
+    q = _get_queue()
+    if q is None:
+        raise RuntimeError("Queue not initialized, call this in an async context")
+    return q
 
 
 @dataclass

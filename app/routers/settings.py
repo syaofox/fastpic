@@ -80,31 +80,41 @@ async def task_events(request: Request):
     from fastapi.responses import StreamingResponse
 
     async def event_generator():
-        queue = task_state.get_queue_for_sse()
-        last_sent_status = None
-        disconnected = False
+        queue = None
+        try:
+            queue = task_state.get_queue_for_sse()
+            last_sent_status = None
 
-        while True:
-            if await request.is_disconnected():
-                if not disconnected:
-                    disconnected = True
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    await asyncio.wait_for(queue.get(), timeout=25)
+                except TimeoutError:
                     yield "data: \n\n"
-                break
+                    continue
+                except Exception:
+                    break
 
-            try:
-                await asyncio.wait_for(queue.get(), timeout=25)
-
-                status = task_state.get_status()
-                if status:
-                    last_sent_status = status
-                    yield f"data: {status}\n\n"
-                elif last_sent_status and last_sent_status.get("finished_at"):
-                    yield f"data: {last_sent_status}\n\n"
-                    last_sent_status = None
-            except TimeoutError:
-                yield "data: \n\n"
-            except Exception:
-                break
+                try:
+                    status = task_state.get_status()
+                    if status:
+                        last_sent_status = status
+                        yield f"data: {status}\n\n"
+                    elif last_sent_status and last_sent_status.get("finished_at"):
+                        yield f"data: {last_sent_status}\n\n"
+                        last_sent_status = None
+                except Exception:
+                    break
+        except Exception:
+            pass
+        finally:
+            if queue is not None:
+                try:
+                    yield "data: \n\n"
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),
