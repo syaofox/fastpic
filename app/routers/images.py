@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from sqlalchemy import func
+from sqlalchemy import delete, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -25,6 +25,7 @@ from app.config import (
     UPLOAD_PARALLEL,
 )
 from app.models import (
+    FolderThumbnail,
     Image,
     ImageTag,
     Tag,
@@ -203,6 +204,10 @@ async def delete_images(
             asyncio.to_thread(_delete_files, photo_paths),
             asyncio.to_thread(_delete_files, cache_paths),
         )
+
+        deleted_paths = [img.relative_path for img in all_images]
+        if deleted_paths:
+            await session.execute(delete(FolderThumbnail).where(FolderThumbnail.image_relative_path.in_(deleted_paths)))
 
         for img in all_images:
             await session.delete(img)

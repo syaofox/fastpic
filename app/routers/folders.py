@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -102,8 +102,14 @@ async def move_images(
             except OSError as e:
                 errors.append(f"{img.filename}: {e}")
                 continue
+            old_rel = img.relative_path
             await update_image_path_and_regenerate_thumbnail(
                 img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS
+            )
+            await session.execute(
+                update(FolderThumbnail)
+                .where(FolderThumbnail.image_relative_path == old_rel)
+                .values(image_relative_path=new_rel)
             )
             session.add(img)
             moved += 1
@@ -165,6 +171,11 @@ async def move_folders(
             except OSError as e:
                 errors.append(f"{folder_path}: {e}")
                 continue
+
+            await session.execute(
+                update(FolderThumbnail).where(FolderThumbnail.folder_path == folder_path).values(folder_path=new_prefix)
+            )
+
             async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
                 for img in images:
                     suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path) :]
@@ -234,6 +245,10 @@ async def rename_folder(
     except OSError as e:
         return {"ok": False, "error": f"重命名失败: {e}"}
 
+    await session.execute(
+        update(FolderThumbnail).where(FolderThumbnail.folder_path == folder_path).values(folder_path=new_prefix)
+    )
+
     try:
         async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
             for img in images:
@@ -299,7 +314,13 @@ async def rename_image(
     except OSError as e:
         return {"ok": False, "error": f"重命名失败: {e}"}
 
+    old_rel = img.relative_path
     await update_image_path_and_regenerate_thumbnail(img, new_rel, dest_path, PHOTOS_DIR, CACHE_DIR, VIDEO_EXTENSIONS)
+    await session.execute(
+        update(FolderThumbnail)
+        .where(FolderThumbnail.image_relative_path == old_rel)
+        .values(image_relative_path=new_rel)
+    )
     session.add(img)
     try:
         await session.commit()
