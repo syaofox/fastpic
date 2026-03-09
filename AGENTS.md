@@ -79,6 +79,9 @@ uv run pyright
 - **路径处理**: 使用 `normalize_path(path, allow_empty=True/False)` 规范化输入
 - **SQL LIKE 查询**: 必须用 `escape_like(value)` 转义，配合 `LIKE_ESCAPE = "!"`
 - **错误处理**: `raise HTTPException(status_code=4xx, detail="简短中文")`
+- **API 响应**: 使用 `ApiResponse` 统一响应格式，返回 `ApiResponse.success/error/partial`
+- **WebSocket**: 使用 `message_broadcaster` 广播消息到客户端
+- **任务进度**: 使用 `task_state.async_update_progress()` 同步状态并推送 WebSocket
 - **命名**: 私有函数/变量加 `_` 前缀，常量全大写
 - **异常**: 使用具体异常类，捕获时指定具体类型
 - **行长度**: 最大 120 字符
@@ -89,6 +92,8 @@ uv run pyright
 - **HTMX**: `hx-get` + `hx-target` + `hx-swap="innerHTML"`
 - **安全**: `innerHTML` 写入用户数据必须用 `escapeHtml()` 转义
 - **CSS**: 使用 Tailwind 类
+- **JS 模块**: 使用 ES6 模块，通过 `main.js` 导出到 window
+- **操作服务**: 使用 `operationService` 封装 API 调用，自动处理响应和 Toast
 
 ## 项目结构
 
@@ -98,30 +103,39 @@ fastpic/
 │   ├── main.py                   # FastAPI 应用入口
 │   ├── config.py                 # 配置（环境变量解析）
 │   ├── models.py                 # SQLModel 数据模型
-│   ├── schemas.py                # Pydantic 请求/响应模型
+│   ├── schemas.py                # Pydantic 请求/响应模型（包含 ApiResponse）
 │   ├── app_common.py             # 公共依赖、依赖注入
 │   ├── routers/                  # 路由模块
-│   │   ├── auth.py               # 登录认证
-│   │   ├── folders.py            # 文件夹 API
-│   │   ├── images.py             # 图片/视频 API
+│   │   ├── auth.py              # 登录认证
+│   │   ├── folders.py           # 文件夹 API
+│   │   ├── images.py            # 图片/视频 API
 │   │   ├── settings.py           # 设置页面
-│   │   └── tags.py               # 标签管理
+│   │   ├── tags.py               # 标签管理
+│   │   └── websocket.py          # WebSocket 实时通信
 │   ├── services/                 # 业务服务
-│   │   ├── scanner.py            # 异步扫描与缩略图生成
-│   │   ├── scan_state.py         # 扫描状态管理
-│   │   └── watcher.py             # 文件监控（热重载）
+│   │   ├── scanner.py           # 异步扫描与缩略图生成
+│   │   ├── scan_state.py        # 扫描状态管理
+│   │   ├── watcher.py           # 文件监控（热重载）
+│   │   ├── message_broadcaster.py # WebSocket 消息广播
+│   │   └── task_service.py      # 任务执行服务
 │   ├── utils/                    # 工具函数
-│   │   ├── path_utils.py         # 路径规范化
-│   │   ├── hash_utils.py         # 文件哈希
-│   │   ├── image_records.py      # 数据库记录
-│   │   ├── images.py             # 图片处理
-│   │   ├── image_batch.py        # 批量处理
-│   │   ├── query_builder.py      # SQL 查询构建
-│   │   ├── folder_tree.py        # 文件夹树
-│   │   ├── search.py             # 搜索（简繁、拼音）
-│   │   └── format.py             # 格式化
 │   ├── templates/                # Jinja2 模板
 │   └── static/                   # 静态资源
+│       └── js/
+│           ├── state/            # 状态管理（Signals）
+│           │   ├── signals.js    # 信号实现
+│           │   └── stores/       # 状态仓库
+│           │       ├── taskStore.js
+│           │       ├── galleryStore.js
+│           │       └── selectionStore.js
+│           ├── services/         # API 服务
+│           │   ├── websocket.js  # WebSocket 管理
+│           │   ├── api.js        # 统一 API 调用
+│           │   └── operations.js # 操作服务
+│           ├── components/       # UI 组件
+│           │   ├── Toast.js      # Toast 通知
+│           │   └── Progress.js   # 进度指示器
+│           └── main.js           # 入口文件
 ├── src/input.css                 # Tailwind CSS 源
 ├── photos/                       # 图片根目录
 ├── cache/                        # 缩略图缓存（三层）
@@ -155,6 +169,42 @@ from app.utils.search import search_images
 results = await search_images(query, folder_id=None, tags=None)
 ```
 
+## 统一 API 响应格式
+
+所有 API 端点返回统一格式 `ApiResponse`：
+
+```python
+from app.schemas import ApiResponse, ResponseStatus
+
+# 成功响应
+return ApiResponse.success({"deleted": 5}, "删除成功")
+# {"status": "success", "message": "删除成功", "data": {"deleted": 5}, "affected": [], "errors": []}
+
+# 错误响应
+return ApiResponse.error("操作失败", ["错误信息"])
+# {"status": "error", "message": "操作失败", "data": null, "affected": [], "errors": ["错误信息"]}
+
+# 部分成功
+return ApiResponse.partial("部分成功", data={"moved": 3}, errors=["部分错误"])
+```
+
+## 任务服务
+
+使用 `task_service` 执行费时任务，自动广播进度：
+
+```python
+from app.services.task_service import task_service
+
+# 注册任务处理器
+@task_service.register("my-task")
+async def handler(context, params):
+    await context.broadcast_progress(5, 10, "处理中")
+    return {"result": "ok"}
+
+# 执行任务
+result = await task_service.execute("my-task", "任务标题", params, 10)
+```
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -174,6 +224,31 @@ results = await search_images(query, folder_id=None, tags=None)
 - **大图预览**: 点击缩略图打开模态框，支持左右切换、ESC/遮罩关闭
 - **文件夹树**: 左侧导航按目录筛选
 - **实时搜索**: 搜索框 300ms 防抖，支持简繁转换和拼音
+- **WebSocket 实时通信**: 任务进度实时推送，替代旧 SSE 方案
+- **统一 API 响应**: 所有 API 返回 `ApiResponse` 格式
+
+## 前端状态管理
+
+使用 Signals 模式管理前端状态：
+
+```javascript
+import { galleryStore } from './state/stores/galleryStore.js';
+import { selectionStore } from './state/stores/selectionStore.js';
+import { operationService } from './services/operations.js';
+
+// 使用 galleryStore
+galleryStore.setPath('/photos');
+galleryStore.invalidateCache();
+
+// 使用 selectionStore
+selectionStore.toggleImage(id);
+selectionStore.clearSelection();
+
+// 使用 operationService（推荐）
+operationService.deleteImages([1, 2, 3]);
+operationService.moveImages(ids, targetPath);
+operationService.batchDelete(imageIds, folderPaths);
+```
 
 ## 测试规范
 

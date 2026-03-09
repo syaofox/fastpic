@@ -16,7 +16,7 @@ class TestDeleteImagesEndpoint:
         assert "/api/delete-images" in routes
 
     def test_empty_ids_returns_zero(self):
-        """空 IDs 返回 deleted: 0"""
+        """空 IDs 返回 ApiResponse.success"""
         from fastapi.testclient import TestClient
 
         from app.main import app
@@ -27,7 +27,9 @@ class TestDeleteImagesEndpoint:
             response = client.post("/api/delete-images", json={"ids": []})
 
             assert response.status_code == 200
-            assert response.json() == {"deleted": 0}
+            data = response.json()
+            assert data["status"] == "success"
+            assert data["data"]["deleted"] == 0
 
     def test_task_running_returns_error(self):
         """已有任务运行时返回错误"""
@@ -41,7 +43,9 @@ class TestDeleteImagesEndpoint:
             response = client.post("/api/delete-images", json={"ids": [1, 2, 3]})
 
             assert response.status_code == 200
-            assert "error" in response.json()
+            data = response.json()
+            assert data["status"] == "error"
+            assert "error" in data["message"] or "有任务正在进行中" in data["message"]
 
     @pytest.mark.asyncio
     async def test_batch_delete_files_parallel(self):
@@ -80,7 +84,9 @@ class TestDeleteImagesEndpoint:
                                 body = DeleteImagesRequest(ids=[1, 2])
                                 result = await delete_images(body, mock_session)
 
-                                assert result["deleted"] == 2
+                                assert result is not None
+                                assert result.data is not None
+                                assert result.data["deleted"] == 2
                                 mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
