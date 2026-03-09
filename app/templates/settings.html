@@ -1603,7 +1603,9 @@ function triggerMergeFolders() {
 }
 
 // 页面加载时获取统计
-loadStats();
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+});
 
 function onTaskComplete(taskType, result) {
     var taskLabelMap = {
