@@ -3,7 +3,6 @@
 import asyncio
 import os
 import shutil
-from collections import defaultdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -41,7 +40,6 @@ from app.utils.folder_tree import (
     invalidate_folder_tree_cache,
 )
 from app.utils.image_batch import (
-    collect_image_items_by_prefix,
     iter_images_by_path_prefix,
 )
 from app.utils.image_path_update import update_image_path_and_regenerate_thumbnail
@@ -542,6 +540,7 @@ task_queue = TaskQueue()
 async def _run_merge_folders_task(task: QueueTask) -> dict:
     """合并文件夹任务处理器（修正版）"""
     from sqlalchemy import delete, select
+
     from app.models import Image, async_session_factory
 
     body = task.params or {}

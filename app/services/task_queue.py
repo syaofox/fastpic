@@ -1,32 +1,24 @@
 """
-任务队列服务：支持按类型并发、持久化、取消操作。
+任务队列服务：支持按类型并发、取消操作。
 
 设计要点：
 - 按任务类型分别排队（scan/upload/delete/rename 等）
 - 同类型任务串行执行，不同类型可并发
-- 文件持久化，重启后可恢复
+- 内存存储，重启后任务丢失
 - 支持任务取消
 """
 
 import asyncio
-import json
 import logging
-import os
-import tempfile
-import threading
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from app.services import task_state
 
 logger = logging.getLogger(__name__)
-
-QUEUE_FILE = Path("task_queue.json")
-_lock = threading.Lock()
 
 DEFAULT_MAX_CONCURRENT = 2
 
@@ -49,49 +41,6 @@ class QueueTask:
     current_operation: str = ""
     processed_items: int = 0
     total_items: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "queue_id": self.queue_id,
-            "task_type": self.task_type,
-            "params": self.params,
-            "priority": self.priority,
-            "created_at": self.created_at,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "status": self.status,
-            "result": self.result,
-            "error": self.error,
-            "progress_percent": self.progress_percent,
-            "current_operation": self.current_operation,
-            "processed_items": self.processed_items,
-            "total_items": self.total_items,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "QueueTask":
-        return cls(**data)
-
-
-@dataclass
-class QueueState:
-    """队列状态"""
-
-    tasks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
-    running: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "tasks": self.tasks,
-            "running": self.running,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "QueueState":
-        return cls(
-            tasks=data.get("tasks", {}),
-            running=data.get("running", {}),
-        )
 
 
 class TaskQueue:
@@ -122,46 +71,9 @@ class TaskQueue:
         self._task_handlers: dict[str, Callable[[QueueTask], Coroutine[Any, Any, dict[str, Any]]]] = {}
         self._running_tasks: dict[str, QueueTask] = {}
         self._worker_lock = asyncio.Lock()
+        self._tasks: dict[str, list[QueueTask]] = {}
+        self._running: dict[str, QueueTask] = {}
         self._initialized = True
-
-        self._ensure_data_dir()
-        self._load_state()
-
-    def _ensure_data_dir(self) -> None:
-        QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    def _read_state(self) -> QueueState:
-        self._ensure_data_dir()
-        if not QUEUE_FILE.exists():
-            return QueueState()
-        try:
-            with open(QUEUE_FILE, encoding="utf-8") as f:
-                data = json.load(f)
-                return QueueState.from_dict(data)
-        except (OSError, json.JSONDecodeError):
-            return QueueState()
-
-    def _write_state(self, state: QueueState) -> None:
-        self._ensure_data_dir()
-        data = state.to_dict()
-        tmp_file = None
-        try:
-            fd, tmp_file = tempfile.mkstemp(dir=QUEUE_FILE.parent, suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_file, QUEUE_FILE)
-        except Exception:
-            if tmp_file and os.path.exists(tmp_file):
-                os.unlink(tmp_file)
-            raise
-
-    def _load_state(self) -> None:
-        """加载状态并恢复运行中的任务"""
-        state = self._read_state()
-        for task_type, task_data in state.running.items():
-            if task_data.get("status") == "running":
-                task = QueueTask.from_dict(task_data)
-                self._running_tasks[task.queue_id] = task
 
     def register_handler(
         self,
@@ -199,20 +111,16 @@ class TaskQueue:
         while True:
             await asyncio.sleep(0.1)
             async with self._worker_lock:
-                state = self._read_state()
-                pending = state.tasks.get(task_type, [])
+                pending = self._tasks.get(task_type, [])
                 if not pending:
                     continue
 
-                task_data = pending[0]
-                task = QueueTask.from_dict(task_data)
+                task = pending.pop(0)
+                self._tasks[task_type] = pending
 
                 task.status = "running"
                 task.started_at = datetime.now().isoformat()
-                state.tasks[task_type] = pending[1:]
-                state.running[task_type] = task.to_dict()
-                self._write_state(state)
-
+                self._running[task_type] = task
                 self._running_tasks[task.queue_id] = task
 
             task_state.start_task(task_type)
@@ -241,10 +149,8 @@ class TaskQueue:
                         else:
                             task_state.fail_task(task.error or "未知错误")
                         async with self._worker_lock:
-                            state = self._read_state()
-                            if task_type in state.running:
-                                del state.running[task_type]
-                            self._write_state(state)
+                            if task_type in self._running:
+                                del self._running[task_type]
                             if task.queue_id in self._running_tasks:
                                 del self._running_tasks[task.queue_id]
 
@@ -263,11 +169,9 @@ class TaskQueue:
         )
 
         async with self._worker_lock:
-            state = self._read_state()
-            if task_type not in state.tasks:
-                state.tasks[task_type] = []
-            state.tasks[task_type].append(task.to_dict())
-            self._write_state(state)
+            if task_type not in self._tasks:
+                self._tasks[task_type] = []
+            self._tasks[task_type].append(task)
 
         self._ensure_worker(task_type)
         logger.info(f"[queue] 添加任务: {task_type}, queue_id={task.queue_id}")
@@ -275,20 +179,20 @@ class TaskQueue:
 
     def get_status(self) -> dict[str, Any]:
         """获取队列状态"""
-        state = self._read_state()
         result: dict[str, Any] = {}
 
-        for task_type, pending in state.tasks.items():
+        for task_type, pending in self._tasks.items():
+            running = self._running.get(task_type)
             result[task_type] = {
-                "running": state.running.get(task_type),
-                "pending": pending,
+                "running": running.__dict__ if running else None,
+                "pending": [p.__dict__ for p in pending],
                 "pending_count": len(pending),
             }
 
-        for task_type, running_data in state.running.items():
+        for task_type, running_task in self._running.items():
             if task_type not in result:
                 result[task_type] = {
-                    "running": running_data,
+                    "running": running_task.__dict__,
                     "pending": [],
                     "pending_count": 0,
                 }
@@ -297,42 +201,49 @@ class TaskQueue:
 
     def get_task_status(self, queue_id: str) -> dict[str, Any] | None:
         """获取指定任务状态"""
-        state = self._read_state()
-        for pending_list in state.tasks.values():
-            for task_data in pending_list:
-                if task_data.get("queue_id") == queue_id:
-                    return task_data
-        for running_data in state.running.values():
-            if running_data.get("queue_id") == queue_id:
-                return running_data
+        for pending_list in self._tasks.values():
+            for task in pending_list:
+                if task.queue_id == queue_id:
+                    return {
+                        "queue_id": task.queue_id,
+                        "task_type": task.task_type,
+                        "status": task.status,
+                        "progress_percent": task.progress_percent,
+                        "current_operation": task.current_operation,
+                    }
+        for task in self._running.values():
+            if task.queue_id == queue_id:
+                return {
+                    "queue_id": task.queue_id,
+                    "task_type": task.task_type,
+                    "status": task.status,
+                    "progress_percent": task.progress_percent,
+                    "current_operation": task.current_operation,
+                }
         return None
 
     def cancel_task(self, queue_id: str) -> bool:
         """取消任务"""
-        state = self._read_state()
-
-        for task_type, pending in state.tasks.items():
-            for i, task_data in enumerate(pending):
-                if task_data.get("queue_id") == queue_id:
-                    task_data["status"] = "cancelled"
-                    task_data["finished_at"] = datetime.now().isoformat()
-                    task_data["error"] = "任务被取消"
-                    state.tasks[task_type].pop(i)
-                    self._write_state(state)
+        for task_type, pending in list(self._tasks.items()):
+            for i, task in enumerate(pending):
+                if task.queue_id == queue_id:
+                    task.status = "cancelled"
+                    task.finished_at = datetime.now().isoformat()
+                    task.error = "任务被取消"
+                    self._tasks[task_type].pop(i)
                     logger.info(f"[queue] 取消待执行任务: {queue_id}")
                     return True
 
-        for task_type, running_data in list(state.running.items()):
-            if running_data.get("queue_id") == queue_id:
-                running_data["status"] = "cancelled"
-                running_data["finished_at"] = datetime.now().isoformat()
-                running_data["error"] = "任务被取消"
-                del state.running[task_type]
-                self._write_state(state)
+        for task_type, task in list(self._running.items()):
+            if task.queue_id == queue_id:
+                task.status = "cancelled"
+                task.finished_at = datetime.now().isoformat()
+                task.error = "任务被取消"
+                del self._running[task_type]
 
                 if queue_id in self._running_tasks:
-                    task = self._running_tasks[queue_id]
-                    task.status = "cancelled"
+                    t = self._running_tasks[queue_id]
+                    t.status = "cancelled"
                 logger.info(f"[queue] 取消运行中任务: {queue_id}")
                 return True
 
@@ -340,10 +251,8 @@ class TaskQueue:
 
     def clear_completed(self) -> None:
         """清理已完成任务"""
-        state = self._read_state()
-        state.tasks = {k: v for k, v in state.tasks.items() if v}
-        state.running = {}
-        self._write_state(state)
+        self._tasks = {k: v for k, v in self._tasks.items() if v}
+        self._running = {}
 
 
 async def get_task_queue() -> TaskQueue:

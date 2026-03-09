@@ -1,5 +1,5 @@
 """
-任务状态服务：用于持久化设置页面费时操作的状态，
+任务状态服务：用于设置页面费时操作的状态展示，
 防止页面刷新后 UI 状态丢失导致重复提交。
 
 支持任务队列，一次只能执行一个费时操作。
@@ -7,17 +7,12 @@
 """
 
 import asyncio
-import json
 import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
-
-STATE_FILE = Path("task_state.json")
-_lock = threading.Lock()
 
 TASK_TITLES = {
     "scan": "正在扫描媒体文件",
@@ -30,6 +25,7 @@ TASK_TITLES = {
 
 _progress_callbacks: list[Callable[[dict], None]] = []
 _queue: asyncio.Queue | None = None
+_lock = threading.Lock()
 
 
 def _get_queue() -> asyncio.Queue:
@@ -91,106 +87,62 @@ class TaskState:
     processed_items: int = 0
 
 
-def _ensure_data_dir() -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _read_state() -> TaskState:
-    _ensure_data_dir()
-    if not STATE_FILE.exists():
-        return TaskState()
-    try:
-        with open(STATE_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-            return TaskState(
-                task_id=data.get("task_id"),
-                task_type=data.get("task_type"),
-                title=data.get("title"),
-                started_at=data.get("started_at"),
-                finished_at=data.get("finished_at"),
-                result=data.get("result"),
-                error=data.get("error"),
-                current_operation=data.get("current_operation"),
-                progress_percent=data.get("progress_percent", 0.0),
-                total_items=data.get("total_items", 0),
-                processed_items=data.get("processed_items", 0),
-            )
-    except (OSError, json.JSONDecodeError):
-        return TaskState()
-
-
-def _write_state(state: TaskState) -> None:
-    _ensure_data_dir()
-    data = {
-        "task_id": state.task_id,
-        "task_type": state.task_type,
-        "title": state.title,
-        "started_at": state.started_at,
-        "finished_at": state.finished_at,
-        "result": state.result,
-        "error": state.error,
-        "current_operation": state.current_operation,
-        "progress_percent": state.progress_percent,
-        "total_items": state.total_items,
-        "processed_items": state.processed_items,
-    }
-    with _lock:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+_state: TaskState = TaskState()
 
 
 def get_queue_status() -> dict[str, Any]:
     """获取任务队列状态"""
-    state = _read_state()
-    is_running = state.finished_at is None and state.task_type is not None
+    global _state
+    is_running = _state.finished_at is None and _state.task_type is not None
 
     result = {
         "is_running": is_running,
-        "current_task": state.task_type,
+        "current_task": _state.task_type,
     }
 
-    if state.task_type and state.started_at:
-        result["started_at"] = state.started_at
+    if _state.task_type and _state.started_at:
+        result["started_at"] = _state.started_at
 
     if is_running:
         result["status"] = "running"
     else:
         result["status"] = "idle"
 
-    if state.current_operation:
-        result["current_operation"] = state.current_operation
-    if state.progress_percent:
-        result["progress_percent"] = state.progress_percent
-    if state.total_items:
-        result["total_items"] = state.total_items
-    if state.processed_items:
-        result["processed_items"] = state.processed_items
+    if _state.current_operation:
+        result["current_operation"] = _state.current_operation
+    if _state.progress_percent:
+        result["progress_percent"] = _state.progress_percent
+    if _state.total_items:
+        result["total_items"] = _state.total_items
+    if _state.processed_items:
+        result["processed_items"] = _state.processed_items
 
     return result
 
 
 def is_busy() -> bool:
     """检查是否有任务正在进行"""
-    state = _read_state()
-    return state.finished_at is None and state.task_type is not None
+    global _state
+    return _state.finished_at is None and _state.task_type is not None
 
 
 def start_task(task_type: str, total_items: int = 0, title: str | None = None) -> bool:
     """标记任务开始，返回是否成功启动（如果忙则返回 False）"""
+    global _state
     if is_busy():
         return False
 
     if title is None:
         title = TASK_TITLES.get(task_type, "正在处理...")
 
-    state = TaskState(
-        task_id=str(uuid.uuid4()),
-        task_type=task_type,
-        title=title,
-        started_at=datetime.now().isoformat(),
-        total_items=total_items,
-    )
-    _write_state(state)
+    with _lock:
+        _state = TaskState(
+            task_id=str(uuid.uuid4()),
+            task_type=task_type,
+            title=title,
+            started_at=datetime.now().isoformat(),
+            total_items=total_items,
+        )
     return True
 
 
@@ -201,19 +153,19 @@ def update_progress(
     total_items: int | None = None,
 ) -> None:
     """更新任务进度"""
-    current = _read_state()
-    state = TaskState(
-        task_type=current.task_type,
-        started_at=current.started_at,
-        finished_at=current.finished_at,
-        result=current.result,
-        error=current.error,
-        current_operation=current_operation if current_operation is not None else current.current_operation,
-        progress_percent=progress_percent if progress_percent is not None else current.progress_percent,
-        total_items=total_items if total_items is not None else current.total_items,
-        processed_items=processed_items if processed_items is not None else current.processed_items,
-    )
-    _write_state(state)
+    global _state
+    with _lock:
+        _state = TaskState(
+            task_type=_state.task_type,
+            started_at=_state.started_at,
+            finished_at=_state.finished_at,
+            result=_state.result,
+            error=_state.error,
+            current_operation=current_operation if current_operation is not None else _state.current_operation,
+            progress_percent=progress_percent if progress_percent is not None else _state.progress_percent,
+            total_items=total_items if total_items is not None else _state.total_items,
+            processed_items=processed_items if processed_items is not None else _state.processed_items,
+        )
 
 
 async def async_update_progress(
@@ -234,74 +186,74 @@ async def async_update_progress(
 
 def end_task(result: dict[str, Any]) -> None:
     """标记任务成功结束"""
-    current = _read_state()
-    state = TaskState(
-        task_id=current.task_id,
-        task_type=current.task_type,
-        title=current.title,
-        started_at=current.started_at,
-        finished_at=datetime.now().isoformat(),
-        result=result,
-        current_operation="已完成",
-        progress_percent=100.0,
-    )
-    _write_state(state)
+    global _state
+    with _lock:
+        _state = TaskState(
+            task_id=_state.task_id,
+            task_type=_state.task_type,
+            title=_state.title,
+            started_at=_state.started_at,
+            finished_at=datetime.now().isoformat(),
+            result=result,
+            current_operation="已完成",
+            progress_percent=100.0,
+        )
 
 
 def fail_task(error: str) -> None:
     """标记任务失败"""
-    current = _read_state()
-    state = TaskState(
-        task_id=current.task_id,
-        task_type=current.task_type,
-        title=current.title,
-        started_at=current.started_at,
-        finished_at=datetime.now().isoformat(),
-        error=error,
-        current_operation="任务失败",
-    )
-    _write_state(state)
+    global _state
+    with _lock:
+        _state = TaskState(
+            task_id=_state.task_id,
+            task_type=_state.task_type,
+            title=_state.title,
+            started_at=_state.started_at,
+            finished_at=datetime.now().isoformat(),
+            error=error,
+            current_operation="任务失败",
+        )
 
 
 def get_status() -> dict[str, Any] | None:
     """获取当前任务状态（标准化格式）"""
-    state = _read_state()
-    if state.task_type is None:
+    global _state
+    if _state.task_type is None:
         return None
-    is_running = state.finished_at is None
+    is_running = _state.finished_at is None
     result = {
-        "task_id": state.task_id,
-        "task_type": state.task_type,
-        "title": state.title or TASK_TITLES.get(state.task_type, "正在处理..."),
-        "started_at": state.started_at,
+        "task_id": _state.task_id,
+        "task_type": _state.task_type,
+        "title": _state.title or TASK_TITLES.get(_state.task_type, "正在处理..."),
+        "started_at": _state.started_at,
         "is_running": is_running,
     }
-    if state.current_operation:
-        result["current_operation"] = state.current_operation
-    if state.progress_percent:
-        result["progress_percent"] = state.progress_percent
-    if state.total_items:
-        result["total_items"] = state.total_items
-    if state.processed_items:
-        result["processed_items"] = state.processed_items
-    if state.error:
-        result["error"] = state.error
-    if state.result:
-        result["result"] = state.result
-    if state.finished_at:
-        result["finished_at"] = state.finished_at
+    if _state.current_operation:
+        result["current_operation"] = _state.current_operation
+    if _state.progress_percent:
+        result["progress_percent"] = _state.progress_percent
+    if _state.total_items:
+        result["total_items"] = _state.total_items
+    if _state.processed_items:
+        result["processed_items"] = _state.processed_items
+    if _state.error:
+        result["error"] = _state.error
+    if _state.result:
+        result["result"] = _state.result
+    if _state.finished_at:
+        result["finished_at"] = _state.finished_at
     return result
 
 
 def get_last_result() -> dict[str, Any] | None:
     """获取上一次任务结果"""
-    state = _read_state()
-    if state.finished_at and (state.result is not None or state.error is not None):
+    global _state
+    if _state.finished_at and (_state.result is not None or _state.error is not None):
         return {
-            "task_type": state.task_type,
-            "finished_at": state.finished_at,
-            "result": state.result,
-            "error": state.error,
+            "task_type": _state.task_type,
+            "finished_at": _state.finished_at,
+            "result": _state.result,
+            "error": _state.error,
             "is_running": False,
         }
     return None
@@ -309,4 +261,6 @@ def get_last_result() -> dict[str, Any] | None:
 
 def clear() -> None:
     """清除任务状态"""
-    _write_state(TaskState())
+    global _state
+    with _lock:
+        _state = TaskState()

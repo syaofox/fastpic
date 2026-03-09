@@ -4,7 +4,7 @@
 
 from pydantic import BaseModel
 
-from app.services.task_queue import QueueTask, TaskQueue
+from app.services.task_queue import TaskQueue
 
 
 class AddTaskRequest(BaseModel):
