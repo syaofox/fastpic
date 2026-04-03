@@ -856,10 +856,12 @@ async def add_folder_thumbnail(
 ):
     """将指定图片设为文件夹缩略图（图片需在该文件夹下含子目录）。
     最多 4 张，FIFO：后设置的插在最前面，超出 4 张时移除末尾最旧的。"""
-    folder_path = normalize_path(folder_path, allow_empty=False)
+    from urllib.parse import unquote
+
+    folder_path = normalize_path(unquote(folder_path), allow_empty=False)
     if folder_path is None:
         raise HTTPException(status_code=400, detail="文件夹路径不合法")
-    rel_path = normalize_path(body.relative_path, allow_empty=False)
+    rel_path = normalize_path(unquote(body.relative_path), allow_empty=False)
     if rel_path is None:
         raise HTTPException(status_code=400, detail="图片路径不合法")
     if rel_path != folder_path and not rel_path.startswith(folder_path + "/"):
@@ -960,7 +962,9 @@ async def regenerate_covers(
         updated_count += 1
 
     if errors:
-        return ApiResponse.partial("已处理 " + str(updated_count) + " 个文件夹", {"updated": updated_count}, errors)
+        return ApiResponse.partial(
+            "已处理 " + str(updated_count) + " 个文件夹", {"updated": updated_count}, errors=errors
+        )
     return ApiResponse.success({"updated": updated_count}, "已重建 " + str(updated_count) + " 个文件夹封面")
 
 

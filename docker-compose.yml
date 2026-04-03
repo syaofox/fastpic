@@ -47,7 +47,7 @@ services:
       - --innodb-log-file-size=${MARIADB_LOG_FILE_SIZE:-512M}
       - --transaction-isolation=READ-COMMITTED
     volumes:
-      - /home/syaofox/Downloads/fastpic/data:/var/lib/mysql
+      - ./data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -85,5 +85,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - /home/syaofox/Downloads/fastpic/cache:/app/cache
-      - /home/syaofox/Downloads/fastpic/photos:/app/photos
+      - ./cache:/app/cache
+      - ./photos:/app/photos
+      # 测试挂载源代码
+      - ./src:/app/src
