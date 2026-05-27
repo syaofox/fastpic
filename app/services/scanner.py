@@ -29,6 +29,14 @@ THUMBNAIL_WIDTH = 300
 # 多进程缩略图：并行度与批大小
 _MAX_WORKERS = min(32, (os.cpu_count() or 4) + 4)
 _PROCESS_BATCH_SIZE = min(16, _MAX_WORKERS * 2)
+_POOL_EXECUTOR: ProcessPoolExecutor | None = None
+
+
+def _get_pool() -> ProcessPoolExecutor:
+    global _POOL_EXECUTOR
+    if _POOL_EXECUTOR is None:
+        _POOL_EXECUTOR = ProcessPoolExecutor(max_workers=_MAX_WORKERS)
+    return _POOL_EXECUTOR
 
 
 def _load_image_maybe_truncated(full_path: Path) -> tuple[PILImage.Image, bool]:
@@ -327,12 +335,12 @@ async def scan_photos(photos_dir: Path, cache_dir: Path, image_files: list[Path]
             """多进程处理一批图片，返回成功的结果列表（含 md5_hash）"""
             if not paths:
                 return []
-            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-                tasks = [
-                    loop.run_in_executor(executor, _process_single_image_sync, fp, photos_dir, cache_dir)
-                    for fp in paths
-                ]
-                raw_results = await asyncio.gather(*tasks)
+            executor = _get_pool()
+            tasks = [
+                loop.run_in_executor(executor, _process_single_image_sync, fp, photos_dir, cache_dir)
+                for fp in paths
+            ]
+            raw_results = await asyncio.gather(*tasks)
             return [r for r in raw_results if r is not None]
 
         async def _process_batch_safe(
@@ -493,12 +501,12 @@ async def scan_videos(photos_dir: Path, cache_dir: Path, video_files: list[Path]
             """多进程处理一批视频（含 md5_hash）"""
             if not paths:
                 return []
-            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-                tasks = [
-                    loop.run_in_executor(executor, _process_single_video_sync, fp, photos_dir, cache_dir)
-                    for fp in paths
-                ]
-                raw_results = await asyncio.gather(*tasks)
+            executor = _get_pool()
+            tasks = [
+                loop.run_in_executor(executor, _process_single_video_sync, fp, photos_dir, cache_dir)
+                for fp in paths
+            ]
+            raw_results = await asyncio.gather(*tasks)
             return [r for r in raw_results if r is not None]
 
         def _dedupe_results(
@@ -864,13 +872,13 @@ async def cleanup_database(photos_dir: Path, cache_dir: Path, existing_rel_paths
 
             if to_regen:
                 regen_batch_size = min(_PROCESS_BATCH_SIZE, len(to_regen))
-                with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-                    for i in range(0, len(to_regen), regen_batch_size):
-                        regen_batch = to_regen[i : i + regen_batch_size]
-                        tasks = [loop.run_in_executor(executor, _regenerate_one, item) for item in regen_batch]
-                        results = await asyncio.gather(*tasks)
-                        cache_regenerated += sum(1 for ok in results if ok)
-                        await asyncio.sleep(0)
+                executor = _get_pool()
+                for i in range(0, len(to_regen), regen_batch_size):
+                    regen_batch = to_regen[i : i + regen_batch_size]
+                    tasks = [loop.run_in_executor(executor, _regenerate_one, item) for item in regen_batch]
+                    results = await asyncio.gather(*tasks)
+                    cache_regenerated += sum(1 for ok in results if ok)
+                    await asyncio.sleep(0)
 
             await asyncio.sleep(0)
 

@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+from urllib.parse import quote
 
 from sqlalchemy import BigInteger, Column, String, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -13,8 +14,8 @@ _MYSQL_USER = os.environ.get("MYSQL_USER", "fastpic")
 _MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "fastpic")
 _MYSQL_DATABASE = os.environ.get("MYSQL_DATABASE", "fastpic")
 
-_db_user = _MYSQL_USER
-_db_pass = _MYSQL_PASSWORD.replace("%", "%%")
+_db_user = quote(_MYSQL_USER, safe="")
+_db_pass = quote(_MYSQL_PASSWORD, safe="")
 if _MYSQL_HOST:
     DATABASE_URL = f"mysql+pymysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"
     ASYNC_DATABASE_URL = f"mysql+aiomysql://{_db_user}:{_db_pass}@{_MYSQL_HOST}/{_MYSQL_DATABASE}"

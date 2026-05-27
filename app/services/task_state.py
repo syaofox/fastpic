@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from app.services.message_broadcaster import broadcaster
+
 TASK_TITLES = {
     "scan": "正在扫描媒体文件",
     "cleanup": "正在清理数据库",
@@ -79,8 +81,6 @@ async def emit_progress(**kwargs) -> None:
     await q.put(data)
 
     try:
-        from app.services.message_broadcaster import broadcaster
-
         task_type = kwargs.get("task_type", "")
         processed = kwargs.get("processed_items", 0)
         total = kwargs.get("total_items", 0)
@@ -148,13 +148,13 @@ def is_busy() -> bool:
 def start_task(task_type: str, total_items: int = 0, title: str | None = None) -> bool:
     """标记任务开始，返回是否成功启动（如果忙则返回 False）"""
     global _state
-    if is_busy():
-        return False
 
     if title is None:
         title = TASK_TITLES.get(task_type, "正在处理...")
 
     with _lock:
+        if is_busy():
+            return False
         _state = TaskState(
             task_id=str(uuid.uuid4()),
             task_type=task_type,
@@ -175,6 +175,7 @@ def update_progress(
     global _state
     with _lock:
         _state = TaskState(
+            task_id=_state.task_id,
             task_type=_state.task_type,
             started_at=_state.started_at,
             finished_at=_state.finished_at,

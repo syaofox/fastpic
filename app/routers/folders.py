@@ -553,7 +553,9 @@ async def delete_folders(
                 total_folders += 1
         await session.commit()
         if total_folders > 0:
-            invalidate_folder_tree_cache(body.paths[0] if len(body.paths) == 1 else None)
+            for fp in body.paths:
+                parent = str(Path(fp).parent) if "/" in fp else ""
+                invalidate_folder_tree_cache(parent)
         task_state.end_task({"deleted_images": total_images, "deleted_folders": total_folders})
         return ApiResponse.success(
             {"deleted_images": total_images, "deleted_folders": total_folders},
@@ -594,7 +596,6 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
         return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
 
     photos_dir = PHOTOS_DIR.resolve()
-    media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
     # 收集两个文件夹内的所有图片（仅需 id 和 relative_path）
     async with async_session_factory() as session:
@@ -621,11 +622,11 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
         if target == "folder_b" or (target == "auto" and count_b > count_a):
             target_prefix, source_prefix = folder_b, folder_a
             source_letter = "a"
-            source_path, target_path = path_a, path_b
+            source_path = path_a
         else:
             target_prefix, source_prefix = folder_a, folder_b
             source_letter = "b"
-            source_path, target_path = path_b, path_a
+            source_path = path_b
 
         # 构建目标路径到图片项的映射（目标路径 = target_prefix + 相对后缀）
         target_map = {}  # 目标路径 -> (img_id, source_letter)
@@ -691,12 +692,6 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
                     # rename：为目标文件生成新文件名，保留原目标文件
                     # 目标路径已存在，需要生成不冲突的新路径
                     new_target_rel = target_rel  # 先尝试原目标路径
-                    parent = Path(new_target_rel).parent
-                    name = Path(new_target_rel).name
-                    # 使用 unique_path 生成新文件名，但需要基于目标目录和文件名
-                    # 注意：unique_path 期望一个完整的目标文件路径，我们构造临时路径
-                    temp_path = target_path / name  # 假设新文件在目标文件夹根？实际上要考虑子目录
-                    # 但 target_rel 可能包含子目录，需要准确定位
                     full_target = photos_dir / target_rel
                     new_full = unique_path(full_target.parent, full_target.name, suffix_style="paren")
                     new_target_rel = str(new_full.relative_to(photos_dir)).replace("\\", "/")

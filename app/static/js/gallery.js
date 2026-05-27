@@ -1697,9 +1697,12 @@ document.addEventListener('keydown', function(e) {
         newImages.forEach(function(item) { item.remove(); });
         placeItemsBatch(newImages);
 
-        // 只保留最新的哨兵，移除旧的
+        // 只保留最新的哨兵，移除旧的；如果没有新哨兵（已到达最后一页），移除所有旧哨兵
         if (sentinels.length > 1) {
             sentinels.slice(0, -1).forEach(function(s) { s.remove(); });
+        } else if (sentinels.length === 1) {
+            // 只有一个旧哨兵，说明响应中没有新哨兵（已到达最后一页），移除它
+            sentinels[0].remove();
         }
     }
 
@@ -1767,6 +1770,9 @@ document.addEventListener('keydown', function(e) {
                     for (var i = 0; i < sentinels.length - 1; i++) {
                         sentinels[i].remove();
                     }
+                } else if (sentinels.length === 1) {
+                    // 只有一个哨兵，说明响应中没有新哨兵（已到达最后一页），移除它
+                    sentinels[0].remove();
                 }
             }
         }

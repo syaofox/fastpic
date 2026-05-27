@@ -87,5 +87,3 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - ./cache:/app/cache
       - ./photos:/app/photos
-      # 测试挂载源代码
-      - ./src:/app/src

@@ -193,73 +193,76 @@ async def _run_scan_duplicates_task(task: QueueTask) -> dict:
 
     from app.models import Image, async_session_factory
 
-    body = task.params or {}
-    folder_path = normalize_path(body.get("folder_path", ""), allow_empty=True)
+    try:
+        body = task.params or {}
+        folder_path = normalize_path(body.get("folder_path", ""), allow_empty=True)
 
-    base_stmt = select(
-        Image.id,
-        Image.relative_path,
-        Image.filename,
-        Image.file_size,
-        Image.modified_at,
-        Image.md5_hash,
-    )
-    if folder_path:
-        pf = path_filter_for_prefix(Image.relative_path, folder_path)
-        base_stmt = base_stmt.where(pf)
+        base_stmt = select(
+            Image.id,
+            Image.relative_path,
+            Image.filename,
+            Image.file_size,
+            Image.modified_at,
+            Image.md5_hash,
+        )
+        if folder_path:
+            pf = path_filter_for_prefix(Image.relative_path, folder_path)
+            base_stmt = base_stmt.where(pf)
 
-    photos_dir = PHOTOS_DIR.resolve()
-    by_size: dict[int, list[dict]] = defaultdict(list)
+        photos_dir = PHOTOS_DIR.resolve()
+        by_size: dict[int, list[dict]] = defaultdict(list)
 
-    async with async_session_factory() as session:
-        last_id = 0
-        while True:
-            stmt = base_stmt.where(Image.id > last_id).order_by(Image.id).limit(SCAN_DUPLICATES_BATCH_SIZE)
-            result = await session.execute(stmt)
-            rows = result.fetchall()
-            if not rows:
-                break
-            for row in rows:
-                img_id, rel_path, filename, file_size, modified_at, md5_hash = row
-                last_id = img_id or last_id
-                by_size[file_size or 0].append(
+        async with async_session_factory() as session:
+            last_id = 0
+            while True:
+                stmt = base_stmt.where(Image.id > last_id).order_by(Image.id).limit(SCAN_DUPLICATES_BATCH_SIZE)
+                result = await session.execute(stmt)
+                rows = result.fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    img_id, rel_path, filename, file_size, modified_at, md5_hash = row
+                    last_id = img_id or last_id
+                    by_size[file_size or 0].append(
+                        {
+                            "id": img_id,
+                            "relative_path": rel_path,
+                            "filename": filename,
+                            "file_size": file_size,
+                            "modified_at": modified_at,
+                            "md5_hash": md5_hash,
+                            "cache_key": cache_filename(rel_path),
+                        }
+                    )
+                await asyncio.sleep(0)
+
+        candidate_groups = [g for g in by_size.values() if len(g) > 1]
+        if not candidate_groups:
+            return {"groups": []}
+
+        by_hash: dict[str, list[dict]] = defaultdict(list)
+        for group in candidate_groups:
+            for item in group:
+                h = item.get("md5_hash")
+                if h is None:
+                    h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
+                if h is None:
+                    continue
+                by_hash[h].append(item)
+
+        groups = []
+        for content_hash, items in by_hash.items():
+            if len(items) > 1:
+                groups.append(
                     {
-                        "id": img_id,
-                        "relative_path": rel_path,
-                        "filename": filename,
-                        "file_size": file_size,
-                        "modified_at": modified_at,
-                        "md5_hash": md5_hash,
-                        "cache_key": cache_filename(rel_path),
+                        "content_hash": content_hash,
+                        "file_size": items[0]["file_size"],
+                        "items": items,
                     }
                 )
-            await asyncio.sleep(0)
-
-    candidate_groups = [g for g in by_size.values() if len(g) > 1]
-    if not candidate_groups:
-        return {"groups": []}
-
-    by_hash: dict[str, list[dict]] = defaultdict(list)
-    for group in candidate_groups:
-        for item in group:
-            h = item.get("md5_hash")
-            if h is None:
-                h = await asyncio.to_thread(compute_file_md5, photos_dir, item["relative_path"])
-            if h is None:
-                continue
-            by_hash[h].append(item)
-
-    groups = []
-    for content_hash, items in by_hash.items():
-        if len(items) > 1:
-            groups.append(
-                {
-                    "content_hash": content_hash,
-                    "file_size": items[0]["file_size"],
-                    "items": items,
-                }
-            )
-    return {"groups": groups}
+        return {"groups": groups}
+    finally:
+        end_scan()
 
 
 task_queue.register_handler("scan-duplicates", _run_scan_duplicates_task)

@@ -66,16 +66,6 @@ def setup_error_suppressor_middleware(app):
                 return Response(status_code=204)
             raise
 
-        path = request.url.path
-        if path in EXCLUDED_PATHS or path.startswith("/static/"):
-            return await call_next(request)
-
-        token = request.cookies.get("fp_session")
-        if not token or not hmac.compare_digest(token, SESSION_TOKEN):
-            return RedirectResponse(url="/login", status_code=302)
-
-        return await call_next(request)
-
 
 @router.get("/login")
 async def login_page(request: Request):
@@ -92,7 +82,8 @@ async def login_submit(request: Request):
     password = (form.get("password") or "").strip()
     if hmac.compare_digest(password, ACCESS_PASSWORD):
         response = RedirectResponse(url="/", status_code=302)
-        response.set_cookie(key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax")
+        secure = request.url.scheme == "https"
+        response.set_cookie(key="fp_session", value=SESSION_TOKEN, httponly=True, samesite="lax", secure=secure)
         return response
     return templates.TemplateResponse(request, "login.html", {"error": "密码错误，请重试"})
 

@@ -70,9 +70,11 @@ class TaskQueue:
         self._workers: dict[str, asyncio.Task] = {}
         self._task_handlers: dict[str, Callable[[QueueTask], Coroutine[Any, Any, dict[str, Any]]]] = {}
         self._running_tasks: dict[str, QueueTask] = {}
+        self._task_handles: dict[str, asyncio.Task] = {}
         self._worker_lock = asyncio.Lock()
         self._tasks: dict[str, list[QueueTask]] = {}
         self._running: dict[str, QueueTask] = {}
+        self._notify_event: asyncio.Event = asyncio.Event()
         self._initialized = True
 
     def register_handler(
@@ -103,7 +105,8 @@ class TaskQueue:
     ) -> None:
         """Worker 循环：等待任务并执行"""
         while True:
-            await asyncio.sleep(0.1)
+            await self._notify_event.wait()
+            self._notify_event.clear()
             async with self._worker_lock:
                 pending = self._tasks.get(task_type, [])
                 if not pending:
@@ -122,8 +125,11 @@ class TaskQueue:
             sem = self._semaphores.get(task_type)
             if sem:
                 async with sem:
+                    handle: asyncio.Task | None = None
                     try:
-                        result = await handler(task)
+                        handle = asyncio.ensure_future(handler(task))
+                        self._task_handles[task.queue_id] = handle
+                        result = await handle
                         task.status = "completed"
                         task.result = result
                         task.progress_percent = 100.0
@@ -131,7 +137,8 @@ class TaskQueue:
                     except asyncio.CancelledError:
                         task.status = "cancelled"
                         task.error = "任务被取消"
-                        raise
+                        if handle is not None and not handle.done():
+                            handle.cancel()
                     except Exception as e:
                         logger.exception(f"[queue] {task_type} 任务失败: {e}")
                         task.status = "failed"
@@ -147,6 +154,8 @@ class TaskQueue:
                                 del self._running[task_type]
                             if task.queue_id in self._running_tasks:
                                 del self._running_tasks[task.queue_id]
+                            if task.queue_id in self._task_handles:
+                                del self._task_handles[task.queue_id]
 
     async def add_task(
         self,
@@ -168,6 +177,7 @@ class TaskQueue:
             self._tasks[task_type].append(task)
 
         self._ensure_worker(task_type)
+        self._notify_event.set()
         logger.info(f"[queue] 添加任务: {task_type}, queue_id={task.queue_id}")
         return task.queue_id
 
@@ -234,6 +244,10 @@ class TaskQueue:
                 task.finished_at = datetime.now().isoformat()
                 task.error = "任务被取消"
                 del self._running[task_type]
+
+                handle = self._task_handles.pop(queue_id, None)
+                if handle is not None and not handle.done():
+                    handle.cancel()
 
                 if queue_id in self._running_tasks:
                     t = self._running_tasks[queue_id]
