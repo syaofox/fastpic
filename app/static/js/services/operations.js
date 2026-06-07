@@ -85,8 +85,8 @@ class OperationService {
         return this.execute('rename-folder', () => api.operations.renameFolder(oldPath, newName));
     }
     
-    batchRename(items) {
-        return this.execute('batch-rename', () => api.operations.batchRename(items));
+    batchRename(folderRenames, imageRenames) {
+        return this.execute('batch-rename', () => api.operations.batchRename(folderRenames, imageRenames));
     }
     
     mergeFolder(sourcePath, targetPath) {

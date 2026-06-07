@@ -34,7 +34,7 @@ from app.models import (
 )
 from app.routers import auth, folders, images, settings, tags, websocket
 from app.services.scan_state import begin_scan, end_scan
-from app.services.scanner import run_db_only_validation, run_full_scan
+from app.services.scanner import run_db_only_validation, run_full_scan, shutdown_pool
 from app.services.watcher import start_watcher
 from app.utils.folder_tree import (
     get_folder_tree_cached,
@@ -94,6 +94,7 @@ async def lifespan(app: FastAPI):
     yield
     observer.stop()
     observer.join(timeout=5)
+    shutdown_pool()
 
 
 app = FastAPI(lifespan=lifespan)

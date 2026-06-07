@@ -684,6 +684,9 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
                         img = result.scalar_one_or_none()
                         if img:
                             await session.execute(delete(ImageTag).where(ImageTag.image_id == t_id))
+                            await session.execute(
+                                delete(FolderThumbnail).where(FolderThumbnail.image_relative_path == t_rel)
+                            )
                             await session.delete(img)
                             to_delete.append(t_id)
                     # 将源文件加入移动列表

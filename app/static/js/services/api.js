@@ -58,7 +58,7 @@ export const api = {
         createFolder: (path, name) => api.post('/api/create-folder', { path, name }),
         renameFolder: (oldPath, newName) => api.put(`/api/rename-folder`, { path: oldPath, new_name: newName }),
         renameImage: (imageId, newName) => api.put(`/api/rename-image`, { id: imageId, new_filename: newName }),
-        batchRename: (items) => api.post('/api/batch-rename', { items }),
+        batchRename: (folderRenames, imageRenames) => api.post('/api/batch-rename', { folder_renames: folderRenames || [], image_renames: imageRenames || [] }),
         mergeFolder: (sourcePath, targetPath) => api.post('/api/merge-folders', { folder_a: sourcePath, folder_b: targetPath }),
         regenerateCovers: (paths) => api.post('/api/regenerate-covers', { paths }),
     },

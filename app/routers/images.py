@@ -352,9 +352,14 @@ async def get_image_info(
 @router.post("/upload")
 async def upload_images(request: Request):
     """上传图片或视频到指定路径，支持子目录结构（拖拽/选择文件夹）"""
+    from starlette.formparsers import MultiPartParser
+
     from app.services import task_state
     from app.services.scanner import get_media_metadata_and_thumbnail
     from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
+
+    # 提高 SpooledTemporaryFile 溢出阈值到 100MB，避免大量小图片上传时创建过多磁盘临时文件耗尽 FD
+    MultiPartParser.spool_max_size = max(100 * 1024 * 1024, MAX_UPLOAD_FILE_SIZE)
 
     form_data = await request.form(
         max_part_size=MAX_UPLOAD_FILE_SIZE + 1024,
@@ -512,11 +517,13 @@ async def upload_images(request: Request):
         is_video = ext in VIDEO_EXTENSIONS
         try:
             content = await f.read(MAX_UPLOAD_FILE_SIZE + 1)
-            if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
-                errors.append(f"{display_name}: 本次上传总大小将超限")
-                continue
         except Exception as e:
             errors.append(f"{display_name}: 读取失败 {e}")
+            continue
+        finally:
+            await f.close()
+        if total_uploaded_bytes + len(content) > MAX_UPLOAD_TOTAL_SIZE:
+            errors.append(f"{display_name}: 本次上传总大小将超限")
             continue
         total_uploaded_bytes += len(content)
         content_hash = hashlib.md5(content).hexdigest()

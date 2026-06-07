@@ -1,7 +1,7 @@
 """API 请求/响应 Pydantic 模型"""
 
 from enum import StrEnum
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,7 @@ class ResponseStatus(StrEnum):
     PARTIAL = "partial"
 
 
-class ApiResponse(BaseModel[T]):
+class ApiResponse(BaseModel, Generic[T]):  # noqa: UP046
     status: ResponseStatus = ResponseStatus.SUCCESS
     message: str = ""
     data: T | None = None

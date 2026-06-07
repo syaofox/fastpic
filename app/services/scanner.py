@@ -27,7 +27,7 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".ts"}
 THUMBNAIL_WIDTH = 300
 # 多进程缩略图：并行度与批大小
-_MAX_WORKERS = min(32, (os.cpu_count() or 4) + 4)
+_MAX_WORKERS = min(4, os.cpu_count() or 4)
 _PROCESS_BATCH_SIZE = min(16, _MAX_WORKERS * 2)
 _POOL_EXECUTOR: ProcessPoolExecutor | None = None
 
@@ -37,6 +37,14 @@ def _get_pool() -> ProcessPoolExecutor:
     if _POOL_EXECUTOR is None:
         _POOL_EXECUTOR = ProcessPoolExecutor(max_workers=_MAX_WORKERS)
     return _POOL_EXECUTOR
+
+
+def shutdown_pool() -> None:
+    """应用关闭时释放进程池资源"""
+    global _POOL_EXECUTOR
+    if _POOL_EXECUTOR is not None:
+        _POOL_EXECUTOR.shutdown(wait=False)
+        _POOL_EXECUTOR = None
 
 
 def _load_image_maybe_truncated(full_path: Path) -> tuple[PILImage.Image, bool]:

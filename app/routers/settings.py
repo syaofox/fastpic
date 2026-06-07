@@ -193,6 +193,7 @@ async def _run_scan_duplicates_task(task: QueueTask) -> dict:
 
     from app.models import Image, async_session_factory
 
+    begin_scan()
     try:
         body = task.params or {}
         folder_path = normalize_path(body.get("folder_path", ""), allow_empty=True)

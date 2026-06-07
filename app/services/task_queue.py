@@ -74,7 +74,7 @@ class TaskQueue:
         self._worker_lock = asyncio.Lock()
         self._tasks: dict[str, list[QueueTask]] = {}
         self._running: dict[str, QueueTask] = {}
-        self._notify_event: asyncio.Event = asyncio.Event()
+        self._notify_cond: asyncio.Condition = asyncio.Condition()
         self._initialized = True
 
     def register_handler(
@@ -105,8 +105,10 @@ class TaskQueue:
     ) -> None:
         """Worker 循环：等待任务并执行"""
         while True:
-            await self._notify_event.wait()
-            self._notify_event.clear()
+            async with self._notify_cond:
+                await self._notify_cond.wait_for(
+                    lambda: bool(self._tasks.get(task_type))
+                )
             async with self._worker_lock:
                 pending = self._tasks.get(task_type, [])
                 if not pending:
@@ -177,7 +179,8 @@ class TaskQueue:
             self._tasks[task_type].append(task)
 
         self._ensure_worker(task_type)
-        self._notify_event.set()
+        async with self._notify_cond:
+            self._notify_cond.notify_all()
         logger.info(f"[queue] 添加任务: {task_type}, queue_id={task.queue_id}")
         return task.queue_id
 
