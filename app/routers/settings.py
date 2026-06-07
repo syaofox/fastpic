@@ -10,11 +10,12 @@ from sqlmodel import select
 
 from app.app_common import templates
 from app.config import CACHE_DIR, PHOTOS_DIR, SCAN_DUPLICATES_BATCH_SIZE
-from app.models import Image, get_async_session
+from app.models import Image, async_session_factory, get_async_session
 from app.schemas import ScanDuplicatesRequest
 from app.services import task_state
 from app.services.scan_state import begin_scan, end_scan
 from app.services.scanner import run_full_scan
+from app.services.task_manager import task_manager
 from app.services.task_queue import QueueTask, TaskQueue
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.hash_utils import compute_file_md5
@@ -95,12 +96,20 @@ async def cancel_queue_task(request: CancelTaskRequest):
 
 async def _run_scan_task(task: QueueTask) -> dict:
     """扫描任务处理器"""
+    async with async_session_factory() as sess:
+        _db_task = await task_manager.create_task(sess, "scan", "正在扫描媒体文件")
     begin_scan()
     try:
         result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
         n_img = result.get("images_added", 0)
         n_vid = result.get("videos_added", 0)
+        async with async_session_factory() as sess:
+            await task_manager.complete_task(_db_task.id, sess, f"扫描完成，新增 {n_img + n_vid} 个媒体文件")
         return {"scanned": n_img + n_vid, "images": n_img, "videos": n_vid}
+    except Exception as e:
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, str(e))
+        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
@@ -108,14 +117,30 @@ async def _run_scan_task(task: QueueTask) -> dict:
 
 async def _run_cleanup_task(task: QueueTask) -> dict:
     """清理任务处理器"""
+    async with async_session_factory() as sess:
+        _db_task = await task_manager.create_task(sess, "cleanup", "正在清理同步")
     begin_scan()
     try:
         result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        summary_parts = []
+        if result.get("stale_removed"):
+            summary_parts.append(f"清除幽灵记录 {result['stale_removed']} 条")
+        if result.get("orphan_cache_removed"):
+            summary_parts.append(f"清除孤儿缓存 {result['orphan_cache_removed']} 个")
+        if result.get("cache_regenerated"):
+            summary_parts.append(f"重新生成缓存 {result['cache_regenerated']} 个")
+        summary = "，".join(summary_parts) if summary_parts else "数据已一致"
+        async with async_session_factory() as sess:
+            await task_manager.complete_task(_db_task.id, sess, summary)
         return {
             "stale_removed": result.get("stale_removed", 0),
             "orphan_cache_removed": result.get("orphan_cache_removed", 0),
             "cache_regenerated": result.get("cache_regenerated", 0),
         }
+    except Exception as e:
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, str(e))
+        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
@@ -123,9 +148,19 @@ async def _run_cleanup_task(task: QueueTask) -> dict:
 
 async def _run_full_sync_task(task: QueueTask) -> dict:
     """完整同步任务处理器"""
+    async with async_session_factory() as sess:
+        _db_task = await task_manager.create_task(sess, "full-sync", "正在完整重建")
     begin_scan()
     try:
-        return await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        result = await run_full_scan(PHOTOS_DIR, CACHE_DIR)
+        scanned = result.get("images_added", 0) + result.get("videos_added", 0)
+        async with async_session_factory() as sess:
+            await task_manager.complete_task(_db_task.id, sess, f"重建完成，新增 {scanned} 个媒体")
+        return result
+    except Exception as e:
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, str(e))
+        raise
     finally:
         end_scan()
         invalidate_folder_tree_cache()
@@ -193,6 +228,8 @@ async def _run_scan_duplicates_task(task: QueueTask) -> dict:
 
     from app.models import Image, async_session_factory
 
+    async with async_session_factory() as sess:
+        _db_task = await task_manager.create_task(sess, "scan-duplicates", "正在扫描重复文件")
     begin_scan()
     try:
         body = task.params or {}
@@ -239,6 +276,8 @@ async def _run_scan_duplicates_task(task: QueueTask) -> dict:
 
         candidate_groups = [g for g in by_size.values() if len(g) > 1]
         if not candidate_groups:
+            async with async_session_factory() as sess:
+                await task_manager.complete_task(_db_task.id, sess, "未发现重复文件")
             return {"groups": []}
 
         by_hash: dict[str, list[dict]] = defaultdict(list)
@@ -261,7 +300,13 @@ async def _run_scan_duplicates_task(task: QueueTask) -> dict:
                         "items": items,
                     }
                 )
+        async with async_session_factory() as sess:
+            await task_manager.complete_task(_db_task.id, sess, f"发现 {len(groups)} 组重复文件")
         return {"groups": groups}
+    except Exception as e:
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, str(e))
+        raise
     finally:
         end_scan()
 

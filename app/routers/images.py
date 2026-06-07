@@ -36,6 +36,7 @@ from app.models import (
 from app.schemas import ApiResponse, DeleteImagesRequest, DownloadZipRequest
 from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from app.services.task_manager import task_manager
 from app.utils.folder_tree import invalidate_folder_tree_cache
 from app.utils.format import format_file_size
 from app.utils.hash_utils import compute_file_md5_by_path
@@ -177,8 +178,10 @@ async def delete_images(
     """删除指定 ID 的图片（数据库记录 + 原图 + 缓存），分批处理支持大批量"""
     if not task_state.start_task("delete-images"):
         return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
+    _task = await task_manager.create_task(session, "delete-images", "正在删除文件", len(body.ids or []))
     try:
         if not body.ids:
+            await task_manager.complete_task(_task.id, session, "无文件需删除")
             return ApiResponse.success({"deleted": 0})
 
         all_images = []
@@ -225,10 +228,10 @@ async def delete_images(
                 invalidate_folder_tree_cache()
             else:
                 invalidate_folder_tree_cache("")
-        task_state.end_task({"deleted": len(all_images)})
+        await task_manager.complete_task(_task.id, session, f"已删除 {len(all_images)} 项")
         return ApiResponse.success({"deleted": len(all_images)}, f"已删除 {len(all_images)} 项")
     except Exception as e:
-        task_state.fail_task(str(e))
+        await task_manager.fail_task(_task.id, session, str(e))
         return ApiResponse.error(str(e))
 
 
@@ -354,7 +357,6 @@ async def upload_images(request: Request):
     """上传图片或视频到指定路径，支持子目录结构（拖拽/选择文件夹）"""
     from starlette.formparsers import MultiPartParser
 
-    from app.services import task_state
     from app.services.scanner import get_media_metadata_and_thumbnail
     from app.utils.tags import DAMAGED_TAG_NAME, add_tag_to_image, ensure_tag_exists
 
@@ -395,7 +397,9 @@ async def upload_images(request: Request):
     target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    task_state.start_task("upload", total_items=len(files), title="正在上传文件")
+    async with async_session_factory() as _task_sess:
+        _task = await task_manager.create_task(_task_sess, "upload", "正在上传文件", len(files))
+    _task_id = _task.id
 
     has_subpath = any("/" in (fp or "") or "\\" in (fp or "") for fp in file_paths)
     if has_subpath:
@@ -496,7 +500,7 @@ async def upload_images(request: Request):
                 print(f"[upload] 失败: {display_name} - {e}", flush=True)
                 return False, False, f"{display_name}: {str(e)}"
 
-    tasks: list[tuple[int, object, str, str, bytes, str, Path, bool]] = []
+    tasks: list[tuple[int, object, str, str, bytes, str, Path, bool, str]] = []
     for i, f in enumerate(files):
         display_name = file_paths[i] if i < len(file_paths) else (f.filename or "")
         if not display_name.strip():
@@ -572,17 +576,26 @@ async def upload_images(request: Request):
             elif err:
                 errors.append(err)
 
-    await task_state.async_update_progress(
-        current_operation=f"已完成 ({uploaded}/{len(tasks)})",
-        progress_percent=100,
-        processed_items=len(tasks),
-        total_items=len(tasks),
-    )
+    async with async_session_factory() as _task_sess:
+        await task_manager.update_progress(
+            _task_id,
+            _task_sess,
+            processed_items=uploaded,
+            total_items=len(files),
+            current_operation=f"已完成 ({uploaded}/{len(files)})",
+        )
     if uploaded > 0:
         invalidate_folder_tree_cache(target_path)
 
     result = {"uploaded": uploaded, "skipped": skipped, "errors": errors}
-    task_state.end_task(result)
+    async with async_session_factory() as _task_sess:
+        if uploaded > 0 or not errors:
+            summary = f"已上传 {uploaded} 个文件"
+            if skipped:
+                summary += f"，{skipped} 个跳过"
+            await task_manager.complete_task(_task_id, _task_sess, summary)
+        else:
+            await task_manager.fail_task(_task_id, _task_sess, "; ".join(errors[:3]))
 
     print(
         f"[upload] 完成: {uploaded} 成功, {skipped} 跳过, {len(errors)} 失败",

@@ -86,7 +86,7 @@ async def emit_progress(**kwargs) -> None:
         total = kwargs.get("total_items", 0)
         operation = kwargs.get("current_operation", "")
         if task_type:
-            await broadcaster.broadcast_task_progress(task_type, processed, total, operation)
+            await broadcaster.broadcast_task_progress(_state.task_id or "", task_type, processed, total, operation)
     except Exception:
         pass
 

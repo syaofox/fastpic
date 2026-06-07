@@ -102,6 +102,26 @@ class FolderThumbnail(SQLModel, table=True):
     display_order: int = 0
 
 
+class Task(SQLModel, table=True):
+    """持久化任务记录，支持多任务并发追踪和历史查看"""
+
+    __tablename__ = "tasks"
+
+    id: str = Field(primary_key=True)
+    task_type: str = Field(index=True)
+    title: str = ""
+    status: str = Field(default="pending", index=True)  # pending | running | completed | failed | cancelled
+    progress_percent: float = 0.0
+    current_operation: str = ""
+    total_items: int = 0
+    completed_items: int = 0
+    error_message: str | None = None
+    result_summary: str | None = None
+    created_at: float = 0
+    started_at: float | None = None
+    finished_at: float | None = None
+
+
 sync_engine = create_engine(DATABASE_URL, echo=False)
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,

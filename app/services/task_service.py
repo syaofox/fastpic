@@ -14,17 +14,17 @@ class TaskContext:
     processed_items: int = 0
 
     async def broadcast_start(self):
-        await broadcaster.broadcast_task_start(self.task_type, self.title, self.total_items)
+        await broadcaster.broadcast_task_start("", self.task_type, self.title, self.total_items)
 
     async def broadcast_progress(self, processed: int, operation: str = ""):
         self.processed_items = processed
-        await broadcaster.broadcast_task_progress(self.task_type, processed, self.total_items, operation)
+        await broadcaster.broadcast_task_progress("", self.task_type, processed, self.total_items, operation)
 
     async def broadcast_complete(self, result: dict[str, Any], message: str = ""):
-        await broadcaster.broadcast_task_complete(self.task_type, result, message)
+        await broadcaster.broadcast_task_complete("", self.task_type, result, message)
 
     async def broadcast_error(self, error: str):
-        await broadcaster.broadcast_task_error(self.task_type, error)
+        await broadcaster.broadcast_task_error("", self.task_type, error)
 
 
 class TaskService:

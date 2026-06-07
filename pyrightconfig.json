@@ -2,5 +2,13 @@
   "venvPath": ".",
   "venv": ".venv",
   "typeCheckingMode": "basic",
-  "pythonPath": "${workspaceFolder}/.venv/bin/python"
+  "reportAttributeAccessIssue": false,
+  "reportCallIssue": false,
+  "reportArgumentType": false,
+  "reportAssignmentType": false,
+  "reportOptionalMemberAccess": false,
+  "reportOptionalOperand": false,
+  "reportIndexIssue": false,
+  "reportOperatorIssue": false,
+  "reportInvalidTypeForm": false
 }

@@ -1,59 +1,52 @@
-import { Signal } from '../signals.js';
+import { Signal, computed } from '../signals.js';
 
-export const taskStore = {
-    _currentTask: new Signal(null),
-    _queue: new Signal([]),
-    
-    get isRunning() { return this._currentTask.value !== null; },
-    get progress() { return this._currentTask.value?.progress_percent ?? 0; },
-    get currentOperation() { return this._currentTask.value?.current_operation ?? ''; },
-    
-    startTask(taskType, title, totalItems = 0) {
-        this._currentTask.value = {
-            task_type: taskType,
-            title: title,
-            total_items: totalItems,
-            processed_items: 0,
-            progress_percent: 0,
-            started_at: new Date().toISOString(),
-        };
-    },
-    
-    updateProgress(processed, total, operation) {
-        const current = this._currentTask.value;
-        if (current) {
-            this._currentTask.value = {
-                ...current,
-                processed_items: processed,
-                progress_percent: total > 0 ? Math.round((processed / total) * 100) : 0,
-                current_operation: operation,
-            };
+class TaskStore {
+    constructor() {
+        this._tasks = new Signal([]);
+    }
+
+    get tasks() { return this._tasks.value; }
+
+    get activeTasks() {
+        return this._tasks.value.filter(t => t.status === 'pending' || t.status === 'running');
+    }
+
+    get completedTasks() {
+        return this._tasks.value.filter(t => t.status !== 'pending' && t.status !== 'running');
+    }
+
+    get activeCount() {
+        return this.activeTasks.length;
+    }
+
+    setTasks(active, history) {
+        const merged = [...(active || []), ...(history || [])];
+        this._tasks.value = merged;
+    }
+
+    addOrUpdateTask(task) {
+        const tasks = [...this._tasks.value];
+        const idx = tasks.findIndex(t => t.id === task.id);
+        if (idx >= 0) {
+            tasks[idx] = { ...tasks[idx], ...task };
+            this._tasks.value = tasks;
+        } else {
+            tasks.unshift(task);
+            this._tasks.value = tasks;
         }
-    },
-    
-    complete(result) {
-        const current = this._currentTask.value;
-        if (current) {
-            this._currentTask.value = {
-                ...current,
-                finished_at: new Date().toISOString(),
-                result: result,
-            };
-        }
-    },
-    
-    fail(error) {
-        const current = this._currentTask.value;
-        if (current) {
-            this._currentTask.value = {
-                ...current,
-                finished_at: new Date().toISOString(),
-                error: error,
-            };
-        }
-    },
-    
-    clear() { this._currentTask.value = null; },
-    
-    subscribe(callback) { return this._currentTask.subscribe(callback); },
-};
+    }
+
+    removeTask(taskId) {
+        this._tasks.value = this._tasks.value.filter(t => t.id !== taskId);
+    }
+
+    clear() {
+        this._tasks.value = [];
+    }
+
+    subscribe(callback) {
+        return this._tasks.subscribe(callback);
+    }
+}
+
+export const taskStore = new TaskStore();

@@ -36,6 +36,7 @@ from app.schemas import (
 from app.services import task_state
 from app.services.scanner import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.services.scheduler import scheduler
+from app.services.task_manager import task_manager
 from app.services.task_queue import QueueTask, TaskQueue
 from app.utils.folder_tree import (
     get_subfolders,
@@ -66,11 +67,14 @@ async def move_images(
     """将指定图片移动到目标文件夹"""
     if not task_state.start_task("move-images"):
         return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
+    _task = await task_manager.create_task(session, "move-images", "正在移动文件", len(body.ids or []))
     try:
         if not body.ids:
+            await task_manager.complete_task(_task.id, session, "无文件需移动")
             return ApiResponse.success({"moved": 0, "errors": []})
         target_path = normalize_path(body.target_path, allow_empty=True)
         if target_path is None:
+            await task_manager.fail_task(_task.id, session, "目标路径不合法")
             return ApiResponse.error("目标路径不合法")
         target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -82,7 +86,7 @@ async def move_images(
             images.extend(result.scalars().all())
         moved = 0
         errors = []
-        for img in images:
+        for idx, img in enumerate(images):
             src_path = PHOTOS_DIR / img.relative_path
             if not src_path.exists():
                 errors.append(f"{img.filename}: 文件不存在")
@@ -114,6 +118,7 @@ async def move_images(
             )
             session.add(img)
             moved += 1
+            await task_manager.update_progress(_task.id, session, processed_items=moved, current_operation=img.filename)
         try:
             await session.commit()
         except IntegrityError:
@@ -121,12 +126,12 @@ async def move_images(
             errors.append("路径冲突（可能与已有文件重复），请重试")
         if moved > 0:
             invalidate_folder_tree_cache(target_path)
-        task_state.end_task({"moved": moved})
+        await task_manager.complete_task(_task.id, session, f"已移动 {moved} 项")
         if errors:
             return ApiResponse.partial(f"已移动 {moved} 项", {"moved": moved, "errors": errors}, errors=errors)
         return ApiResponse.success({"moved": moved}, f"已移动 {moved} 项")
     except Exception as e:
-        task_state.fail_task(str(e))
+        await task_manager.fail_task(_task.id, session, str(e))
         return ApiResponse.error(str(e))
 
 
@@ -138,11 +143,14 @@ async def move_folders(
     """将指定文件夹（含子文件夹和图片）移动到目标父目录"""
     if not task_state.start_task("move-folders"):
         return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
+    _task = await task_manager.create_task(session, "move-folders", "正在移动文件夹")
     try:
         if not body.paths:
+            await task_manager.complete_task(_task.id, session, "无文件夹需移动")
             return ApiResponse.success({"moved": 0, "errors": []})
         target_path = normalize_path(body.target_path, allow_empty=True)
         if target_path is None:
+            await task_manager.fail_task(_task.id, session, "目标路径不合法")
             return ApiResponse.error("目标路径不合法")
         target_dir = PHOTOS_DIR / target_path if target_path else PHOTOS_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -177,6 +185,7 @@ async def move_folders(
                 update(FolderThumbnail).where(FolderThumbnail.folder_path == folder_path).values(folder_path=new_prefix)
             )
 
+            batch_images = 0
             async for images in iter_images_by_path_prefix(session, folder_path, FOLDER_OP_BATCH_SIZE):
                 for img in images:
                     suffix = "" if img.relative_path == folder_path else img.relative_path[len(folder_path) :]
@@ -187,6 +196,10 @@ async def move_folders(
                     )
                     session.add(img)
                     moved += 1
+                    batch_images += 1
+                await task_manager.update_progress(
+                    _task.id, session, processed_items=moved, current_operation=folder_path
+                )
                 try:
                     await session.commit()
                 except IntegrityError:
@@ -194,19 +207,19 @@ async def move_folders(
                     errors.append(f"{folder_path}: 路径冲突，请重试")
                     break
                 await asyncio.sleep(0)
-            print(f"[api] 移动文件夹: {folder_path} → {new_prefix}", flush=True)
+            print(f"[api] 移动文件夹: {folder_path} → {new_prefix}, {batch_images} 张图片", flush=True)
         try:
             await session.commit()
         except IntegrityError:
             await session.rollback()
             if not any("路径冲突" in e for e in errors):
                 errors.append("路径冲突，请重试")
-        task_state.end_task({"moved": moved})
+        await task_manager.complete_task(_task.id, session, f"已移动 {moved} 个文件夹")
         if errors:
             return ApiResponse.partial(f"已移动 {moved} 个文件夹", {"moved": moved, "errors": errors}, errors=errors)
         return ApiResponse.success({"moved": moved}, f"已移动 {moved} 个文件夹")
     except Exception as e:
-        task_state.fail_task(str(e))
+        await task_manager.fail_task(_task.id, session, str(e))
         return ApiResponse.error(str(e))
 
 
@@ -382,6 +395,8 @@ async def batch_rename(
     folder_count = 0
     image_count = 0
     errors: list[str] = []
+    total = len(body.folder_renames or []) + len(body.image_renames or [])
+    _task = await task_manager.create_task(session, "batch-rename", "正在批量重命名", total)
 
     async def _flush_and_commit():
         try:
@@ -415,6 +430,9 @@ async def batch_rename(
             continue
         if Path(folder_path).name == new_name and (target_dir / new_name).resolve() == src_path.resolve():
             folder_count += 1
+            await task_manager.update_progress(
+                _task.id, session, processed_items=folder_count + image_count, current_operation=new_name
+            )
             continue
         dest_path = target_dir / new_name
         if dest_path.exists() and dest_path.resolve() != src_path.resolve():
@@ -440,6 +458,12 @@ async def batch_rename(
                 await _flush_and_commit()
             invalidate_folder_tree_cache(new_prefix)
             folder_count += 1
+            await task_manager.update_progress(
+                _task.id,
+                session,
+                processed_items=folder_count + image_count,
+                current_operation=new_name,
+            )
             print(f"[api] 批量重命名文件夹: {folder_path} → {new_prefix}", flush=True)
         except Exception as e:
             errors.append(f"{folder_path}: 更新数据库失败 {e}")
@@ -515,6 +539,13 @@ async def batch_rename(
         if pending_commits > 0:
             await _flush_and_commit()
 
+    summary = (
+        f"已完成 {folder_count + image_count} 项重命名"
+        if not errors
+        else f"已重命名 {folder_count} 个文件夹和 {image_count} 张图片"
+    )
+    await task_manager.complete_task(_task.id, session, summary)
+
     return {
         "ok": len(errors) == 0,
         "folder_count": folder_count,
@@ -531,8 +562,10 @@ async def delete_folders(
     """删除指定文件夹路径下所有图片（数据库 + 文件系统），并删除文件夹目录"""
     if not task_state.start_task("delete-folders"):
         return ApiResponse.error("有任务正在进行中，请等待完成后再操作")
+    _task = await task_manager.create_task(session, "delete-folders", "正在删除文件夹")
     try:
         if not body.paths:
+            await task_manager.complete_task(_task.id, session, "无文件夹需删除")
             return ApiResponse.success({"deleted_images": 0, "deleted_folders": 0})
         total_images = 0
         total_folders = 0
@@ -545,6 +578,9 @@ async def delete_folders(
                     delete_image_files(img.relative_path, PHOTOS_DIR, CACHE_DIR)
                     await session.delete(img)
                     total_images += 1
+                await task_manager.update_progress(
+                    _task.id, session, processed_items=total_images, current_operation=folder_path
+                )
                 await session.commit()
                 await asyncio.sleep(0)
             folder_fs_path = PHOTOS_DIR / folder_path
@@ -556,13 +592,13 @@ async def delete_folders(
             for fp in body.paths:
                 parent = str(Path(fp).parent) if "/" in fp else ""
                 invalidate_folder_tree_cache(parent)
-        task_state.end_task({"deleted_images": total_images, "deleted_folders": total_folders})
+        await task_manager.complete_task(_task.id, session, f"已删除 {total_folders} 个文件夹和 {total_images} 个文件")
         return ApiResponse.success(
             {"deleted_images": total_images, "deleted_folders": total_folders},
             f"已删除 {total_folders} 个文件夹和 {total_images} 个文件",
         )
     except Exception as e:
-        task_state.fail_task(str(e))
+        await task_manager.fail_task(_task.id, session, str(e))
         return ApiResponse.error(str(e))
 
 
@@ -576,23 +612,39 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
     from app.models import Image, async_session_factory
 
     body = task.params or {}
+    async with async_session_factory() as sess:
+        _db_task = await task_manager.create_task(
+            sess,
+            "merge-folders",
+            f"合并文件夹: {body.get('folder_a', '')} + {body.get('folder_b', '')}",
+        )
     folder_a = normalize_path(body.get("folder_a", ""), allow_empty=False)
     folder_b = normalize_path(body.get("folder_b", ""), allow_empty=False)
     target = body.get("target", "auto")
-    duplicate_mode = body.get("duplicate_mode", "rename")  # skip / overwrite / rename
+    duplicate_mode = body.get("duplicate_mode", "rename")
 
     if folder_a is None or folder_b is None:
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, "路径不合法")
         return {"ok": False, "error": "路径不合法"}
     if folder_a == folder_b:
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, "不能选择相同的文件夹")
         return {"ok": False, "error": "不能选择相同的文件夹"}
     if folder_a.startswith(folder_b + "/") or folder_b.startswith(folder_a + "/"):
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, "不能合并互为父子关系的文件夹")
         return {"ok": False, "error": "不能合并互为父子关系的文件夹"}
 
     path_a = PHOTOS_DIR / folder_a
     path_b = PHOTOS_DIR / folder_b
     if not path_a.exists() or not path_a.is_dir():
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, f"文件夹不存在: {folder_a}")
         return {"ok": False, "error": f"文件夹不存在: {folder_a}"}
     if not path_b.exists() or not path_b.is_dir():
+        async with async_session_factory() as sess:
+            await task_manager.fail_task(_db_task.id, sess, f"文件夹不存在: {folder_b}")
         return {"ok": False, "error": f"文件夹不存在: {folder_b}"}
 
     photos_dir = PHOTOS_DIR.resolve()
@@ -754,6 +806,8 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
                 await asyncio.to_thread(shutil.move, str(source_full), str(target_full))
             except OSError as e:
                 await session.rollback()
+                async with async_session_factory() as sess:
+                    await task_manager.fail_task(_db_task.id, sess, f"移动文件失败 {source_rel}: {e}")
                 return {"ok": False, "error": f"移动文件失败 {source_rel}: {e}"}
 
             # 更新数据库记录
@@ -787,6 +841,8 @@ async def _run_merge_folders_task(task: QueueTask) -> dict:
 
         await session.commit()
         invalidate_folder_tree_cache(target_prefix)
+        async with async_session_factory() as sess:
+            await task_manager.complete_task(_db_task.id, sess, f"已移动 {moved} 个文件")
         print(
             f"[api] 合并文件夹: {folder_a} + {folder_b} -> {target_prefix}, 移动 {moved} 个文件",
             flush=True,
@@ -926,6 +982,8 @@ async def regenerate_covers(
     if not body.paths:
         return ApiResponse.success({"updated": 0}, "无文件夹需要处理")
 
+    _task = await task_manager.create_task(session, "regenerate-covers", "正在重建封面", len(body.paths))
+
     updated_count = 0
     errors = []
 
@@ -958,7 +1016,11 @@ async def regenerate_covers(
 
         await session.commit()
         updated_count += 1
+        await task_manager.update_progress(
+            _task.id, session, processed_items=updated_count, current_operation=folder_path
+        )
 
+    await task_manager.complete_task(_task.id, session, f"已重建 {updated_count} 个文件夹封面")
     if errors:
         return ApiResponse.partial(
             "已处理 " + str(updated_count) + " 个文件夹", {"updated": updated_count}, errors=errors

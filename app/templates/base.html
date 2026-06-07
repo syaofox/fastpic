@@ -234,6 +234,27 @@
     <!-- 页面内提示（替代 alert） -->
     <div id="toast-container" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[120] flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
     
+    {% block task_panel %}
+    <!-- 任务侧边面板：从右侧滑入 -->
+    <div id="task-panel-overlay" class="hidden fixed inset-0 z-[140] bg-black/30" onclick="closeTaskPanel()"></div>
+    <div id="task-panel" class="fixed top-0 right-0 z-[150] h-full w-80 max-w-[90vw] bg-white shadow-2xl border-l border-slate-200 transform transition-transform duration-300 translate-x-full flex flex-col">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 flex-shrink-0">
+            <h2 class="text-base font-semibold text-slate-800">任务中心</h2>
+            <button type="button" onclick="closeTaskPanel()" class="p-1 hover:bg-slate-100 rounded transition-colors text-slate-500" title="关闭">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-3" id="task-panel-list">
+            <div class="text-sm text-slate-400 text-center py-8">加载中...</div>
+        </div>
+        <div class="px-4 py-3 border-t border-slate-200 flex-shrink-0 flex gap-2" id="task-panel-footer">
+            <button type="button" onclick="clearCompletedTasks()" class="flex-1 px-3 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                清除历史
+            </button>
+        </div>
+    </div>
+    {% endblock %}
+
     <!-- 全局进度指示器 -->
     <div id="progress-indicator" class="fixed top-0 left-0 right-0 z-[130] hidden transform transition-transform duration-300 -translate-y-full">
         <div class="bg-slate-800 text-white px-4 py-3 shadow-lg">
@@ -413,6 +434,166 @@
 
     window.showConfirm = showConfirm;
     window.closeGlobalConfirm = closeGlobalConfirm;
+    })();
+    </script>
+
+    <script>
+    /* ---- 任务面板（独立 script 块，避免 IIFE 内异常影响） ---- */
+    (function() {
+    var _panelInitialized = false;
+
+    window.toggleTaskPanel = function() {
+        var overlay = document.getElementById('task-panel-overlay');
+        if (!overlay) return;
+        if (overlay.classList.contains('hidden')) { window.openTaskPanel(); }
+        else { window.closeTaskPanel(); }
+    };
+    var _panelPollTimer = null;
+
+    window.openTaskPanel = function() {
+        var overlay = document.getElementById('task-panel-overlay');
+        var panel = document.getElementById('task-panel');
+        if (!overlay || !panel) return;
+        overlay.classList.remove('hidden');
+        panel.classList.remove('translate-x-full');
+        window.renderTaskPanel();
+        // 面板打开期间每 2s 轮询刷新，确保 WS 消息遗漏时仍能更新
+        if (_panelPollTimer) clearInterval(_panelPollTimer);
+        _panelPollTimer = setInterval(window.renderTaskPanel, 2000);
+    };
+    window.closeTaskPanel = function() {
+        var overlay = document.getElementById('task-panel-overlay');
+        var panel = document.getElementById('task-panel');
+        if (!overlay || !panel) return;
+        overlay.classList.add('hidden');
+        panel.classList.add('translate-x-full');
+        if (_panelPollTimer) { clearInterval(_panelPollTimer); _panelPollTimer = null; }
+    };
+
+    window.renderTaskPanel = function() {
+        var list = document.getElementById('task-panel-list');
+        if (!list) return;
+        var store = window.taskStore;
+        if (!store || !store.tasks) {
+            // 如果 store 还没准备好，延迟重试一次
+            if (!_panelInitialized) {
+                _panelInitialized = true;
+                setTimeout(window.renderTaskPanel, 500);
+            }
+            list.innerHTML = '<div class="text-sm text-slate-400 text-center py-8">暂无任务</div>';
+            return;
+        }
+        _panelInitialized = true;
+
+        var activeTasks = store.activeTasks || [];
+        var completedTasks = store.completedTasks || [];
+
+        var html = '';
+
+        if (activeTasks.length > 0) {
+            html += '<div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">进行中 (' + activeTasks.length + ')</div>';
+            activeTasks.forEach(function(t) {
+                var progress = Math.round(t.progress_percent || 0);
+                var op = t.current_operation || '';
+                var title = t.title || t.task_type || '任务';
+                html += '<div class="bg-blue-50 border border-blue-100 rounded-lg p-3">';
+                html += '  <div class="flex items-center justify-between mb-1">';
+                html += '    <span class="text-sm font-medium text-blue-800 truncate">' + escapeHtml(title) + '</span>';
+                html += '    <span class="text-xs text-blue-600 font-medium ml-2 flex-shrink-0">' + progress + '%</span>';
+                html += '  </div>';
+                html += '  <div class="w-full h-1.5 bg-blue-200 rounded-full overflow-hidden mb-1">';
+                html += '    <div class="h-full bg-blue-500 rounded-full transition-all" style="width:' + progress + '%"></div>';
+                html += '  </div>';
+                if (op) html += '  <div class="text-xs text-blue-600 truncate">' + escapeHtml(op) + '</div>';
+                html += '  <div class="mt-1.5 flex gap-2">';
+                if (t.status === 'pending' || t.status === 'running') {
+                    html += '    <button type="button" onclick="cancelTask(\'' + t.id + '\')" class="text-xs text-red-600 hover:text-red-800 font-medium">取消</button>';
+                }
+                html += '  </div>';
+                html += '</div>';
+            });
+        }
+
+        if (completedTasks.length > 0) {
+            html += '<div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">历史记录</div>';
+            completedTasks.forEach(function(t) {
+                var title = t.title || t.task_type || '任务';
+                var statusLabel = '';
+                var statusClass = '';
+                if (t.status === 'completed') { statusLabel = '完成'; statusClass = 'text-green-600 bg-green-50'; }
+                else if (t.status === 'failed') { statusLabel = '失败'; statusClass = 'text-red-600 bg-red-50'; }
+                else if (t.status === 'cancelled') { statusLabel = '取消'; statusClass = 'text-slate-500 bg-slate-100'; }
+                var summary = t.result_summary || '';
+                var error = t.error_message || '';
+                var timeStr = '';
+                if (t.finished_at) {
+                    var d = new Date(t.finished_at * 1000);
+                    timeStr = d.toLocaleTimeString();
+                }
+                html += '<div class="bg-white border border-slate-200 rounded-lg p-3 flex items-start gap-2">';
+                html += '  <span class="px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ' + statusClass + '">' + statusLabel + '</span>';
+                html += '  <div class="flex-1 min-w-0">';
+                html += '    <div class="text-sm text-slate-700 truncate">' + escapeHtml(title) + '</div>';
+                if (summary) html += '    <div class="text-xs text-slate-500 mt-0.5">' + escapeHtml(summary) + '</div>';
+                if (error) html += '    <div class="text-xs text-red-500 mt-0.5">' + escapeHtml(error) + '</div>';
+                html += '    <div class="text-xs text-slate-400 mt-0.5">' + timeStr + '</div>';
+                html += '  </div>';
+                html += '</div>';
+            });
+        }
+
+        if (!activeTasks.length && !completedTasks.length) {
+            html = '<div class="text-sm text-slate-400 text-center py-8">暂无任务</div>';
+        }
+
+        list.innerHTML = html;
+    };
+
+    window.cancelTask = function(taskId) {
+        fetch('/api/tasks/' + encodeURIComponent(taskId) + '/cancel', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    var store = window.taskStore;
+                    if (store) store.addOrUpdateTask({ id: taskId, status: 'cancelled', finished_at: Date.now() / 1000, error_message: '已取消', current_operation: '已取消' });
+                    window.renderTaskPanel();
+                }
+            })
+            .catch(function(err) { console.error('取消任务失败:', err); });
+    };
+
+    window.clearCompletedTasks = function() {
+        fetch('/api/tasks/cleanup', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var store = window.taskStore;
+                if (store) store.setTasks(store.activeTasks || [], []);
+                window.renderTaskPanel();
+                if (typeof window.showToast === 'function') {
+                    window.showToast('已清理 ' + (data.deleted || 0) + ' 条历史记录', 'success');
+                }
+            })
+            .catch(function(err) { console.error('清理失败:', err); });
+    };
+
+    function _setupPanelSubscription() {
+        var store = window.taskStore;
+        if (!store) return false;
+        store.subscribe(function() {
+            var overlay = document.getElementById('task-panel-overlay');
+            if (overlay && !overlay.classList.contains('hidden')) {
+                window.renderTaskPanel();
+            }
+        });
+        return true;
+    }
+    // 如果 store 已就绪则立即订阅，否则保存回调等 main.js 设置
+    if (!_setupPanelSubscription()) {
+        window._onTaskStoreReady = _setupPanelSubscription;
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+        _setupPanelSubscription();
+    });
     })();
     </script>
 </body>
